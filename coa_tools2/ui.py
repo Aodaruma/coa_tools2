@@ -787,6 +787,9 @@ class COATOOLS2_PT_Tools(bpy.types.Panel):
                 operator = col.operator(
                     "coa_tools2.reproject_sprite_texture", text="Reproject Sprite"
                 )
+                operator = col.operator(
+                    "coa_tools2.automesh_from_texture", text="Automesh from Texture"
+                )
 
 
 ### Custom template_list look

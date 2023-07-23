@@ -61,6 +61,7 @@ from .operators import create_spritesheet_preview
 from .operators import draw_bone_shape
 from .operators import edit_armature
 from .operators import edit_mesh
+from .operators import automesh
 from .operators import edit_shapekey
 from .operators import edit_weights
 from .operators import import_sprites
@@ -165,6 +166,7 @@ classes = (
     edit_mesh.COATOOLS2_OT_GenerateMeshFromEdgesAndVerts,
     edit_mesh.COATOOLS2_OT_DrawContour,
     edit_mesh.COATOOLS2_OT_PickEdgeLength,
+    automesh.COATOOLS2_OT_AutomeshFromTexture,
     edit_armature.COATOOLS2_OT_TooglePoseMode,
     edit_armature.COATOOLS2_OT_BindMeshToBones,
     edit_armature.COATOOLS2_OT_QuickArmature,
