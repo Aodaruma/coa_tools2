@@ -879,6 +879,7 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
                 # @ self.limit_cursor_by_bounds(
                 #     context, context.active_object.matrix_world @ vert.co
                 # )
+                @ context.active_object.matrix_world @ vert.co
             )
         bmesh.update_edit_mesh(context.active_object.data)
 
