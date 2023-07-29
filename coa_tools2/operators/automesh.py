@@ -136,59 +136,53 @@ def points_to_mesh(
     is_create_faces: Optional[bool] = True,
 ):
     """Create a mesh from points"""
+    if inner_contour is None:
+        inner_contour = []
+
     me = context.object.data
     if not me.is_editmode:
         bpy.ops.object.mode_set(mode="EDIT")
     bm = bmesh.from_edit_mesh(me)
 
-    outer_verts_contours = []
-    inner_verts_contours = []
+    outer_verts, inner_verts = [], []
+    outer_edges, inner_edges = [], []
 
     for c in outer_contour:
-        outer_verts = []
+        if len(c) < 3:
+            continue
+
+        verts, edges = [], []
+        pv = None
         for i, p in enumerate(c):
             p = mathutils.Vector((p.x, 0, -p.y)) / resolution / 100
             v = bm.verts.new(p)
-            outer_verts.append(v)
-        outer_verts_contours.append(outer_verts)
+            if pv is not None:
+                edges.append(bm.edges.new((pv, v)))
+            pv = v
+            verts.append(v)
+        edges.append(bm.edges.new((pv, verts[0])))
+        outer_verts.append(verts)
 
     for c in inner_contour:
-        innver_verts = []
+        if len(c) < 3:
+            continue
+
+        verts, edges = [], []
+        pv = None
         for i, p in enumerate(c):
             p = mathutils.Vector((p.x, 0, -p.y)) / resolution / 100
             v = bm.verts.new(p)
-            innver_verts.append(v)
-        inner_verts_contours.append(innver_verts)
-
-    # bmesh.ops.contextual_create(bm, geom=bm_outer.edges[:] + bm_inner.edges[:])
-    inner_faces, inner_edges, outer_faces, outer_edges = [], [], [], []
-    for iv in inner_verts_contours:
-        r = bmesh.ops.contextual_create(bm, geom=iv)
-        if r["faces"]:
-            f = r["faces"][0]
-            inner_faces.append(f)
-            inner_edges.append(f.edges[:])
-    for ov in outer_verts_contours:
-        r = bmesh.ops.contextual_create(bm, geom=ov)
-        if r["faces"]:
-            f = r["faces"][0]
-            outer_faces.append(f)
-            outer_edges.append(f.edges[:])
-    for f in outer_faces:
-        bm.faces.remove(f)
+            if pv is not None:
+                edges.append(bm.edges.new((pv, v)))
+            pv = v
+            verts.append(v)
+        edges.append(bm.edges.new((pv, verts[0])))
+        inner_verts.append(verts)
 
     if bpy.ops.mesh.looptools_relax and bpy.ops.mesh.looptools_space:
-        for f in inner_faces:
-            bm.faces.remove(f)
-            del f
         bmesh.update_edit_mesh(me)
-        bpy.ops.mesh.looptools_relax()
-        bpy.ops.mesh.looptools_space()
-        for iv in inner_verts_contours:
-            r = bmesh.ops.contextual_create(bm, geom=iv)
-            if r["faces"]:
-                f = r["faces"][0]
-                inner_faces.append(f)
+        bpy.ops.mesh.looptools_relax("INVOKE_DEFAULT")
+        bpy.ops.mesh.looptools_space("INVOKE_DEFAULT")
 
     if is_create_faces:
         bm.edges.ensure_lookup_table()
@@ -200,9 +194,9 @@ def points_to_mesh(
             use_dissolve=False,
             edges=flatten_inner_edges + flatten_outer_edges,
         )
-    else:
-        for f in inner_faces:
-            bm.faces.remove(f)
+        for ie in inner_edges:
+            bmesh.ops.contextual_create(bm, geom=ie)
+
     bmesh.update_edit_mesh(me)
 
 
