@@ -45,6 +45,7 @@ def get_contour(
     context,
     filepath,
     resolution: Optional[float] = 0.25,
+    threshold: Optional[int] = 127,
     dilate: Optional[int] = 0,
     padding: Optional[int] = 50,
 ):
@@ -69,7 +70,7 @@ def get_contour(
             kernel = np.ones((dilate, dilate), np.uint8)
             img = cv2.dilate(img, kernel, iterations=1)
 
-        ret, thresh = cv2.threshold(img, 127, 255, 0)
+        ret, thresh = cv2.threshold(img, threshold, 255, cv2.THRESH_BINARY)
         contours, hierarchy = cv2.findContours(
             thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_TC89_KCOS
         )
@@ -219,6 +220,13 @@ class COATOOLS2_OT_AutomeshFromTexture(bpy.types.Operator):
         min=0.01,
         max=1.0,
     )
+    threshold: FloatProperty(
+        name="Threshold",
+        description="Alpha Threshold when deteting contours",
+        default=127.0,
+        min=0.0,
+        max=255.0,
+    )
     margin: FloatProperty(
         name="Margin",
         description="Margin of the contour",
@@ -258,10 +266,20 @@ class COATOOLS2_OT_AutomeshFromTexture(bpy.types.Operator):
             if filepath is not None and os.path.exists(filepath):
                 print("got img:", filepath)
                 self.inner_contours, _ = get_contour(
-                    context, filepath, self.resolution, -self.margin, self.padding
+                    context,
+                    filepath,
+                    self.resolution,
+                    self.threshold,
+                    -self.margin,
+                    self.padding,
                 )
                 self.outer_contours, _ = get_contour(
-                    context, filepath, self.resolution, self.margin, self.padding
+                    context,
+                    filepath,
+                    self.resolution,
+                    self.threshold,
+                    self.margin,
+                    self.padding,
                 )
 
         if len(self.inner_contours) > 0 and len(self.outer_contours) > 0:
