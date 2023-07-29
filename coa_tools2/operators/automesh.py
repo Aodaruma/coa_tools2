@@ -232,7 +232,7 @@ class COATOOLS2_OT_AutomeshFromTexture(bpy.types.Operator):
         description="Margin of the contour",
         default=5.0,
         min=0.01,
-        max=10.0,
+        max=100.0,
     )
     # threadhold_angle: FloatProperty(
     #     name="Threadhold Angle",
