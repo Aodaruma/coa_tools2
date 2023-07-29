@@ -81,51 +81,17 @@ def get_contour(
 
 def reconstruct_contour(
     contours,
-    max_distance: Optional[float] = 1.0,
-    min_distance: Optional[float] = 0.5,
-    threadhold_angle: Optional[float] = 50.0,
     padding: Optional[int] = 50,
 ):
     """Reconstruct the contour points"""
-    points = []
+    result = []
     for c in contours:
-        p = []
-        c0 = None
-        for i in range(len(c)):
-            c1 = c[i]
-            c2 = c[i + 1] if i < len(c) - 1 else c[0]
-
-            # d0 = mathutils.Vector(c0[0]) / 100 if c0 is not None else None
-            # d1 = mathutils.Vector(c1[0]) / 100
-            # d2 = mathutils.Vector(c2[0]) / 100
-            d1 = mathutils.Vector(c1[0]) - mathutils.Vector((padding, padding))
-            p.append(d1)
-            # length_01 = (d0 - d1).length if d0 else 0
-            # length_12 = (d1 - d2).length
-            # if length_12 > max_distance:
-            #     middle_point_num = int(length_12 / max_distance)
-            #     for j in range(middle_point_num):
-            #         p.append(d1.lerp(d2, j / middle_point_num))
-            # elif length_12 < min_distance:
-            #     if c0 is not None:
-            #         angle_012 = math.degrees(mathutils.Vector.angle(d0 - d1, d2 - d1))
-            #         if (
-            #             angle_012 < threadhold_angle
-            #             or 360 - angle_012 < threadhold_angle
-            #         ):
-            #             p.append(d1)
-            #             c0 = None
-            #             continue
-            #     if length_01 + length_12 >= min_distance:
-            #         p.append(d1)
-            #         c0 = None
-            #     else:
-            #         c0 = c1
-            # else:
-            #     p.append(d1)
-            #     c0 = None
-        points.append(p)
-    return points
+        points = []
+        for p in c:
+            v = mathutils.Vector(p[0]) - mathutils.Vector((padding, padding))
+            points.append(v)
+        result.append(points)
+    return result
 
 
 def points_to_mesh(
