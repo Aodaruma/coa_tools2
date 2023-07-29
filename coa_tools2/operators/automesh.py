@@ -210,6 +210,8 @@ class COATOOLS2_OT_AutomeshFromTexture(bpy.types.Operator):
     outer_contours = None
     inner_contours = None
     padding = 50
+    old_resolution = 0.25
+    old_margin = 5.0
 
     @classmethod
     def poll(cls, context):
@@ -219,7 +221,13 @@ class COATOOLS2_OT_AutomeshFromTexture(bpy.types.Operator):
 
     def execute(self, context):
         print("Automesh from texture...")
-        if self.outer_contours is None or self.inner_contours is None:
+        if (
+            self.outer_contours is None
+            or self.inner_contours is None
+            or self.resolution != self.old_resolution
+            or self.margin != self.old_margin
+        ):
+            print("get contours...")
             obj = context.active_object
             blimg = get_texture_image(context, obj)
             filepath = bpy.path.abspath(blimg.filepath)
@@ -242,10 +250,16 @@ class COATOOLS2_OT_AutomeshFromTexture(bpy.types.Operator):
                     self.padding,
                 )
 
-        if len(self.inner_contours) > 0 and len(self.outer_contours) > 0:
-            inner_points = reconstruct_contour(
-                self.inner_contours, padding=self.padding
-            )
+        self.old_resolution = self.resolution
+        self.old_margin = self.margin
+
+        if self.outer_contours is not None and len(self.outer_contours) > 0:
+            print("reconstruct contours...")
+            inner_points = None
+            if self.inner_contours is not None and len(self.inner_contours) > 0:
+                inner_points = reconstruct_contour(
+                    self.inner_contours, padding=self.padding
+                )
             outer_points = reconstruct_contour(
                 self.outer_contours, padding=self.padding
             )
