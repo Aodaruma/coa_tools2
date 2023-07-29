@@ -50,7 +50,7 @@ class COATOOLS2_OT_ConvertOldVersionCoatools(bpy.types.Operator):
 
     def change_customdata_name(self, context, obj):
         # change custom property's name "coa_tools" to "coa_tools2"
-        if "coa_tools" in obj:
+        if "coa_tools" in obj or obj.get("coa_tools") is not None:
             obj["coa_tools2"] = obj["coa_tools"]
             # obj["coa_tools"]
             del obj["coa_tools"]
@@ -58,37 +58,35 @@ class COATOOLS2_OT_ConvertOldVersionCoatools(bpy.types.Operator):
         else:
             print("coa_tools not found in " + obj.name, type(obj))
 
-    def convert_objects(self, context):
-        # search armature object
-        armatures = []
+    def execute(self, context):
+        # convert objects
+        objects = []
         for obj in bpy.data.objects:
-            if obj.type == "ARMATURE":
-                # custom property check
-                if obj.get("coa_tools"):
-                    armatures.append(obj)
-                    break
+            # print(obj.name, obj.type, dir(obj), obj.get("coa_tools"))
+            if obj.get("coa_tools") is not None:
+                objects.append(obj)
 
-        if len(armatures) == 0:
-            self.report({"ERROR"}, "Sprite object not found.")
+        if len(objects) == 0:
+            self.report(
+                {"ERROR"},
+                "objects registered with old_version COA Tools was not found.",
+            )
+            # context.scene.coa_tools2.old_coatools_found = False
             return {"CANCELLED"}
 
         # search sprite in each armature and convert to new version
-        for armature in armatures:
-            for obj in bpy.data.objects:
-                if obj.type == "MESH":
-                    if obj.parent == armature:
+        for obj in objects:
+            if obj.type == "ARMATURE":
+                for child in obj.children:
+                    if child.type == "MESH":
                         # convert object
-                        self.change_customdata_name(context, obj)
+                        self.change_customdata_name(context, child)
 
                         # convert mesh of object
-                        self.change_customdata_name(context, obj.data)
+                        self.change_customdata_name(context, child.data)
 
             # convert armature
-            self.change_customdata_name(context, armature)
-
-    def execute(self, context):
-        # convert objects
-        self.convert_objects(context)
+            self.change_customdata_name(context, obj)
 
         # finish
         self.report(
