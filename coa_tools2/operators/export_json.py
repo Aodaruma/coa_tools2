@@ -39,10 +39,10 @@ import math
 import time
 
 
-class ExportToJson(bpy.types.Operator, bpy_extras.io_utils.ExportHelper):
+class COATOOLS2_OT_ExportToJson(bpy.types.Operator, bpy_extras.io_utils.ExportHelper):
     """This appears in the tooltip of the operator and in the generated docs"""
 
-    bl_idname = "object.export_to_json"  # important since its how bpy.ops.import_test.some_data is constructed
+    bl_idname = "coa_tools2.export_to_json"  # important since its how bpy.ops.import_test.some_data is constructed
     bl_label = "Export To Json"
     bl_description = ""
     bl_options = {"REGISTER"}
