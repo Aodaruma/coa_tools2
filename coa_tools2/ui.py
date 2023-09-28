@@ -636,6 +636,14 @@ class COATOOLS2_PT_Tools(bpy.types.Panel):
 
                     row = layout.row(align=True)
                     row.operator(
+                        "coa_tools2.export_to_json",
+                        text="Export json",
+                        icon="EXPORT",
+                        emboss=True,
+                    )
+
+                    row = layout.row(align=True)
+                    row.operator(
                         "coa_tools2.create_slot_object",
                         text="Merge to Slot Object",
                         icon="FILEBROWSER",
