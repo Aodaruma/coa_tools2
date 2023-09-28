@@ -72,6 +72,7 @@ from .operators import view_sprites
 from .operators import version_converter
 from .operators import change_alpha_mode
 from .operators import convert_from_old
+from .operators import export_json
 
 from .operators.exporter import export_dragonbones
 from .operators.exporter import export_creature
@@ -216,6 +217,7 @@ classes = (
     export_dragonbones.COATOOLS2_OT_DragonBonesExport,
     export_dragonbones.COATOOLS2_PT_ExportPanel,
     export_creature.COATOOLS2_OT_CreatureExport,
+    export_json.COATOOLS2_OT_ExportToJson,
 )
 
 addon_keymaps = []
