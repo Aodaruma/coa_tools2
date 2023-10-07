@@ -4,6 +4,7 @@
         "ms-python.python",
         "ms-python.vscode-pylance",
         "davidanson.vscode-markdownlint",
-        "jacqueslucke.blender-development"
+        "jacqueslucke.blender-development",
+        "adobe.extendscript-debug"
     ]
 }
