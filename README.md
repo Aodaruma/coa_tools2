@@ -12,6 +12,7 @@ the Addon of Cutout Animation Tools for Blender, which allows you to create cuto
 - [Download and Installation](#download-and-installation)
   - [Photoshop Exporter](#photoshop-exporter)
   - [GIMP Exporter](#gimp-exporter)
+  - [KRITA Exporter](#krita-exporter)
   - [Blender Addon](#blender-addon)
 - [Development](#development)
 
@@ -52,6 +53,15 @@ The coatools_exporter.py should be copied to your GIMP plug-ins folder which is 
 It should show up under Files>Export to CoaTools... after your restart GIMP
 
 It should show up under Files>Export to CoaTools... after your restart GIMP
+
+#### KRITA Exporter
+
+The coa_tools2_exporter folder and coa_tools2_exporter.desktop file goes to your pykrita directory.
+
+To find it, go to Krita, Settings/Manage Resources: Click "Open Resource Folder". If this does not show you the Pykrita folder, then create one. Copy 'coa_tools2_exporter' folder and 'coa_tools2_exporter.desktop' from coa_tools2-master/Krita into that folder. Restart Krita. 
+Krita: Settings/Configure Krita -> Python Plugin Manager: Enable COA Tools Exporter. Once activated, enable the docker under Settings/Dockers/COA Tools Exporter.
+
+Select the desired layers. Give it a name and path in the docker and export the images.
 
 #### Blender Addon
 
