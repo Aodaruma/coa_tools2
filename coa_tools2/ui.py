@@ -800,6 +800,11 @@ class COATOOLS2_PT_Tools(bpy.types.Panel):
                 operator = col.operator(
                     "coa_tools2.reproject_sprite_texture", text="Reproject Sprite"
                 )
+        if obj != None and obj.mode == "OBJECT" and obj.type == "MESH":
+            col = layout.column(align=True)
+            operator = col.operator(
+                "coa_tools2.copy_mesh_data", text="Copy Mesh Data", icon="COPYDOWN"
+            )
 
 
 ### Custom template_list look
