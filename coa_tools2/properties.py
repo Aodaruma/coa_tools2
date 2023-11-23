@@ -535,6 +535,10 @@ class ObjectProperties(bpy.types.PropertyGroup):
 
     anim_collections_index: IntProperty(update=set_actions)
 
+    copy_data_from_mesh: bpy.props.PointerProperty(
+        type=bpy.types.Mesh, name="Copy Data From Mesh Object"
+    )
+
 
 class SceneProperties(bpy.types.PropertyGroup):
     display_all: BoolProperty(default=True)
