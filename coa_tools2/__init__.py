@@ -72,6 +72,7 @@ from .operators import view_sprites
 from .operators import version_converter
 from .operators import change_alpha_mode
 from .operators import convert_from_old
+from .operators import copy_mesh_data
 
 from .operators.exporter import export_dragonbones
 from .operators.exporter import export_creature
@@ -170,6 +171,7 @@ classes = (
     edit_mesh.COATOOLS2_OT_GenerateMeshFromEdgesAndVerts,
     edit_mesh.COATOOLS2_OT_DrawContour,
     edit_mesh.COATOOLS2_OT_PickEdgeLength,
+    copy_mesh_data.COATOOLS2_OT_CopyMeshData,
     edit_armature.COATOOLS2_OT_TooglePoseMode,
     edit_armature.COATOOLS2_OT_BindMeshToBones,
     edit_armature.COATOOLS2_OT_QuickArmature,
