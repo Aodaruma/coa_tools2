@@ -83,7 +83,10 @@ class COATOOLS2_PT_Info(bpy.types.Panel):
             and addon_updater_ops.updater.json["ignore"] == False
         ):
             return context
-        if context.scene.coa_tools2.deprecated_data_found or context.scene.coa_tools2.old_coatools_found:
+        if (
+            context.scene.coa_tools2.deprecated_data_found
+            or context.scene.coa_tools2.old_coatools_found
+        ):
             return context
         if (
             context.space_data.shading.type != "RENDERED"
@@ -799,6 +802,9 @@ class COATOOLS2_PT_Tools(bpy.types.Panel):
             if "sprite" in obj.coa_tools2:
                 operator = col.operator(
                     "coa_tools2.reproject_sprite_texture", text="Reproject Sprite"
+                )
+                operator = col.operator(
+                    "coa_tools2.automesh_from_texture", text="Automesh from Texture"
                 )
         if obj != None and obj.mode == "OBJECT" and obj.type == "MESH":
             col = layout.column(align=True)
