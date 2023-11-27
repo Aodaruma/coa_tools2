@@ -203,17 +203,25 @@ class COATOOLS2_OT_QuickArmature(bpy.types.Operator):
 
     def create_default_bone_group(self, armature):
         default_bone_group = None
-        if "default_bones" not in armature.pose.bone_groups:
-            default_bone_group = armature.pose.bone_groups.new(name="default_bones")
-            default_bone_group.color_set = "THEME08"
+        if functions.b_version_smaller_than((4, 0, 0)):
+            if "default_bones" not in armature.pose.bone_groups:
+                default_bone_group = armature.pose.bone_groups.new(name="default_bones")
+                default_bone_group.color_set = "THEME08"
+            else:
+                default_bone_group = armature.pose.bone_groups["default_bones"]
         else:
-            default_bone_group = armature.pose.bone_groups["default_bones"]
+            armature: bpy.types.Armature = armature.data
+            if "default_bones" not in [c.name for c in armature.collections]:
+                default_bone_group = armature.collections.new(name="default_bones")
+                # default_bone_group.color_set = "THEME08"
+            else:
+                default_bone_group = armature.collections["default_bones"]
         return default_bone_group
 
     def create_bones(self, context, armature):
         if armature != None:
             bpy.ops.object.mode_set(mode="EDIT")
-            bone = armature.data.edit_bones.new("Bone")
+            bone: bpy.types.EditBone = armature.data.edit_bones.new("Bone")
 
             ### tag bones that will be locked
             bone["lock_z"] = True
@@ -253,6 +261,8 @@ class COATOOLS2_OT_QuickArmature(bpy.types.Operator):
             armature.data.edit_bones.active = bone
             self.current_bone = bone
             self.create_default_bone_group(armature)
+            if not functions.b_version_smaller_than((4, 0, 0)):
+                bone.color.palette = "THEME08"
 
     def drag_bone(self, context, event, bone=None):
         ### math.atan2(0.5, 0.5)*180/math.pi
@@ -478,7 +488,9 @@ class COATOOLS2_OT_QuickArmature(bpy.types.Operator):
                                 )
                                 self.report({"INFO"}, msg)
                             elif self.object_hover.coa_tools2.type == "SLOT":
-                                prev_index = int(self.object_hover.coa_tools2.slot_index)
+                                prev_index = int(
+                                    self.object_hover.coa_tools2.slot_index
+                                )
                                 for i, slot in enumerate(
                                     self.object_hover.coa_tools2.slot
                                 ):
@@ -521,7 +533,7 @@ class COATOOLS2_OT_QuickArmature(bpy.types.Operator):
             return self.exit_edit_mode(context)
         return {"PASS_THROUGH"}
 
-    def exit_edit_mode(self, context):
+    def exit_edit_mode(self, context: bpy.types.Context):
         functions.set_active_tool(self, context, "builtin.select")
         try:
             bpy.utils.unregister_tool(COATOOLS2_TO_DrawBone)
@@ -537,13 +549,23 @@ class COATOOLS2_OT_QuickArmature(bpy.types.Operator):
             bpy.ops.object.mode_set(mode="POSE")
 
             for pose_bone in context.active_object.pose.bones:
-                if (
-                    "default_bones" in context.active_object.pose.bone_groups
-                    and pose_bone.bone_group == None
-                ):
-                    pose_bone.bone_group = context.active_object.pose.bone_groups[
-                        "default_bones"
-                    ]
+                if functions.b_version_smaller_than((4, 0, 0)):
+                    if (
+                        "default_bones" in context.active_object.pose.bone_groups
+                        and pose_bone.bone_group == None
+                    ):
+                        pose_bone.bone_group = context.active_object.pose.bone_groups[
+                            "default_bones"
+                        ]
+                else:
+                    armature: bpy.types.Armature = context.active_object.data
+                    if (
+                        "default_bones" in [c.name for c in armature.collections]
+                        and pose_bone.bone.collections == None
+                    ):
+                        pose_bone.bone.collections = (
+                            context.active_object.data.collections["default_bones"]
+                        )
 
         # lock_sprites(context,get_sprite_object(context.active_object),get_sprite_object(context.active_object).lock_sprites)
         self.sprite_object = bpy.data.objects[self.sprite_object_name]
