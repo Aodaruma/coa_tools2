@@ -1,4 +1,4 @@
-#target Photoshop
+﻿#target Photoshop
 
 var doc = app.activeDocument;
 var layers = doc.layers;
@@ -215,17 +215,17 @@ function get_target_layers(layers) {
     return target_layers;
 }
 
-    function export_sprites(
-        export_path,
-        export_name,
-        crop_to_dialog_bounds,
-        center_sprites,
-        crop_layers,
-        export_json,
-        layer_type,
-        is_layerset_automerge,
+function export_sprites(
+    export_path,
+    export_name,
+    crop_to_dialog_bounds,
+    center_sprites,
+    crop_layers,
+    export_json,
+    layer_type,
+    is_layerset_automerge,
     is_prepending_layerset_name,
-    ) {
+) {
     var init_units = app.preferences.rulerUnits;
     app.preferences.rulerUnits = Units.PIXELS;
     // check if folder exists. if not, create one
@@ -235,7 +235,7 @@ function get_target_layers(layers) {
     var tmp_layers = doc.layers;
 
     try {
-            duplicate_into_new_doc(layer_type);
+        duplicate_into_new_doc(layer_type);
         var dupli_doc = app.activeDocument;
     } catch (e) {
         alert(e);
@@ -249,21 +249,21 @@ function get_target_layers(layers) {
     ///
 
     // flatten layers
-        if (is_layerset_automerge == true) {
-    for (var i = 0; i < dupli_doc.layers.length; i++) {
-        var layer = dupli_doc.layers[i];
-        dupli_doc.activeLayer = layer;
-        if (layer.name.indexOf("--sprites") == -1) {
-            flatten_layer(dupli_doc, layer.name);
-        } else if (layer.name.indexOf("--sprites") != -1 && layer.typename == "LayerSet") {
-            for (var j = 0; j < layer.layers.length; j++) {
-                var sub_layer = layer.layers[j];
-                dupli_doc.activeLayer = sub_layer;
-                flatten_layer(dupli_doc, sub_layer.name);
+    if (is_layerset_automerge == true) {
+        for (var i = 0; i < dupli_doc.layers.length; i++) {
+            var layer = dupli_doc.layers[i];
+            dupli_doc.activeLayer = layer;
+            if (layer.name.indexOf("--sprites") == -1) {
+                flatten_layer(dupli_doc, layer.name);
+            } else if (layer.name.indexOf("--sprites") != -1 && layer.typename == "LayerSet") {
+                for (var j = 0; j < layer.layers.length; j++) {
+                    var sub_layer = layer.layers[j];
+                    dupli_doc.activeLayer = sub_layer;
+                    flatten_layer(dupli_doc, sub_layer.name);
+                }
             }
         }
     }
-        }
 
 
     var target_layers = get_target_layers(dupli_doc.layers);
