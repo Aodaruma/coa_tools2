@@ -388,7 +388,7 @@ function export_button() {
     app.activeDocument.info.caption = win.export_path.text;
     app.activeDocument.info.captionWriter = win.export_name.text;
     //export_sprites(win.export_path.text, win.export_name.text, win.limit_layer.value, win.center_sprites.value);
-    app.activeDocument.suspendHistory("Export selected Sprites", "export_sprites(win.export_path.text, win.export_name.text, win.limit_layer.value, win.center_sprites.value,win.crop_layers.value,win.export_json.value)");
+    app.activeDocument.suspendHistory("Export selected Sprites", "export_sprites(win.export_path.text, win.export_name.text, win.limit_layer.value, win.center_sprites.value,win.crop_layers.value,win.export_json.value,win.layer_type.selection.text,win.is_layerset_automerge.value,win.is_prepending_layerset_name.value)");
     win.close();
 }
 
@@ -412,6 +412,12 @@ with (win) {
     win.button_path = add("button", [370, 13, 440, 35], 'select');
     win.export_json = add("checkbox", [5, 130, 180, 150], 'Export Json File');
     win.crop_layers = add("checkbox", [5, 90, 180, 110], 'Crop Layers');
+    win.sText3 = add("statictext", [190, 70, 440, 90], 'Layer Type:');
+    win.layer_type = add("dropdownlist", [190, 90, 440, 110], undefined, {
+        items: ["selected", "visible"]
+    });
+    win.is_layerset_automerge = add("checkbox", [190, 110, 440, 130], 'Merge Layersets');
+    win.is_prepending_layerset_name = add("checkbox", [190, 130, 440, 150], 'Prepend Layerset Name');
 }
 win.export_path.text = app.activeDocument.info.caption;
 win.export_name.text = app.activeDocument.info.captionWriter;
@@ -421,5 +427,8 @@ win.center_sprites.value = true;
 win.limit_layer.value = true;
 win.crop_layers.value = true;
 win.export_json.value = true;
+win.layer_type.selection = 0;
+win.is_layerset_automerge.value = false;
+win.is_prepending_layerset_name.value = false;
 win.center();
 win.show();
