@@ -192,6 +192,16 @@ function duplicate_into_new_doc(choose_layer_type) {
     newDocLayers[0].remove();
 }
 
+function get_parent_layersets(layer) {
+    var parent_layersets = [];
+    var parent_layer = layer.parent;
+    while (parent_layer.typename == "LayerSet") {
+        parent_layersets.push(parent_layer);
+        parent_layer = parent_layer.parent;
+    }
+    return parent_layersets;
+}
+
     function export_sprites(
         export_path,
         export_name,
