@@ -1,4 +1,4 @@
-﻿#target Photoshop
+#target Photoshop
 
 var doc = app.activeDocument;
 var layers = doc.layers;
@@ -150,27 +150,46 @@ function extend_document_size(size_x, size_y) {
     executeAction(idCnvS, desc8, DialogModes.NO);
 }
 
-function duplicate_into_new_doc() {
-    // =======================================================
-    var idMk = charIDToTypeID("Mk  ");
-    var desc231 = new ActionDescriptor();
-    var idnull = charIDToTypeID("null");
-    var ref114 = new ActionReference();
-    var idDcmn = charIDToTypeID("Dcmn");
-    ref114.putClass(idDcmn);
-    desc231.putReference(idnull, ref114);
-    var idNm = charIDToTypeID("Nm  ");
-    desc231.putString(idNm, """dupli_layers_doc""");
-    var idUsng = charIDToTypeID("Usng");
-    var ref115 = new ActionReference();
-    var idLyr = charIDToTypeID("Lyr ");
-    var idOrdn = charIDToTypeID("Ordn");
-    var idTrgt = charIDToTypeID("Trgt");
-    ref115.putEnumerated(idLyr, idOrdn, idTrgt);
-    desc231.putReference(idUsng, ref115);
-    var idVrsn = charIDToTypeID("Vrsn");
-    desc231.putInteger(idVrsn, 5);
-    executeAction(idMk, desc231, DialogModes.NO);
+function duplicate_into_new_doc(choose_layer_type) {
+    const layer_types = {
+        selected: "selected",
+        visible: "visible",
+    }
+    choose_layer_type = choose_layer_type || layer_types.selected;
+
+    var sourceDoc = app.activeDocument;
+    var layers = sourceDoc.layers;
+
+    // create new document
+    var newDoc = app.documents.add(sourceDoc.width, sourceDoc.height, sourceDoc.resolution, "dupli_visible_layers_doc", NewDocumentMode.RGB, DocumentFill.TRANSPARENT);
+    newDocLayers = newDoc.layers;
+
+    // switch back to source document
+    app.activeDocument = sourceDoc;
+
+    // duplicate layers
+    duplicated_num = 0;
+    for (var i = 0; i < layers.length; i++) {
+        if (
+            // (choose_layer_type == layer_types.all) ||
+            (choose_layer_type == layer_types.visible && layers[i].visible) ||
+            (choose_layer_type == layer_types.selected && layers[i].selected)
+        ) {
+            layers[i].duplicate(newDoc, ElementPlacement.PLACEATEND);
+            duplicated_num++;
+        }
+    }
+
+    // if no layers were duplicated, throw an error
+    if (duplicated_num == 0) {
+        throw new Error("No layers were duplicated. Please select or set show at least one layer.");
+    }
+
+    // switch back to new document
+    app.activeDocument = newDoc;
+
+    // delete top layer (empty layer cteaetd by default)
+    newDocLayers[0].remove();
 }
 
 function export_sprites(export_path, export_name, crop_to_dialog_bounds, center_sprites, crop_layers, export_json) {
