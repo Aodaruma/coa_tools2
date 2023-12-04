@@ -224,6 +224,7 @@ function get_target_layers(layers) {
         export_json,
         layer_type,
         is_layerset_automerge,
+    is_prepending_layerset_name,
     ) {
     var init_units = app.preferences.rulerUnits;
     app.preferences.rulerUnits = Units.PIXELS;
@@ -265,10 +266,10 @@ function get_target_layers(layers) {
         }
 
 
-    var selected_layer = dupli_doc.layers;
-    for (var i = 0; i < selected_layer.length; i++) {
+    var target_layers = get_target_layers(dupli_doc.layers);
+    for (var i = 0; i < target_layers.length; i++) {
         // deselect layers
-        var layer = selected_layer[i];
+        var layer = target_layers[i];
 
         dupli_doc.activeLayer = layer;
         var bounds = [layer.bounds[0].as("px"), layer.bounds[1].as("px"), layer.bounds[2].as("px"), layer.bounds[3].as("px")];
@@ -354,6 +355,14 @@ function get_target_layers(layers) {
             layer_name = layer_name.substring(0, keyword_pos - 1);
         } else {
             layer_name = layer_name.substring(0, keyword_pos);
+        }
+
+        // get layerset name that the layer is belonging to
+        parent_layersets = get_parent_layersets(layer);
+        if (is_prepending_layerset_name == true) {
+            for (var j = 0; j < parent_layersets.length; j++) {
+                layer_name = parent_layersets[j].name + "." + layer_name;
+            }
         }
 
         // do save stuff
