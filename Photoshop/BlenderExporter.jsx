@@ -200,6 +200,7 @@ function duplicate_into_new_doc(choose_layer_type) {
         crop_layers,
         export_json,
         layer_type,
+        is_layerset_automerge,
     ) {
     var init_units = app.preferences.rulerUnits;
     app.preferences.rulerUnits = Units.PIXELS;
@@ -224,6 +225,7 @@ function duplicate_into_new_doc(choose_layer_type) {
     ///
 
     // flatten layers
+        if (is_layerset_automerge == true) {
     for (var i = 0; i < dupli_doc.layers.length; i++) {
         var layer = dupli_doc.layers[i];
         dupli_doc.activeLayer = layer;
@@ -237,6 +239,8 @@ function duplicate_into_new_doc(choose_layer_type) {
             }
         }
     }
+        }
+
 
     var selected_layer = dupli_doc.layers;
     for (var i = 0; i < selected_layer.length; i++) {
