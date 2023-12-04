@@ -202,6 +202,19 @@ function get_parent_layersets(layer) {
     return parent_layersets;
 }
 
+function get_target_layers(layers) {
+    var target_layers = [];
+    for (var i = 0; i < layers.length; i++) {
+        var layer = layers[i];
+        if (layer.typename == "LayerSet") {
+            target_layers = target_layers.concat(get_target_layers(layer.layers));
+        } else {
+            target_layers.push(layer);
+        }
+    }
+    return target_layers;
+}
+
     function export_sprites(
         export_path,
         export_name,
