@@ -192,7 +192,15 @@ function duplicate_into_new_doc(choose_layer_type) {
     newDocLayers[0].remove();
 }
 
-function export_sprites(export_path, export_name, crop_to_dialog_bounds, center_sprites, crop_layers, export_json) {
+    function export_sprites(
+        export_path,
+        export_name,
+        crop_to_dialog_bounds,
+        center_sprites,
+        crop_layers,
+        export_json,
+        layer_type,
+    ) {
     var init_units = app.preferences.rulerUnits;
     app.preferences.rulerUnits = Units.PIXELS;
     // check if folder exists. if not, create one
@@ -202,7 +210,7 @@ function export_sprites(export_path, export_name, crop_to_dialog_bounds, center_
     var tmp_layers = doc.layers;
 
     try {
-        duplicate_into_new_doc();
+            duplicate_into_new_doc(layer_type);
         var dupli_doc = app.activeDocument;
     } catch (e) {
         alert(e);
