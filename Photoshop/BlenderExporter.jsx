@@ -1,4 +1,4 @@
-﻿#target Photoshop
+#target Photoshop
 
 var doc = app.activeDocument;
 var layers = doc.layers;
@@ -387,6 +387,9 @@ function export_button() {
     win.export_name.text = String(win.export_name.text).split(' ').join('_');
     app.activeDocument.info.caption = win.export_path.text;
     app.activeDocument.info.captionWriter = win.export_name.text;
+    app.activeDocument.info.layerType = win.layer_type.selection;
+    app.activeDocument.info.isLayersetAutomerge = win.is_layerset_automerge.value;
+    app.activeDocument.info.isPrependingLayersetName = win.is_prepending_layerset_name.value;
     //export_sprites(win.export_path.text, win.export_name.text, win.limit_layer.value, win.center_sprites.value);
     app.activeDocument.suspendHistory("Export selected Sprites", "export_sprites(win.export_path.text, win.export_name.text, win.limit_layer.value, win.center_sprites.value,win.crop_layers.value,win.export_json.value,win.layer_type.selection.text,win.is_layerset_automerge.value,win.is_prepending_layerset_name.value)");
     win.close();
@@ -427,8 +430,8 @@ win.center_sprites.value = true;
 win.limit_layer.value = true;
 win.crop_layers.value = true;
 win.export_json.value = true;
-win.layer_type.selection = 0;
-win.is_layerset_automerge.value = false;
-win.is_prepending_layerset_name.value = false;
+win.layer_type.selection = app.activeDocument.info.layerType;
+win.is_layerset_automerge.value = app.activeDocument.info.isLayersetAutomerge;
+win.is_prepending_layerset_name.value = app.activeDocument.info.isPrependingLayersetName;
 win.center();
 win.show();
