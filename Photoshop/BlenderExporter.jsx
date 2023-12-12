@@ -225,6 +225,7 @@ function export_sprites(
     layer_type,
     is_layerset_automerge,
     is_prepending_layerset_name,
+    is_reorder_layerset_name
 ) {
     var init_units = app.preferences.rulerUnits;
     app.preferences.rulerUnits = Units.PIXELS;
@@ -365,6 +366,28 @@ function export_sprites(
             }
         }
 
+        if (is_reorder_layerset_name == true) {
+            // check the name contains these patterns and reorder them to the end of the name
+            // - mirror names (e.g. "left", "right", "L", "R")
+            // - sequence numbers (e.g. "1", "002", "03")
+            const mirror_names = ["left", "right", "L", "R", "Left", "Right"];
+            for (var m = 0; m < mirror_names.length; m++) {
+                const mname = mirror_names[m];
+                if (layer_name.indexOf(mname) != -1) {
+                    layer_name = layer_name.replace("." + mname, "");
+                    layer_name += "." + mname;
+                }
+            }
+            const sequence_regex = new RegExp(/(\d+)/);
+            const sequence_match = layer_name.match(sequence_regex);
+            if (sequence_match != null) {
+                const sequence_number = sequence_match[1];
+                layer_name = layer_name.replace("." + sequence_number, "");
+                // sequence_number must be padded with zeros to 3 digits
+                layer_name += "." + sequence_number.padStart(3, "0");
+            }
+        }
+
         // do save stuff
         tmp_doc.exportDocument(File(export_path + "/sprites/" + layer_name + ".png"), ExportType.SAVEFORWEB, options);
 
@@ -390,8 +413,22 @@ function export_button() {
     app.activeDocument.info.layerType = win.layer_type.selection;
     app.activeDocument.info.isLayersetAutomerge = win.is_layerset_automerge.value;
     app.activeDocument.info.isPrependingLayersetName = win.is_prepending_layerset_name.value;
+    app.activeDocument.info.isReorderLayersetName = win.is_reorder_layerset_name.value;
     //export_sprites(win.export_path.text, win.export_name.text, win.limit_layer.value, win.center_sprites.value);
-    app.activeDocument.suspendHistory("Export selected Sprites", "export_sprites(win.export_path.text, win.export_name.text, win.limit_layer.value, win.center_sprites.value,win.crop_layers.value,win.export_json.value,win.layer_type.selection.text,win.is_layerset_automerge.value,win.is_prepending_layerset_name.value)");
+    app.activeDocument.suspendHistory(
+        "Export selected Sprites",
+        "export_sprites("
+        + "win.export_path.text,"
+        + "win.export_name.text,"
+        + "win.limit_layer.value,"
+        + "win.center_sprites.value,"
+        + "win.crop_layers.value,"
+        + "win.export_json.value,"
+        + "win.layer_type.selection.text,"
+        + "win.is_layerset_automerge.value,"
+        + "win.is_prepending_layerset_name.value,"
+        + "win.is_reorder_layerset_name.value)"
+    );
     win.close();
 }
 
@@ -421,6 +458,7 @@ with (win) {
     });
     win.is_layerset_automerge = add("checkbox", [190, 110, 440, 130], 'Merge Layersets');
     win.is_prepending_layerset_name = add("checkbox", [190, 130, 440, 150], 'Prepend Layerset Name');
+    win.is_reorder_layerset_name = add("checkbox", [190, 150, 440, 170], 'Reorder Layerset Name');
 }
 win.export_path.text = app.activeDocument.info.caption;
 win.export_name.text = app.activeDocument.info.captionWriter;
@@ -433,5 +471,6 @@ win.export_json.value = true;
 win.layer_type.selection = app.activeDocument.info.layerType;
 win.is_layerset_automerge.value = app.activeDocument.info.isLayersetAutomerge;
 win.is_prepending_layerset_name.value = app.activeDocument.info.isPrependingLayersetName;
+win.is_reorder_layerset_name.value = app.activeDocument.info.isReorderLayersetName;
 win.center();
 win.show();
