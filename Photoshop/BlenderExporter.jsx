@@ -440,25 +440,39 @@ function path_button() {
     }
 }
 
-var win = new Window("dialog", 'Json Exporter' + exporter_version, [0, 0, 445, 157],);
+const window_width = 445;
+const window_height = 220;
+
+var win = new Window("dialog", 'Json Exporter ' + exporter_version, [0, 0, window_width, window_height]);
+win.alignChildren = "left";
+
 with (win) {
-    win.export_path = add("edittext", [85, 15, 365, 35], undefined);
-    win.sText = add("statictext", [5, 20, 75, 40], 'Export Path:');
+    // export path
+    win.export_path = add("edittext", [85, 10, 365, 30], undefined);
+    win.sText = add("statictext", [5, 10, 75, 30], 'Export Path:');
+    win.button_path = add("button", [370, 10, 440, 30], 'select');
+
+    // export name
+    win.sText2 = add("statictext", [5, 40, 85, 60], 'Export Name:');
+    win.export_name = add("edittext", [85, 40, 440, 60], undefined);
+
+    // options (1/2)
     win.limit_layer = add("checkbox", [5, 70, 180, 90], 'Limit layers by Document');
     win.center_sprites = add("checkbox", [5, 110, 180, 130], 'Center Sprites in Blender');
-    win.export_button = add("button", [340, 130, 440, 152], 'Export Layers');
-    win.export_name = add("edittext", [85, 40, 440, 60], undefined);
-    win.sText2 = add("statictext", [5, 45, 85, 65], 'Export Name:');
-    win.button_path = add("button", [370, 13, 440, 35], 'select');
     win.export_json = add("checkbox", [5, 130, 180, 150], 'Export Json File');
     win.crop_layers = add("checkbox", [5, 90, 180, 110], 'Crop Layers');
-    win.sText3 = add("statictext", [190, 70, 440, 90], 'Layer Type:');
-    win.layer_type = add("dropdownlist", [190, 90, 440, 110], undefined, {
+
+    // options (2/2)
+    win.sText3 = add("statictext", [190, 70, 255, 90], 'Layer Type:');
+    win.layer_type = add("dropdownlist", [255, 70, 350, 90], undefined, {
         items: ["selected", "visible"]
     });
-    win.is_layerset_automerge = add("checkbox", [190, 110, 440, 130], 'Merge Layersets');
-    win.is_prepending_layerset_name = add("checkbox", [190, 130, 440, 150], 'Prepend Layerset Name');
-    win.is_reorder_layerset_name = add("checkbox", [190, 150, 440, 170], 'Reorder Layerset Name');
+    win.is_layerset_automerge = add("checkbox", [190, 90, 440, 110], 'Merge Layersets');
+    win.is_prepending_layerset_name = add("checkbox", [190, 110, 440, 130], 'Prepend Layerset Name');
+    win.is_reorder_layerset_name = add("checkbox", [190, 130, 440, 150], 'Reorder Layerset Name');
+
+    // buttons
+    win.export_button = add("button", [340, 190, 440, 212], 'Export Layers');
 }
 win.export_path.text = app.activeDocument.info.caption;
 win.export_name.text = app.activeDocument.info.captionWriter;
