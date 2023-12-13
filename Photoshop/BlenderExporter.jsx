@@ -367,24 +367,36 @@ function export_sprites(
         }
 
         if (is_reorder_layerset_name == true) {
-            // check the name contains these patterns and reorder them to the end of the name
-            // - mirror names (e.g. "left", "right", "L", "R")
+            // check the name contains these patterns and reorder them to the end of the name (name + sequence_number + mirror_name)
             // - sequence numbers (e.g. "1", "002", "03")
-            const mirror_names = ["left", "right", "L", "R", "Left", "Right"];
+            // - mirror names (e.g. "left", "right", "L", "R")
+
+            var sequence_regex = new RegExp(/\.?(\d+)/);
+            var sequence_match = layer_name.match(sequence_regex);
+            if (sequence_match != null) {
+                var sequence_number = sequence_match[1];
+                layer_name = layer_name.replace("." + sequence_number, "");
+                // sequence_number must be padded with zeros to 3 digits
+                // layer_name += "." + sequence_number.padStart(3, "0"); // cant use; not supported in extended script (locked at ES3)
+                var seq_length = sequence_number.length;
+                var seq_padding = 3 - seq_length;
+                var seq_padding_str = "";
+                if (seq_padding < 0) {
+                    seq_padding = 0;
+                }
+                for (var p = 0; p < seq_padding; p++) {
+                    seq_padding_str += "0";
+                }
+                layer_name += "." + seq_padding_str + sequence_number;
+            }
+
+            var mirror_names = ["left", "right", "L", "R", "Left", "Right"];
             for (var m = 0; m < mirror_names.length; m++) {
-                const mname = mirror_names[m];
+                var mname = mirror_names[m];
                 if (layer_name.indexOf(mname) != -1) {
                     layer_name = layer_name.replace("." + mname, "");
                     layer_name += "." + mname;
                 }
-            }
-            const sequence_regex = new RegExp(/(\d+)/);
-            const sequence_match = layer_name.match(sequence_regex);
-            if (sequence_match != null) {
-                const sequence_number = sequence_match[1];
-                layer_name = layer_name.replace("." + sequence_number, "");
-                // sequence_number must be padded with zeros to 3 digits
-                layer_name += "." + sequence_number.padStart(3, "0");
             }
         }
 
