@@ -58,7 +58,7 @@ function write_line(tabs, text) {
 }
 
 function save_coords(center_sprites, export_path, export_name) {
-    if (win.center_sprites.value) {
+    if (center_sprites == true) {
         var offset = [doc.width.as("px") * -.5 + ',' + doc.height.as("px") * .5];
     } else {
         var offset = [0, 0];
