@@ -429,28 +429,27 @@ function export_sprites(
 function export_button() {
 
     win.export_name.text = String(win.export_name.text).split(' ').join('_');
-    app.activeDocument.info.caption = win.export_path.text;
-    app.activeDocument.info.captionWriter = win.export_name.text;
-    app.activeDocument.info.layerType = win.layer_type.selection;
-    app.activeDocument.info.isLayersetAutomerge = win.is_layerset_automerge.value;
-    app.activeDocument.info.isPrependingLayersetName = win.is_prepending_layerset_name.value;
-    app.activeDocument.info.isReorderLayersetName = win.is_reorder_layerset_name.value;
-    app.activeDocument.info.isSetCompositeModeToNormal = win.is_set_composite_mode_to_normal.value;
-    //export_sprites(win.export_path.text, win.export_name.text, win.limit_layer.value, win.center_sprites.value);
+    app.activeDocument.info.caption = win.export_path.export_path.text;
+    app.activeDocument.info.captionWriter = win.export_name.export_name.text;
+    app.activeDocument.info.layerType = win.options.ops01.select_options.layer_type_group.layer_type.selection;
+    app.activeDocument.info.isLayersetAutomerge = win.options.ops01.convert_options.is_layerset_automerge.value;
+    app.activeDocument.info.isSetCompositeModeToNormal = win.options.ops01.convert_options.is_set_composite_mode_to_normal.value;
+    app.activeDocument.info.isPrependingLayersetName = win.options.ops02.naming_options.is_prepending_layerset_name.value;
+    app.activeDocument.info.isReorderLayersetName = win.options.ops02.naming_options.is_reorder_layerset_name.value;
     app.activeDocument.suspendHistory(
         "Export selected Sprites",
         "export_sprites("
-        + "win.export_path.text,"
-        + "win.export_name.text,"
-        + "win.limit_layer.value,"
-        + "win.center_sprites.value,"
-        + "win.crop_layers.value,"
-        + "win.export_json.value,"
-        + "win.layer_type.selection.text,"
-        + "win.is_layerset_automerge.value,"
-        + "win.is_prepending_layerset_name.value,"
-        + "win.is_reorder_layerset_name.value,"
-        + "win.is_set_composite_mode_to_normal.value"
+        + "win.export_path.export_path.text,"
+        + "win.export_name.export_name.text,"
+        + "win.options.ops01.convert_options.limit_layer.value,"
+        + "win.options.ops02.export_options.center_sprites.value,"
+        + "win.options.ops01.convert_options.crop_layers.value,"
+        + "win.options.ops02.export_options.export_json.value,"
+        + "win.options.ops01.select_options.layer_type_group.layer_type.selection.text,"
+        + "win.options.ops01.convert_options.is_layerset_automerge.value,"
+        + "win.options.ops02.naming_options.is_prepending_layerset_name.value,"
+        + "win.options.ops02.naming_options.is_reorder_layerset_name.value,"
+        + "win.options.ops01.convert_options.is_set_composite_mode_to_normal.value"
         + ")"
     );
     win.close();
@@ -459,58 +458,115 @@ function export_button() {
 function path_button() {
     var folder_path = Folder.selectDialog("Select Place to save");
     if (folder_path != null) {
-        win.export_path.text = folder_path;
+        win.export_path.export_path.text = folder_path;
         app.activeDocument.info.caption = folder_path;
     }
 }
 
-const window_width = 445;
-const window_height = 220;
 
-var win = new Window("dialog", 'Json Exporter ' + exporter_version, [0, 0, window_width, window_height]);
-win.alignChildren = "left";
+var res = "dialog { \
+    text: 'COA tools2 - Json Exporter " + exporter_version + "', \
+    alignChildren: 'fill', \
+    export_name: Group { \
+        orientation: 'row', \
+        alignChildren: 'left', \
+        sText: StaticText { text: 'Export Name:', alignment: 'left', preferredSize: [70, 20] }, \
+        export_name: EditText { preferredSize: [320, 20] } \
+    }, \
+    export_path: Group { \
+        orientation: 'row', \
+        alignChildren: 'left', \
+        sText: StaticText { text: 'Export Path:', alignment: 'left', preferredSize: [70, 20] }, \
+        export_path: EditText { preferredSize: [230, 20] }, \
+        button_path: Button { text: 'select' } \
+    }, \
+    options: Group { \
+        orientation: 'row', \
+        align: 'center', \
+        alignChildren: 'fill', \
+        ops01: Group { \
+            orientation: 'column', \
+            align: 'top', \
+            select_options: Panel { \
+                text: 'Select Options', \
+                orientation: 'column', \
+                alignChildren: 'left', \
+                layer_type_group: Group { \
+                    orientation: 'row', \
+                    sText: StaticText { text: 'Layer Type:', alignment: 'left' }, \
+                    layer_type: DropDownList { text: 'Layer Type:', preferredSize: [100, 20] }, \
+                }, \
+            }, \
+            convert_options: Panel { \
+                text: 'Convert Options', \
+                orientation: 'column', \
+                alignChildren: 'left', \
+                crop_layers: Checkbox { text: 'Crop Layers', value: true}, \
+                limit_layer: Checkbox { text: 'Crop layer by Document size', value: true }, \
+                is_layerset_automerge: Checkbox { text: 'Merge Layersets', value: true }, \
+                is_set_composite_mode_to_normal: Checkbox { text: 'Set Composite Mode to Normal', value: true } \
+            } \
+        }, \
+        ops02: Group { \
+            orientation: 'column', \
+            align: 'top', \
+            naming_options: Panel { \
+                text: 'Naming Options', \
+                orientation: 'column', \
+                alignChildren: 'left', \
+                is_prepending_layerset_name: Checkbox { text: 'Prepend Layerset Name', value: true }, \
+                is_reorder_layerset_name: Checkbox { text: 'Reorder Layerset Name', value: true } \
+            }, \
+            export_options: Panel { \
+                text: 'Export Options', \
+                orientation: 'column', \
+                alignChildren: 'left', \
+                export_json: Checkbox { text: 'Export Json File', value: true } \
+                center_sprites: Checkbox { text: 'Center Sprites in Blender', value: true }, \
+            } \
+        } \
+    }, \
+    buttons : Group { \
+        orientation: 'row', \
+        alignment: 'right', \
+        export_button: Button { text: 'Export', preferredSize: [100, 20], properties: { name: 'ok' } }, \
+        cancel_button: Button { text: 'Cancel', preferredSize: [100, 20], properties: { name: 'cancel' } } \
+    } \
+}";
 
-with (win) {
-    // export path
-    win.export_path = add("edittext", [85, 10, 365, 30], undefined);
-    win.sText = add("statictext", [5, 10, 75, 30], 'Export Path:');
-    win.button_path = add("button", [370, 10, 440, 30], 'select');
+var win = new Window(res);
 
-    // export name
-    win.sText2 = add("statictext", [5, 40, 85, 60], 'Export Name:');
-    win.export_name = add("edittext", [85, 40, 440, 60], undefined);
+win.export_path.export_path.text = app.activeDocument.info.caption !== undefined ? app.activeDocument.info.caption : "";
+win.export_path.button_path.onClick = path_button;
+win.export_name.export_name.text = app.activeDocument.info.captionWriter !== undefined ? app.activeDocument.info.captionWriter : app.activeDocument.name;
 
-    // options (1/2)
-    win.limit_layer = add("checkbox", [5, 70, 180, 90], 'Crop layer by Document size');
-    win.center_sprites = add("checkbox", [5, 110, 180, 130], 'Center Sprites in Blender');
-    win.export_json = add("checkbox", [5, 130, 180, 150], 'Export Json File');
-    win.crop_layers = add("checkbox", [5, 90, 180, 110], 'Crop Layers');
+win.options.ops01.select_options.layer_type_group.layer_type.add("item", "selected");
+win.options.ops01.select_options.layer_type_group.layer_type.add("item", "visible");
+win.options.ops01.select_options.layer_type_group.layer_type.selection = app.activeDocument.info.layerType !== undefined ? app.activeDocument.info.layerType : "selected";
 
-    // options (2/2)
-    win.sText3 = add("statictext", [190, 70, 255, 90], 'Layer Type:');
-    win.layer_type = add("dropdownlist", [255, 70, 350, 90], undefined, {
-        items: ["selected", "visible"]
-    });
-    win.is_layerset_automerge = add("checkbox", [190, 90, 440, 110], 'Merge Layersets');
-    win.is_prepending_layerset_name = add("checkbox", [190, 110, 440, 130], 'Prepend Layerset Name');
-    win.is_reorder_layerset_name = add("checkbox", [190, 130, 440, 150], 'Reorder Layerset Name');
-    win.is_set_composite_mode_to_normal = add("checkbox", [190, 150, 440, 170], 'Set Composite Mode to Normal');
-
-    // buttons
-    win.export_button = add("button", [340, 190, 440, 212], 'Export Layers');
+win.options.ops01.convert_options.crop_layers.onClick = function () {
+    if (this.value === true) {
+        this.parent.limit_layer.enabled = true;
+    } else {
+        this.parent.limit_layer.enabled = false;
+    }
 }
-win.export_path.text = app.activeDocument.info.caption;
-win.export_name.text = app.activeDocument.info.captionWriter;
-win.export_button.onClick = export_button;
-win.button_path.onClick = path_button;
-win.center_sprites.value = true;
-win.limit_layer.value = true;
-win.crop_layers.value = true;
-win.export_json.value = true;
-win.layer_type.selection = app.activeDocument.info.layerType;
-win.is_layerset_automerge.value = app.activeDocument.info.isLayersetAutomerge;
-win.is_prepending_layerset_name.value = app.activeDocument.info.isPrependingLayersetName;
-win.is_reorder_layerset_name.value = app.activeDocument.info.isReorderLayersetName;
-win.is_set_composite_mode_to_normal.value = app.activeDocument.info.isSetCompositeModeToNormal;
+win.options.ops01.convert_options.is_layerset_automerge.value = app.activeDocument.info.isLayersetAutomerge !== undefined ? app.activeDocument.info.isLayersetAutomerge : false;
+win.options.ops01.convert_options.is_set_composite_mode_to_normal.value = app.activeDocument.info.isSetCompositeModeToNormal !== undefined ? app.activeDocument.info.isSetCompositeModeToNormal : true;
+
+win.options.ops02.naming_options.is_prepending_layerset_name.value = app.activeDocument.info.isPrependingLayersetName !== undefined ? app.activeDocument.info.isPrependingLayersetName : false;
+win.options.ops02.naming_options.is_reorder_layerset_name.value = app.activeDocument.info.isReorderLayersetName !== undefined ? app.activeDocument.info.isReorderLayersetName : false;
+
+win.options.ops02.export_options.export_json.onClick = function () {
+    if (this.value === true) {
+        this.parent.center_sprites.enabled = true;
+    } else {
+        this.parent.center_sprites.enabled = false;
+    }
+}
+
+win.buttons.export_button.onClick = export_button;
+win.buttons.cancel_button.onClick = function () { win.close(); }
+
 win.center();
 win.show();
