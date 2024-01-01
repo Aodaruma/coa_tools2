@@ -481,7 +481,7 @@ with (win) {
     win.export_name = add("edittext", [85, 40, 440, 60], undefined);
 
     // options (1/2)
-    win.limit_layer = add("checkbox", [5, 70, 180, 90], 'Limit layers by Document');
+    win.limit_layer = add("checkbox", [5, 70, 180, 90], 'Crop layer by Document size');
     win.center_sprites = add("checkbox", [5, 110, 180, 130], 'Center Sprites in Blender');
     win.export_json = add("checkbox", [5, 130, 180, 150], 'Export Json File');
     win.crop_layers = add("checkbox", [5, 90, 180, 110], 'Crop Layers');
