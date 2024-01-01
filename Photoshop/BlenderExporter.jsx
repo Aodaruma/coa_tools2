@@ -1,4 +1,4 @@
-﻿#target Photoshop
+#target Photoshop
 
 var doc = app.activeDocument;
 var layers = doc.layers;
@@ -225,7 +225,8 @@ function export_sprites(
     layer_type,
     is_layerset_automerge,
     is_prepending_layerset_name,
-    is_reorder_layerset_name
+    is_reorder_layerset_name,
+    is_set_composite_mode_to_normal
 ) {
     var init_units = app.preferences.rulerUnits;
     app.preferences.rulerUnits = Units.PIXELS;
@@ -266,6 +267,14 @@ function export_sprites(
         }
     }
 
+    // set all layer composite mode to normal
+    if (is_set_composite_mode_to_normal == true) {
+        for (var i = 0; i < dupli_doc.layers.length; i++) {
+            var layer = dupli_doc.layers[i];
+            dupli_doc.activeLayer = layer;
+            layer.blendMode = BlendMode.NORMAL;
+        }
+    }
 
     var target_layers = get_target_layers(dupli_doc.layers);
     for (var i = 0; i < target_layers.length; i++) {
@@ -426,6 +435,7 @@ function export_button() {
     app.activeDocument.info.isLayersetAutomerge = win.is_layerset_automerge.value;
     app.activeDocument.info.isPrependingLayersetName = win.is_prepending_layerset_name.value;
     app.activeDocument.info.isReorderLayersetName = win.is_reorder_layerset_name.value;
+    app.activeDocument.info.isSetCompositeModeToNormal = win.is_set_composite_mode_to_normal.value;
     //export_sprites(win.export_path.text, win.export_name.text, win.limit_layer.value, win.center_sprites.value);
     app.activeDocument.suspendHistory(
         "Export selected Sprites",
@@ -439,7 +449,9 @@ function export_button() {
         + "win.layer_type.selection.text,"
         + "win.is_layerset_automerge.value,"
         + "win.is_prepending_layerset_name.value,"
-        + "win.is_reorder_layerset_name.value)"
+        + "win.is_reorder_layerset_name.value,"
+        + "win.is_set_composite_mode_to_normal.value"
+        + ")"
     );
     win.close();
 }
@@ -482,6 +494,7 @@ with (win) {
     win.is_layerset_automerge = add("checkbox", [190, 90, 440, 110], 'Merge Layersets');
     win.is_prepending_layerset_name = add("checkbox", [190, 110, 440, 130], 'Prepend Layerset Name');
     win.is_reorder_layerset_name = add("checkbox", [190, 130, 440, 150], 'Reorder Layerset Name');
+    win.is_set_composite_mode_to_normal = add("checkbox", [190, 150, 440, 170], 'Set Composite Mode to Normal');
 
     // buttons
     win.export_button = add("button", [340, 190, 440, 212], 'Export Layers');
@@ -498,5 +511,6 @@ win.layer_type.selection = app.activeDocument.info.layerType;
 win.is_layerset_automerge.value = app.activeDocument.info.isLayersetAutomerge;
 win.is_prepending_layerset_name.value = app.activeDocument.info.isPrependingLayersetName;
 win.is_reorder_layerset_name.value = app.activeDocument.info.isReorderLayersetName;
+win.is_set_composite_mode_to_normal.value = app.activeDocument.info.isSetCompositeModeToNormal;
 win.center();
 win.show();
