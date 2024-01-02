@@ -241,6 +241,8 @@ function export_sprites(
         var dupli_doc = app.activeDocument;
     } catch (e) {
         alert(e);
+        // delete tmp doc if it exists
+        if (dupli_doc) dupli_doc.close(SaveOptions.DONOTSAVECHANGES);
         win.close();
         return;
     }
@@ -431,11 +433,20 @@ function export_button() {
     win.export_name.text = String(win.export_name.text).split(' ').join('_');
     app.activeDocument.info.caption = win.export_path.export_path.text;
     app.activeDocument.info.captionWriter = win.export_name.export_name.text;
-    app.activeDocument.info.layerType = win.options.ops01.select_options.layer_type_group.layer_type.selection;
+    // select_options
+    app.activeDocument.info.layerType = win.options.ops01.select_options.layer_type_group.layer_type.selection.text;
+    // convert_options
+    app.activeDocument.info.cropLayers = win.options.ops01.convert_options.crop_layers.value;
+    app.activeDocument.info.limitLayer = win.options.ops01.convert_options.limit_layer.value;
     app.activeDocument.info.isLayersetAutomerge = win.options.ops01.convert_options.is_layerset_automerge.value;
     app.activeDocument.info.isSetCompositeModeToNormal = win.options.ops01.convert_options.is_set_composite_mode_to_normal.value;
+    // naming_options
     app.activeDocument.info.isPrependingLayersetName = win.options.ops02.naming_options.is_prepending_layerset_name.value;
     app.activeDocument.info.isReorderLayersetName = win.options.ops02.naming_options.is_reorder_layerset_name.value;
+    // export_options
+    app.activeDocument.info.exportJson = win.options.ops02.export_options.export_json.value;
+    app.activeDocument.info.centerSprites = win.options.ops02.export_options.center_sprites.value;
+
     app.activeDocument.suspendHistory(
         "Export selected Sprites",
         "export_sprites("
@@ -536,14 +547,15 @@ var res = "dialog { \
 
 var win = new Window(res);
 
-win.export_path.export_path.text = app.activeDocument.info.caption !== undefined ? app.activeDocument.info.caption : "";
+win.export_path.export_path.text = app.activeDocument.info.caption || "";
 win.export_path.button_path.onClick = path_button;
-win.export_name.export_name.text = app.activeDocument.info.captionWriter !== undefined ? app.activeDocument.info.captionWriter : app.activeDocument.name;
+win.export_name.export_name.text = app.activeDocument.info.captionWriter || app.activeDocument.name;
 
 win.options.ops01.select_options.layer_type_group.layer_type.add("item", "selected");
 win.options.ops01.select_options.layer_type_group.layer_type.add("item", "visible");
-win.options.ops01.select_options.layer_type_group.layer_type.selection = app.activeDocument.info.layerType !== undefined ? app.activeDocument.info.layerType : "selected";
+win.options.ops01.select_options.layer_type_group.layer_type.selection = app.activeDocument.info.layerType || "selected";
 
+win.options.ops01.convert_options.crop_layers.value = app.activeDocument.info.cropLayers || true;
 win.options.ops01.convert_options.crop_layers.onClick = function () {
     if (this.value === true) {
         this.parent.limit_layer.enabled = true;
@@ -551,12 +563,15 @@ win.options.ops01.convert_options.crop_layers.onClick = function () {
         this.parent.limit_layer.enabled = false;
     }
 }
-win.options.ops01.convert_options.is_layerset_automerge.value = app.activeDocument.info.isLayersetAutomerge !== undefined ? app.activeDocument.info.isLayersetAutomerge : false;
-win.options.ops01.convert_options.is_set_composite_mode_to_normal.value = app.activeDocument.info.isSetCompositeModeToNormal !== undefined ? app.activeDocument.info.isSetCompositeModeToNormal : true;
+win.options.ops01.convert_options.limit_layer.value = app.activeDocument.info.limitLayer || true;
+win.options.ops01.convert_options.is_layerset_automerge.value = app.activeDocument.info.isLayersetAutomerge || false;
+win.options.ops01.convert_options.is_set_composite_mode_to_normal.value = app.activeDocument.info.isSetCompositeModeToNormal || true;
 
-win.options.ops02.naming_options.is_prepending_layerset_name.value = app.activeDocument.info.isPrependingLayersetName !== undefined ? app.activeDocument.info.isPrependingLayersetName : false;
-win.options.ops02.naming_options.is_reorder_layerset_name.value = app.activeDocument.info.isReorderLayersetName !== undefined ? app.activeDocument.info.isReorderLayersetName : false;
+win.options.ops02.naming_options.is_prepending_layerset_name.value = app.activeDocument.info.isPrependingLayersetName || false;
+win.options.ops02.naming_options.is_reorder_layerset_name.value = app.activeDocument.info.isReorderLayersetName || false;
 
+win.options.ops02.export_options.export_json.value = app.activeDocument.info.exportJson || true;
+win.options.ops02.export_options.center_sprites.value = app.activeDocument.info.centerSprites || true;
 win.options.ops02.export_options.export_json.onClick = function () {
     if (this.value === true) {
         this.parent.center_sprites.enabled = true;
