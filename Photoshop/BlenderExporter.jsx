@@ -150,6 +150,27 @@ function extend_document_size(size_x, size_y) {
     executeAction(idCnvS, desc8, DialogModes.NO);
 }
 
+function is_same_layer(layer1, layer2) {
+    // check name and the parents are same
+    if (layer1.name != layer2.name)
+        return false;
+
+    var layer1_parents = get_parent_layersets(layer1);
+    var layer2_parents = get_parent_layersets(layer2);
+
+    if (layer1_parents.length != layer2_parents.length)
+        return false;
+
+    for (var i = 0; i < layer1_parents.length; i++) {
+        if (layer1_parents[i].name != layer2_parents[i].name)
+            return false;
+    }
+
+    // TODO: since photoshop allows same name layers(layersets) in the same layerset level, we need to check unique id of the layer whenever we compare in another document
+
+    return true;
+}
+
 function duplicate_into_new_doc(choose_layer_type) {
     const layer_types = {
         selected: "selected",
@@ -160,36 +181,80 @@ function duplicate_into_new_doc(choose_layer_type) {
     var sourceDoc = app.activeDocument;
     var layers = sourceDoc.layers;
 
+    // search layers for selected or visible layers
+    var target_layers = [];
+    var search_queue = [];
+    for (var i = 0; i < layers.length; i++)
+        search_queue.push(layers[i]);
+
+    while (search_queue.length > 0) {
+        var layer = search_queue.pop();
+        if (layer.typename == "LayerSet") {
+            for (var j = 0; j < layer.layers.length; j++)
+                search_queue.push(layer.layers[j]);
+        } else {
+            if (
+                // (choose_layer_type == layer_types.all) ||
+                (choose_layer_type == layer_types.visible && layer.visible === true) ||
+                (choose_layer_type == layer_types.selected && layer.selected === true)
+            ) {
+                // layer.duplicate(newDoc, ElementPlacement.PLACEATEND);
+                // duplicated_num++;
+                target_layers.push(layer);
+            }
+        }
+    }
+
+    // if no layers were duplicated, throw an error
+    if (target_layers.length == 0) {
+        throw new Error("No layers were duplicated. Please select or set show at least one layer.");
+    }
+
     // create new document
-    var newDoc = app.documents.add(sourceDoc.width, sourceDoc.height, sourceDoc.resolution, "dupli_visible_layers_doc", NewDocumentMode.RGB, DocumentFill.TRANSPARENT);
+    var newDoc = app.documents.add(sourceDoc.width, sourceDoc.height, sourceDoc.resolution, "dupli_layers_doc", NewDocumentMode.RGB, DocumentFill.TRANSPARENT);
     newDocLayers = newDoc.layers;
 
     // switch back to source document
     app.activeDocument = sourceDoc;
 
-    // duplicate layers
-    duplicated_num = 0;
+    // duplicate all layers into new document, and delete them which is not in target_layers array (if locked, unlock it and delete)
     for (var i = 0; i < layers.length; i++) {
-        if (
-            // (choose_layer_type == layer_types.all) ||
-            (choose_layer_type == layer_types.visible && layers[i].visible) ||
-            (choose_layer_type == layer_types.selected && layers[i].selected)
-        ) {
-            layers[i].duplicate(newDoc, ElementPlacement.PLACEATEND);
-            duplicated_num++;
-        }
-    }
-
-    // if no layers were duplicated, throw an error
-    if (duplicated_num == 0) {
-        throw new Error("No layers were duplicated. Please select or set show at least one layer.");
+        var layer = layers[i];
+        layer.duplicate(newDoc, ElementPlacement.PLACEATEND);
     }
 
     // switch back to new document
     app.activeDocument = newDoc;
 
+    var search_queue = [];
+    for (var i = 0; i < newDocLayers.length; i++)
+        search_queue.push(newDocLayers[i]);
+
+    while (search_queue.length > 0) {
+        var layer = search_queue.pop();
+        if (layer.allLocked == true) {
+            layer.allLocked = false;
+        }
+        if (layer.typename == "LayerSet") {
+            for (var j = 0; j < layer.layers.length; j++)
+                search_queue.push(layer.layers[j]);
+        } else {
+            var is_target_layer = false;
+            for (var j = 0; j < target_layers.length; j++) {
+                var target_layer = target_layers[j];
+                // if (layer.id == target_layer.id) {
+                if (is_same_layer(layer, target_layer)) {
+                    is_target_layer = true;
+                    break;
+                }
+            }
+            if (is_target_layer === false)
+                layer.remove();
+        }
+    }
+
     // delete top layer (empty layer cteaetd by default)
-    newDocLayers[0].remove();
+    // newDocLayers[0].remove();
 }
 
 function get_parent_layersets(layer) {
