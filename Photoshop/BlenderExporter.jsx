@@ -291,7 +291,8 @@ function export_sprites(
     is_layerset_automerge,
     is_prepending_layerset_name,
     is_reorder_layerset_name,
-    is_set_composite_mode_to_normal
+    is_set_composite_mode_to_normal,
+    is_omit_layer_name_if_only_one
 ) {
     var init_units = app.preferences.rulerUnits;
     app.preferences.rulerUnits = Units.PIXELS;
@@ -440,6 +441,13 @@ function export_sprites(
             for (var j = 0; j < parent_layersets.length; j++) {
                 layer_name = parent_layersets[j].name + "." + layer_name;
             }
+            if (is_omit_layer_name_if_only_one == true) {
+                // delete latest layer name
+                var layer_name_split = layer_name.split(".");
+                if (layer_name_split.length > 1) {
+                    layer_name = layer_name_split.slice(0, -1).join(".");
+                }
+            }
         }
 
         if (is_reorder_layerset_name == true) {
@@ -508,6 +516,7 @@ function export_button() {
     // naming_options
     app.activeDocument.info.isPrependingLayersetName = win.options.ops02.naming_options.is_prepending_layerset_name.value;
     app.activeDocument.info.isReorderLayersetName = win.options.ops02.naming_options.is_reorder_layerset_name.value;
+    app.activeDocument.info.isOmitLayerNameIfOnlyOne = win.options.ops02.naming_options.is_omit_layer_name_if_only_one.value;
     // export_options
     app.activeDocument.info.exportJson = win.options.ops02.export_options.export_json.value;
     app.activeDocument.info.centerSprites = win.options.ops02.export_options.center_sprites.value;
@@ -525,7 +534,8 @@ function export_button() {
         + "win.options.ops01.convert_options.is_layerset_automerge.value,"
         + "win.options.ops02.naming_options.is_prepending_layerset_name.value,"
         + "win.options.ops02.naming_options.is_reorder_layerset_name.value,"
-        + "win.options.ops01.convert_options.is_set_composite_mode_to_normal.value"
+        + "win.options.ops01.convert_options.is_set_composite_mode_to_normal.value,"
+        + "win.options.ops02.naming_options.is_omit_layer_name_if_only_one.value"
         + ")"
     );
     win.close();
@@ -592,6 +602,7 @@ var res = "dialog { \
                 alignChildren: 'left', \
                 is_prepending_layerset_name: Checkbox { text: 'Prepend Layerset Name', value: true }, \
                 is_reorder_layerset_name: Checkbox { text: 'Reorder Layerset Name', value: true } \
+                is_omit_layer_name_if_only_one: Checkbox { text: 'Omit Layer Name if alone', value: true }, \
             }, \
             export_options: Panel { \
                 text: 'Export Options', \
@@ -634,6 +645,16 @@ win.options.ops01.convert_options.is_set_composite_mode_to_normal.value = app.ac
 
 win.options.ops02.naming_options.is_prepending_layerset_name.value = app.activeDocument.info.isPrependingLayersetName || false;
 win.options.ops02.naming_options.is_reorder_layerset_name.value = app.activeDocument.info.isReorderLayersetName || false;
+win.options.ops02.naming_options.is_omit_layer_name_if_only_one.value = app.activeDocument.info.isOmitLayerNameIfOnlyOne || false;
+win.options.ops02.naming_options.is_prepending_layerset_name.onClick = function () {
+    if (this.value === true) {
+        this.parent.is_omit_layer_name_if_only_one.enabled = true;
+    } else {
+        this.parent.is_omit_layer_name_if_only_one.enabled = false;
+    }
+}
+// set is_omit_layer_name_if_only_one.enabled to is_prepending_layerset_name in initial state
+win.options.ops02.naming_options.is_omit_layer_name_if_only_one.enabled = win.options.ops02.naming_options.is_prepending_layerset_name.value;
 
 win.options.ops02.export_options.export_json.value = app.activeDocument.info.exportJson || true;
 win.options.ops02.export_options.center_sprites.value = app.activeDocument.info.centerSprites || true;
