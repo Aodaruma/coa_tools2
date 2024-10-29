@@ -1,4 +1,4 @@
-#target Photoshop
+﻿#target Photoshop
 
 var doc = app.activeDocument;
 var layers = doc.layers;
@@ -88,7 +88,8 @@ function save_coords(center_sprites, export_path, export_name) {
         json_file.writeln(write_dict_entry(tabs = 3, key = "tiles_x", value = coords[i][2][0]));
         json_file.writeln(write_dict_entry(tabs = 3, key = "tiles_y", value = coords[i][2][1]));
         json_file.writeln(write_dict_entry(tabs = 3, key = "frame_index", value = 0));
-        json_file.writeln(write_dict_entry(tabs = 3, key = "children", value = [], comma = false));
+        json_file.writeln(write_dict_entry(tabs = 3, key = "children", value = []));
+        json_file.writeln(write_dict_entry(tabs = 3, key = "blend_mode", value = coords[i][3], comma = false));
         if (i < coords.length - 1) {
             json_file.writeln(write_line(tabs = 2, '},'));
         } else {
@@ -335,14 +336,6 @@ function export_sprites(
         }
     }
 
-    // set all layer composite mode to normal
-    if (is_set_composite_mode_to_normal == true) {
-        for (var i = 0; i < dupli_doc.layers.length; i++) {
-            var layer = dupli_doc.layers[i];
-            dupli_doc.activeLayer = layer;
-            layer.blendMode = BlendMode.NORMAL;
-        }
-    }
 
     var target_layers = get_target_layers(dupli_doc.layers);
     for (var i = 0; i < target_layers.length; i++) {
@@ -365,6 +358,9 @@ function export_sprites(
         var tmp_doc = app.activeDocument;
         var tile_size = [1, 1];
         var tmp_doc = app.documents.add(dupli_doc.width, dupli_doc.height, dupli_doc.resolution, layer_name, NewDocumentMode.RGB, DocumentFill.TRANSPARENT);
+
+        var composite_mode = "" + layer.blendMode;
+        composite_mode = composite_mode.replace("BlendMode.", "");
 
         // duplicate layer into new doc and crop to layerbounds with margin
         app.activeDocument = dupli_doc;
@@ -484,11 +480,20 @@ function export_sprites(
             }
         }
 
+        // set all layer composite mode to normal
+        if (is_set_composite_mode_to_normal == true) {
+            for (var j = 0; j < tmp_doc.layers.length; j++) {
+                var layer = tmp_doc.layers[j];
+                tmp_doc.activeLayer = layer;
+                layer.blendMode = BlendMode.NORMAL;
+            }
+        }
+
         // do save stuff
         tmp_doc.exportDocument(File(export_path + "/sprites/" + layer_name + ".png"), ExportType.SAVEFORWEB, options);
 
         // store coords
-        coords.push([layer_name + ".png", layer_pos, tile_size]);
+        coords.push([layer_name + ".png", layer_pos, tile_size, composite_mode]);
 
         // close tmp doc again
         tmp_doc.close(SaveOptions.DONOTSAVECHANGES);
