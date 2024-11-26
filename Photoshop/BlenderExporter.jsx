@@ -345,6 +345,49 @@ function export_sprites(
     is_set_composite_mode_to_normal,
     is_omit_layer_name_if_only_one
 ) {
+    // check
+    if (export_path == "") {
+        alert("Please select a folder to export the sprites.");
+        return;
+    }
+    if (export_name == "") {
+        alert("Please enter a name for the export.");
+        return;
+    }
+
+    var layers = get_target_layers(doc.layers);
+    if (layers.length == 0) {
+        alert("No layers were found to export.");
+        return;
+    }
+    var unique_layer_names = {};
+    for (var i = 0; i < layers.length; i++) {
+        var layer = layers[i];
+        var layer_name = layer.name;
+        if (is_prepending_layerset_name == true)
+            layer_name = process_prepending_layerset_name(layer, layer_name, is_omit_layer_name_if_only_one);
+        if (is_reorder_layerset_name == true)
+            layer_name = process_reorder_layerset_name(layer_name);
+
+        if (unique_layer_names[layer_name] == undefined) {
+            unique_layer_names[layer_name] = 1;
+        } else {
+            unique_layer_names[layer_name] += 1;
+        }
+    }
+    var duplicated_layer_names = [];
+    for (var key in unique_layer_names) {
+        if (unique_layer_names[key] > 1) {
+            duplicated_layer_names.push(key);
+        }
+    }
+    if (duplicated_layer_names.length > 0) {
+        alert("There are multiple layers with the same name:\n\n" + duplicated_layer_names.join("\n") +
+            "\n\n Please rename them to be unique.");
+        return;
+    }
+
+    // initalize
     var init_units = app.preferences.rulerUnits;
     app.preferences.rulerUnits = Units.PIXELS;
     // check if folder exists. if not, create one
