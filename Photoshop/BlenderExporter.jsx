@@ -280,6 +280,57 @@ function get_target_layers(layers) {
     return target_layers;
 }
 
+function process_prepending_layerset_name(layer, layer_name, is_omit_layer_name_if_only_one) {
+    var parent_layersets = get_parent_layersets(layer);
+    for (var j = 0; j < parent_layersets.length; j++) {
+        layer_name = parent_layersets[j].name + "." + layer_name;
+    }
+    if (is_omit_layer_name_if_only_one == true) {
+        // delete latest layer name
+        var layer_name_split = layer_name.split(".");
+        if (layer_name_split.length > 1) {
+            layer_name = layer_name_split.slice(0, -1).join(".");
+        }
+    }
+    return layer_name;
+}
+
+function process_reorder_layerset_name(layer_name) {
+    // check the name contains these patterns and reorder them to the end of the name (name + sequence_number + mirror_name)
+    // - sequence numbers (e.g. "1", "002", "03")
+    // - mirror names (e.g. "left", "right", "L", "R")
+
+    var sequence_regex = new RegExp(/\.?(\d+)/);
+    var sequence_match = layer_name.match(sequence_regex);
+    if (sequence_match != null) {
+        var sequence_number = sequence_match[1];
+        layer_name = layer_name.replace("." + sequence_number, "");
+        // sequence_number must be padded with zeros to 3 digits
+        // layer_name += "." + sequence_number.padStart(3, "0"); // cant use; not supported in extended script (locked at ES3)
+        var seq_length = sequence_number.length;
+        var seq_padding = 3 - seq_length;
+        var seq_padding_str = "";
+        if (seq_padding < 0) {
+            seq_padding = 0;
+        }
+        for (var p = 0; p < seq_padding; p++) {
+            seq_padding_str += "0";
+        }
+        layer_name += "." + seq_padding_str + sequence_number;
+    }
+
+    var mirror_names = ["left", "right", "L", "R", "Left", "Right"];
+    for (var m = 0; m < mirror_names.length; m++) {
+        var mname = mirror_names[m];
+        if (layer_name.indexOf(mname) != -1) {
+            layer_name = layer_name.replace("." + mname, "");
+            layer_name += "." + mname;
+        }
+    }
+
+    return layer_name;
+}
+
 function export_sprites(
     export_path,
     export_name,
@@ -436,53 +487,11 @@ function export_sprites(
         }
 
         // get layerset name that the layer is belonging to
-        parent_layersets = get_parent_layersets(layer);
-        if (is_prepending_layerset_name == true) {
-            for (var j = 0; j < parent_layersets.length; j++) {
-                layer_name = parent_layersets[j].name + "." + layer_name;
-            }
-            if (is_omit_layer_name_if_only_one == true) {
-                // delete latest layer name
-                var layer_name_split = layer_name.split(".");
-                if (layer_name_split.length > 1) {
-                    layer_name = layer_name_split.slice(0, -1).join(".");
-                }
-            }
-        }
+        if (is_prepending_layerset_name == true)
+            layer_name = process_prepending_layerset_name(layer, layer_name, is_omit_layer_name_if_only_one);
 
-        if (is_reorder_layerset_name == true) {
-            // check the name contains these patterns and reorder them to the end of the name (name + sequence_number + mirror_name)
-            // - sequence numbers (e.g. "1", "002", "03")
-            // - mirror names (e.g. "left", "right", "L", "R")
-
-            var sequence_regex = new RegExp(/\.?(\d+)/);
-            var sequence_match = layer_name.match(sequence_regex);
-            if (sequence_match != null) {
-                var sequence_number = sequence_match[1];
-                layer_name = layer_name.replace("." + sequence_number, "");
-                // sequence_number must be padded with zeros to 3 digits
-                // layer_name += "." + sequence_number.padStart(3, "0"); // cant use; not supported in extended script (locked at ES3)
-                var seq_length = sequence_number.length;
-                var seq_padding = 3 - seq_length;
-                var seq_padding_str = "";
-                if (seq_padding < 0) {
-                    seq_padding = 0;
-                }
-                for (var p = 0; p < seq_padding; p++) {
-                    seq_padding_str += "0";
-                }
-                layer_name += "." + seq_padding_str + sequence_number;
-            }
-
-            var mirror_names = ["left", "right", "L", "R", "Left", "Right"];
-            for (var m = 0; m < mirror_names.length; m++) {
-                var mname = mirror_names[m];
-                if (layer_name.indexOf(mname) != -1) {
-                    layer_name = layer_name.replace("." + mname, "");
-                    layer_name += "." + mname;
-                }
-            }
-        }
+        if (is_reorder_layerset_name == true)
+            layer_name = process_reorder_layerset_name(layer_name);
 
         // do save stuff
         tmp_doc.exportDocument(File(export_path + "/sprites/" + layer_name + ".png"), ExportType.SAVEFORWEB, options);
