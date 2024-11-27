@@ -1,11 +1,11 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "b86ae1b02c558daa3f9e3919a6c509c294894aa38104c27a888acfad60b06aae"
+            "sha256": "7e272339f40f332f39f5212281b325172de9457ae11f3b7f34419b6d7e55e365"
         },
         "pipfile-spec": 6,
         "requires": {
-            "python_version": "3.10.8"
+            "python_version": "3.11.9"
         },
         "sources": [
             {
@@ -18,11 +18,12 @@
     "default": {
         "fake-bpy-module-latest": {
             "hashes": [
-                "sha256:013c551d2e4457a6e3f6facd4e2f9216626ed9c901e6dec344e17369f29f7645",
-                "sha256:7ab864cf2ddf07b1d7219b8bc80a8921e619eb2efb96a08662b78c56cf7b6fc1"
+                "sha256:100c89136a925e8ba3c8fd34fff6a424504ca1083d8db926385c08f36c00f3fa",
+                "sha256:efae614053deee443ec3c1b64f76a56e67002b37d634729c7d74d018bd7986b4"
             ],
             "index": "pypi",
-            "version": "==20231121"
+            "markers": "python_version >= '3.8'",
+            "version": "==20241127"
         }
     },
     "develop": {}
