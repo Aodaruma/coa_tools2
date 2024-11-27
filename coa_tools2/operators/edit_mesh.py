@@ -1738,7 +1738,7 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
                 self.draw_coords(
                     coords=vecs,
                     color=[1, 0.7, 0.5, 1.0],
-                    draw_type=CONSTANTS.DRAW_LINE_STRIP,
+                    draw_type=CONSTANTS.DRAW_LINE_LOOP,
                     line_width=2,
                 )
 
