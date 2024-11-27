@@ -1662,32 +1662,45 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
         point_size=None,
     ):  # draw_types -> LINE_STRIP, LINES, POINTS
         if functions.b_version_bigger_than((4, 0, 0)):
-            if draw_type == CONSTANTS.DRAW_LINES:
-                draw_type = "LINES_ADJ"
-            elif draw_type == CONSTANTS.DRAW_LINE_STRIP:
-                draw_type = "LINES"
-            shader = gpu.shader.from_builtin("UNIFORM_COLOR")
-            batch = batch_for_shader(shader, draw_type, {"pos": coords})
-            shader.bind()
-            shader.uniform_float("color", (1, 1, 0, 1))
-            batch.draw(shader)
-            pass
+            gpu.state.blend_set("ALPHA")
+            if shader_type == CONSTANTS.SHADER_2D_UNIFORM_COLOR:
+                shader_type = CONSTANTS.SHADER_UNIFORM_COLOR
+            elif (
+                shader_type == CONSTANTS.SHADER_3D_SMOOTH_COLOR
+                or shader_type == CONSTANTS.SHADER_2D_SMOOTH_COLOR
+            ):
+                shader_type = CONSTANTS.SHADER_SNMOOTH_COLOR
         else:
+            # will be deprecated bgl
             bgl.glLineWidth(line_width)
             if point_size != None:
                 bgl.glPointSize(point_size)
             bgl.glEnable(bgl.GL_BLEND)
             bgl.glEnable(bgl.GL_LINE_SMOOTH)
 
-            shader = gpu.shader.from_builtin(shader_type)
-            batch = batch_for_shader(shader, draw_type, {"pos": coords})
-            shader.bind()
+        shader = gpu.shader.from_builtin(shader_type)
+        content = {"pos": coords}
+        if shader_type not in [
+            CONSTANTS.SHADER_2D_UNIFORM_COLOR,
+            CONSTANTS.SHADER_UNIFORM_COLOR,
+        ]:
+            content["color"] = color
+        batch = batch_for_shader(shader, draw_type, content)
+        shader.bind()
+        if shader_type in [
+            CONSTANTS.SHADER_2D_UNIFORM_COLOR,
+            CONSTANTS.SHADER_UNIFORM_COLOR,
+        ]:
             shader.uniform_float("color", color)
-            batch.draw(shader)
+        batch.draw(shader)
 
+        if functions.b_version_bigger_than((4, 0, 0)):
+            gpu.state.blend_set("NONE")
+        else:
+            # will be deprecated bgl
             bgl.glDisable(bgl.GL_BLEND)
             bgl.glDisable(bgl.GL_LINE_SMOOTH)
-            return shader
+        return shader
 
     def coord_3d_to_2d(self, coord):
         region = bpy.context.region
