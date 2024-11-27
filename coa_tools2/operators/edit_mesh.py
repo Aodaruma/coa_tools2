@@ -879,7 +879,8 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
                 # @ self.limit_cursor_by_bounds(
                 #     context, context.active_object.matrix_world @ vert.co
                 # )
-                @ context.active_object.matrix_world @ vert.co
+                @ context.active_object.matrix_world
+                @ vert.co
             )
         bmesh.update_edit_mesh(context.active_object.data)
 
@@ -1660,21 +1661,33 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
         line_width=2,
         point_size=None,
     ):  # draw_types -> LINE_STRIP, LINES, POINTS
-        bgl.glLineWidth(line_width)
-        if point_size != None:
-            bgl.glPointSize(point_size)
-        bgl.glEnable(bgl.GL_BLEND)
-        bgl.glEnable(bgl.GL_LINE_SMOOTH)
+        if functions.b_version_bigger_than((4, 0, 0)):
+            if draw_type == CONSTANTS.DRAW_LINES:
+                draw_type = "LINES_ADJ"
+            elif draw_type == CONSTANTS.DRAW_LINE_STRIP:
+                draw_type = "LINES"
+            shader = gpu.shader.from_builtin("UNIFORM_COLOR")
+            batch = batch_for_shader(shader, draw_type, {"pos": coords})
+            shader.bind()
+            shader.uniform_float("color", (1, 1, 0, 1))
+            batch.draw(shader)
+            pass
+        else:
+            bgl.glLineWidth(line_width)
+            if point_size != None:
+                bgl.glPointSize(point_size)
+            bgl.glEnable(bgl.GL_BLEND)
+            bgl.glEnable(bgl.GL_LINE_SMOOTH)
 
-        shader = gpu.shader.from_builtin(shader_type)
-        batch = batch_for_shader(shader, draw_type, {"pos": coords})
-        shader.bind()
-        shader.uniform_float("color", color)
-        batch.draw(shader)
+            shader = gpu.shader.from_builtin(shader_type)
+            batch = batch_for_shader(shader, draw_type, {"pos": coords})
+            shader.bind()
+            shader.uniform_float("color", color)
+            batch.draw(shader)
 
-        bgl.glDisable(bgl.GL_BLEND)
-        bgl.glDisable(bgl.GL_LINE_SMOOTH)
-        return shader
+            bgl.glDisable(bgl.GL_BLEND)
+            bgl.glDisable(bgl.GL_LINE_SMOOTH)
+            return shader
 
     def coord_3d_to_2d(self, coord):
         region = bpy.context.region
@@ -1729,7 +1742,8 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
                     # bgl.glLineWidth(2)
 
                     if self.selected_vert_coord != None:
-                        bgl.glEnable(bgl.GL_LINE_SMOOTH)
+                        if not functions.b_version_bigger_than((4, 0, 0)):
+                            bgl.glEnable(bgl.GL_LINE_SMOOTH)
                         vertex_vec = self.selected_vert_coord + y_offset
                         if self.point_type == "VERT":
                             color = green
