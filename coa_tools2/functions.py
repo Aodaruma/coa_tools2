@@ -680,13 +680,20 @@ def set_view(scene, mode):
                             override["screen"] = screen
                             override["space_data"] = active_space_data
                             override["area"] = area
-
-                            bpy.ops.view3d.view_axis(
-                                override,
-                                type="FRONT",
-                                align_active=False,
-                                relative=False,
-                            )
+                            if b_version_bigger_than((3, 2, 0)):
+                                # with bpy.context.temp_override(**override):
+                                bpy.ops.view3d.view_axis(
+                                    type="FRONT",
+                                    align_active=False,
+                                    relative=False,
+                                )
+                            else:
+                                bpy.ops.view3d.view_axis(
+                                    override,
+                                    type="FRONT",
+                                    align_active=False,
+                                    relative=False,
+                                )
 
     elif mode == "3D":
         for screen in bpy.data.screens:
