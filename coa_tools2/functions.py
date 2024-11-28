@@ -693,7 +693,9 @@ def set_view(scene, mode):
                                 )
                             else:
                                 bpy.ops.view3d.view_axis(
-                                    type="FRONT", align_active=False, relative=False
+                                    type="FRONT",
+                                    align_active=False,
+                                    relative=False,
                                 )
 
     elif mode == "3D":
