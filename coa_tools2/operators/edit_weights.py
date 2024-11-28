@@ -19,7 +19,6 @@ Created by Aodaruma
 """
 
 import bpy
-import bgl
 import gpu
 from gpu_extras.batch import batch_for_shader
 import bpy_extras
@@ -106,8 +105,12 @@ class COATOOLS2_OT_EditWeights(bpy.types.Operator):
         armature = get_armature(get_sprite_object(obj))
         armature.hide_viewport = False
         bpy.ops.object.mode_set(mode="OBJECT")
-        for i, bone_layer in enumerate(BONE_LAYERS):
-            armature.data.layers[i] = bone_layer
+        if b_version_smaller_than((4, 0, 0)):
+            for i, bone_layer in enumerate(BONE_LAYERS):
+                armature.data.layers[i] = bone_layer
+        else:
+            for i, visible in enumerate(BONE_LAYERS):
+                armature.data.collections[i].is_visible = visible
 
         for name in self.selected_object_names:
             obj = bpy.data.objects[name]
@@ -234,9 +237,14 @@ class COATOOLS2_OT_EditWeights(bpy.types.Operator):
             self.armature_set_mode(context, "POSE", True)
             global BONE_LAYERS
             BONE_LAYERS = []
-            for i, bone_layer in enumerate(armature.data.layers):
-                BONE_LAYERS.append(bool(bone_layer))
-                armature.data.layers[i] = True
+            if b_version_smaller_than((4, 0, 0)):
+                for i, bone_layer in enumerate(armature.data.layers):
+                    BONE_LAYERS.append(bool(bone_layer))
+                    armature.data.layers[i] = True
+            else:
+                for collection in armature.data.collections:
+                    BONE_LAYERS.append(collection.is_visible)
+                    collection.is_visible = True
             self.select_bone()
 
         sprite = context.active_object
@@ -256,7 +264,6 @@ class COATOOLS2_OT_EditWeights(bpy.types.Operator):
         bpy.ops.view3d.view_selected()
 
         ### set correct viewport shading
-        # bpy.context.space_data.shading.type = 'RENDERED'
         for area in bpy.context.screen.areas:
             if area.type == "VIEW_3D":
                 area.spaces[0].overlay.show_paint_wire = True
@@ -265,8 +272,6 @@ class COATOOLS2_OT_EditWeights(bpy.types.Operator):
         bpy.ops.object.mode_set(mode="WEIGHT_PAINT")
 
         ### start draw call
-        # args = ()
-        # self.draw_handler = bpy.types.SpaceView3D.draw_handler_add(self.draw_callback_px, args, "WINDOW", "POST_PIXEL")
         args = ()
         self.draw_handler = bpy.types.SpaceView3D.draw_handler_add(
             self.draw_callback_px, args, "WINDOW", "POST_PIXEL"
@@ -284,8 +289,8 @@ class COATOOLS2_OT_EditWeights(bpy.types.Operator):
         coords=[],
         color=[],
         indices=[],
-        draw_type="LINE_STRIP",
-        shader_type="2D_UNIFORM_COLOR",
+        draw_type="TRIS",
+        shader_type="UNIFORM_COLOR",
         line_width=2,
         point_size=None,
     ):  # draw_types -> LINE_STRIP, LINES, POINTS
@@ -302,13 +307,8 @@ class COATOOLS2_OT_EditWeights(bpy.types.Operator):
             )
         else:
             batch = batch_for_shader(shader, draw_type, {"pos": coords})
-        shader.bind()
         shader.uniform_float("color", color)
         batch.draw(shader)
-
-        bgl.glDisable(bgl.GL_BLEND)
-        bgl.glDisable(bgl.GL_LINE_SMOOTH)
-        return shader
 
     def draw_callback_px(self):
         obj = bpy.context.active_object
@@ -365,11 +365,12 @@ class COATOOLS2_OT_EditWeights(bpy.types.Operator):
                         coords.append(Vector((x, y)))
                         if i <= detail:
                             indices.append([0, i, i + 1])
-                    self.draw_coords(
-                        coords=coords,
-                        indices=indices,
-                        color=color,
-                        draw_type=CONSTANTS.DRAW_TRIS,
-                    )
+                    if weight > 0.0000001:
+                        self.draw_coords(
+                            coords=coords,
+                            indices=indices,
+                            color=color,
+                            draw_type=CONSTANTS.DRAW_TRIS,
+                        )
 
                     # self.draw_coords(coords=[vert_2d], color=color, draw_type=CONSTANTS.DRAW_POINTS, point_size=8)
