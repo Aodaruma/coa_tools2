@@ -50,13 +50,14 @@ def get_active_tool(mode):  # "EDIT_MESH", "EDIT_ARMATURE", "OBJECT"
 def set_active_tool(self, context, tool_name):
     for area in context.screen.areas:
         if area.type == "VIEW_3D":
-            override = bpy.context.copy()
-            override["space_data"] = area.spaces[0]
-            override["area"] = area
             if b_version_smaller_than((4, 0, 0)):
+                override = bpy.context.copy()
+                override["space_data"] = area.spaces[0]
+                override["area"] = area
                 bpy.ops.wm.tool_set_by_id(override, name=tool_name)
             else:
-                bpy.ops.wm.tool_set_by_id(name=tool_name)
+                with bpy.context.temp_override(space_data=area.spaces[0], area=area):
+                    bpy.ops.wm.tool_set_by_id(name=tool_name)
 
 
 def link_object(context, obj):
@@ -611,13 +612,15 @@ def set_local_view(local):
                     if b_version_smaller_than((4, 0, 0)):
                         bpy.ops.view3d.localview(override)
                     else:
-                        bpy.ops.view3d.localview()
+                        with bpy.context.temp_override(area=area):
+                            bpy.ops.view3d.localview()
             else:
                 if area.spaces.active.local_view != None:
                     if b_version_smaller_than((4, 0, 0)):
                         bpy.ops.view3d.localview(override)
                     else:
-                        bpy.ops.view3d.localview()
+                        with bpy.context.temp_override(area=area):
+                            bpy.ops.view3d.localview()
 
 
 def actions_callback(self, context):
@@ -674,22 +677,22 @@ def set_view(scene, mode):
                     active_space_data = area.spaces[0]
                     if active_space_data != None:
                         if hasattr(active_space_data, "region_3d"):
-                            region_3d = active_space_data.region_3d
-                            region_3d.view_perspective = "ORTHO"
-                            override = bpy.context.copy()
-                            override["screen"] = screen
-                            override["space_data"] = active_space_data
-                            override["area"] = area
-                            if b_version_bigger_than((3, 2, 0)):
-                                # with bpy.context.temp_override(**override):
+                            if b_version_smaller_than((4, 0, 0)):
+                                region_3d = active_space_data.region_3d
+                                region_3d.view_perspective = "ORTHO"
+                                override = bpy.context.copy()
+                                override["screen"] = screen
+                                override["space_data"] = active_space_data
+                                override["area"] = area
+
                                 bpy.ops.view3d.view_axis(
+                                    override,
                                     type="FRONT",
                                     align_active=False,
                                     relative=False,
                                 )
                             else:
                                 bpy.ops.view3d.view_axis(
-                                    override,
                                     type="FRONT",
                                     align_active=False,
                                     relative=False,
@@ -716,7 +719,15 @@ def assign_tex_to_uv(image, uv):
         uv.data[i].image = image
 
 
-def set_bone_group(self, armature, pose_bone, group="ik_group", theme="THEME09"):
+def set_bone_group(
+    self,
+    armature,
+    pose_bone,
+    group="ik_group",
+    theme="THEME09",
+    visible=True,
+    exclusive=False,
+):
     new_group = None
     if b_version_smaller_than((4, 0, 0)):
         if group not in armature.pose.bone_groups:
@@ -733,6 +744,10 @@ def set_bone_group(self, armature, pose_bone, group="ik_group", theme="THEME09")
             new_collection = armature.pose.bone_groups[group]
         new_collection.assign(pose_bone.bone)
         pose_bone.bone.color.pallete = theme
+        new_collection.is_visible = visible
+        if exclusive:
+            pose_bone.bone.collections.clear()
+        new_collection.assign(pose_bone.bone)
 
 
 last_sprite_object = None
