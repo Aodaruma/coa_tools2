@@ -1198,7 +1198,9 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
 
                 ### check if mouse is in 3d View
                 coord = mathutils.Vector((event.mouse_region_x, event.mouse_region_y))
-                view_3d_width = bpy.context.area.width - bpy.context.area.regions[5].width
+                view_3d_width = (
+                    bpy.context.area.width - bpy.context.area.regions[5].width
+                )
                 tools_width = bpy.context.area.regions[4].width
                 if coord[0] < tools_width or coord[0] > view_3d_width:
                     self.inside_area = False
@@ -1217,7 +1219,7 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
                         else:
                             bpy.context.window.cursor_set("PAINT_BRUSH")
                 if not self.inside_area:
-                    return {'PASS_THROUGH'}
+                    return {"PASS_THROUGH"}
                 ### Set Mouse click
                 if (
                     (event.value == "PRESS" or event.value == "CLICK")
@@ -1764,7 +1766,11 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
                         p2 = self.coord_3d_to_2d(
                             obj.matrix_world @ self.verts_edges_data[1] + y_offset
                         )
-                        self.draw_coords(coords=[p1, p2], color=color draw_type=CONSTANTS.DRAW_LINE_STRIP)
+                        self.draw_coords(
+                            coords=[p1, p2],
+                            color=color,
+                            draw_type=CONSTANTS.DRAW_LINE_STRIP,
+                        )
                     else:
                         color = yellow
 
