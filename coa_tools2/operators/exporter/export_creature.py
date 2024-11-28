@@ -1044,8 +1044,8 @@ class COATOOLS2_OT_CreatureExport(bpy.types.Operator):
             img_atlas,
             self.export_path_abs,
             self.project_name,
-            self.scene.coa_tools.image_format,
-            self.scene.coa_tools.image_quality,
+            self.scene.coa_tools2.image_format,
+            self.scene.coa_tools2.image_quality,
         )
 
         context.window_manager.progress_end()
