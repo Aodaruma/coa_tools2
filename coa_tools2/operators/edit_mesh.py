@@ -1757,7 +1757,7 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
                     vertex_vec_new = self.snapped_vert_coord + y_offset
 
                     color = green
-                    if self.selected_vert_coord != None
+                    if self.selected_vert_coord != None:
                         if not functions.b_version_bigger_than((4, 0, 0)):
                             bgl.glEnable(bgl.GL_LINE_SMOOTH)
                         vertex_vec = self.selected_vert_coord + y_offset
