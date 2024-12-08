@@ -201,7 +201,9 @@ class COATOOLS2_OT_QuickArmature(bpy.types.Operator):
             # amt.draw_type = "BBONE"
             return armature
 
-    def create_default_bone_group(self, armature):
+    def create_default_bone_group(
+        self, armature: bpy.types.Object, bone: bpy.types.Bone
+    ):
         default_bone_group = None
         if functions.b_version_smaller_than((4, 0, 0)):
             if "default_bones" not in armature.pose.bone_groups:
@@ -216,6 +218,8 @@ class COATOOLS2_OT_QuickArmature(bpy.types.Operator):
                 # default_bone_group.color_set = "THEME08"
             else:
                 default_bone_group = armature.collections["default_bones"]
+            default_bone_group.assign(bone)
+            bone.color.palette = "THEME08"
         return default_bone_group
 
     def create_bones(self, context, armature):
@@ -260,9 +264,7 @@ class COATOOLS2_OT_QuickArmature(bpy.types.Operator):
             bone.select_tail = True
             armature.data.edit_bones.active = bone
             self.current_bone = bone
-            self.create_default_bone_group(armature)
-            if not functions.b_version_smaller_than((4, 0, 0)):
-                bone.color.palette = "THEME08"
+            self.create_default_bone_group(armature, bone)
 
     def drag_bone(self, context, event, bone=None):
         ### math.atan2(0.5, 0.5)*180/math.pi
@@ -548,8 +550,8 @@ class COATOOLS2_OT_QuickArmature(bpy.types.Operator):
         if context.active_object.type == "ARMATURE":
             bpy.ops.object.mode_set(mode="POSE")
 
-            for pose_bone in context.active_object.pose.bones:
-                if functions.b_version_smaller_than((4, 0, 0)):
+            if functions.b_version_smaller_than((4, 0, 0)):
+                for pose_bone in context.active_object.pose.bones:
                     if (
                         "default_bones" in context.active_object.pose.bone_groups
                         and pose_bone.bone_group == None
@@ -557,15 +559,15 @@ class COATOOLS2_OT_QuickArmature(bpy.types.Operator):
                         pose_bone.bone_group = context.active_object.pose.bone_groups[
                             "default_bones"
                         ]
-                else:
+            else:
+                for bone in context.active_object.data.bones:
                     armature: bpy.types.Armature = context.active_object.data
                     if (
                         "default_bones" in [c.name for c in armature.collections]
-                        and pose_bone.bone.collections == None
+                        and bone.bone.collections == None
                     ):
-                        pose_bone.bone.collections = (
-                            context.active_object.data.collections["default_bones"]
-                        )
+                        armature.collections["default_bones"].assign(bone)
+                    bone.color.palette = "THEME08"
 
         # lock_sprites(context,get_sprite_object(context.active_object),get_sprite_object(context.active_object).lock_sprites)
         self.sprite_object = bpy.data.objects[self.sprite_object_name]
@@ -827,8 +829,19 @@ class COATOOLS2_OT_SetIK(bpy.types.Operator):
             copy_rot_const = bone.constraints.new("COPY_ROTATION")
             copy_rot_const.target = context.active_object
             copy_rot_const.subtarget = ik_target_name
-            context.active_object.data.bones[bone.name].layers[1] = True
-            context.active_object.data.bones[bone.name].layers[0] = False
+            if functions.b_version_smaller_than((4, 0, 0)):
+                context.active_object.data.bones[bone.name].layers[1] = True
+                context.active_object.data.bones[bone.name].layers[0] = False
+            else:
+                functions.set_bone_group(
+                    self,
+                    context.active_object,
+                    bone,
+                    "hidden_bones",
+                    "DEFAULT",
+                    False,
+                    True,
+                )
 
         bpy.ops.ed.undo_push(message="Set Ik")
         return {"FINISHED"}

@@ -263,6 +263,7 @@ def register():
         bpy.utils.register_class(cls)
 
     # register tools
+    # deleted in upstream/master, need to be validated whether it is still needed
     bpy.utils.register_tool(
         edit_mesh.COATOOLS2_TO_DrawPolygon,
         after={"builtin.cursor"},
