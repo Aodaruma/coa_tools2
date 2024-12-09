@@ -281,6 +281,57 @@ function get_target_layers(layers) {
     return target_layers;
 }
 
+function process_prepending_layerset_name(layer, layer_name, is_omit_layer_name_if_only_one) {
+    var parent_layersets = get_parent_layersets(layer);
+    for (var j = 0; j < parent_layersets.length; j++) {
+        layer_name = parent_layersets[j].name + "." + layer_name;
+    }
+    if (is_omit_layer_name_if_only_one == true) {
+        // delete latest layer name
+        var layer_name_split = layer_name.split(".");
+        if (layer_name_split.length > 1) {
+            layer_name = layer_name_split.slice(0, -1).join(".");
+        }
+    }
+    return layer_name;
+}
+
+function process_reorder_layerset_name(layer_name) {
+    // check the name contains these patterns and reorder them to the end of the name (name + sequence_number + mirror_name)
+    // - sequence numbers (e.g. "1", "002", "03")
+    // - mirror names (e.g. "left", "right", "L", "R")
+
+    var sequence_regex = new RegExp(/\.?(\d+)/);
+    var sequence_match = layer_name.match(sequence_regex);
+    if (sequence_match != null) {
+        var sequence_number = sequence_match[1];
+        layer_name = layer_name.replace("." + sequence_number, "");
+        // sequence_number must be padded with zeros to 3 digits
+        // layer_name += "." + sequence_number.padStart(3, "0"); // cant use; not supported in extended script (locked at ES3)
+        var seq_length = sequence_number.length;
+        var seq_padding = 3 - seq_length;
+        var seq_padding_str = "";
+        if (seq_padding < 0) {
+            seq_padding = 0;
+        }
+        for (var p = 0; p < seq_padding; p++) {
+            seq_padding_str += "0";
+        }
+        layer_name += "." + seq_padding_str + sequence_number;
+    }
+
+    var mirror_names = ["left", "right", "L", "R", "Left", "Right"];
+    for (var m = 0; m < mirror_names.length; m++) {
+        var mname = mirror_names[m];
+        if (layer_name.indexOf(mname) != -1) {
+            layer_name = layer_name.replace("." + mname, "");
+            layer_name += "." + mname;
+        }
+    }
+
+    return layer_name;
+}
+
 function export_sprites(
     export_path,
     export_name,
@@ -295,6 +346,49 @@ function export_sprites(
     is_set_composite_mode_to_normal,
     is_omit_layer_name_if_only_one
 ) {
+    // check
+    if (export_path == "") {
+        alert("Please select a folder to export the sprites.");
+        return;
+    }
+    if (export_name == "") {
+        alert("Please enter a name for the export.");
+        return;
+    }
+
+    var layers = get_target_layers(doc.layers);
+    if (layers.length == 0) {
+        alert("No layers were found to export.");
+        return;
+    }
+    var unique_layer_names = {};
+    for (var i = 0; i < layers.length; i++) {
+        var layer = layers[i];
+        var layer_name = layer.name;
+        if (is_prepending_layerset_name == true)
+            layer_name = process_prepending_layerset_name(layer, layer_name, is_omit_layer_name_if_only_one);
+        if (is_reorder_layerset_name == true)
+            layer_name = process_reorder_layerset_name(layer_name);
+
+        if (unique_layer_names[layer_name] == undefined) {
+            unique_layer_names[layer_name] = 1;
+        } else {
+            unique_layer_names[layer_name] += 1;
+        }
+    }
+    var duplicated_layer_names = [];
+    for (var key in unique_layer_names) {
+        if (unique_layer_names[key] > 1) {
+            duplicated_layer_names.push(key);
+        }
+    }
+    if (duplicated_layer_names.length > 0) {
+        alert("There are multiple layers with the same name:\n\n" + duplicated_layer_names.join("\n") +
+            "\n\n Please rename them to be unique.");
+        return;
+    }
+
+    // initalize
     var init_units = app.preferences.rulerUnits;
     app.preferences.rulerUnits = Units.PIXELS;
     // check if folder exists. if not, create one
@@ -432,53 +526,11 @@ function export_sprites(
         }
 
         // get layerset name that the layer is belonging to
-        parent_layersets = get_parent_layersets(layer);
-        if (is_prepending_layerset_name == true) {
-            for (var j = 0; j < parent_layersets.length; j++) {
-                layer_name = parent_layersets[j].name + "." + layer_name;
-            }
-            if (is_omit_layer_name_if_only_one == true) {
-                // delete latest layer name
-                var layer_name_split = layer_name.split(".");
-                if (layer_name_split.length > 1) {
-                    layer_name = layer_name_split.slice(0, -1).join(".");
-                }
-            }
-        }
+        if (is_prepending_layerset_name == true)
+            layer_name = process_prepending_layerset_name(layer, layer_name, is_omit_layer_name_if_only_one);
 
-        if (is_reorder_layerset_name == true) {
-            // check the name contains these patterns and reorder them to the end of the name (name + sequence_number + mirror_name)
-            // - sequence numbers (e.g. "1", "002", "03")
-            // - mirror names (e.g. "left", "right", "L", "R")
-
-            var sequence_regex = new RegExp(/\.?(\d+)/);
-            var sequence_match = layer_name.match(sequence_regex);
-            if (sequence_match != null) {
-                var sequence_number = sequence_match[1];
-                layer_name = layer_name.replace("." + sequence_number, "");
-                // sequence_number must be padded with zeros to 3 digits
-                // layer_name += "." + sequence_number.padStart(3, "0"); // cant use; not supported in extended script (locked at ES3)
-                var seq_length = sequence_number.length;
-                var seq_padding = 3 - seq_length;
-                var seq_padding_str = "";
-                if (seq_padding < 0) {
-                    seq_padding = 0;
-                }
-                for (var p = 0; p < seq_padding; p++) {
-                    seq_padding_str += "0";
-                }
-                layer_name += "." + seq_padding_str + sequence_number;
-            }
-
-            var mirror_names = ["left", "right", "L", "R", "Left", "Right"];
-            for (var m = 0; m < mirror_names.length; m++) {
-                var mname = mirror_names[m];
-                if (layer_name.indexOf(mname) != -1) {
-                    layer_name = layer_name.replace("." + mname, "");
-                    layer_name += "." + mname;
-                }
-            }
-        }
+        if (is_reorder_layerset_name == true)
+            layer_name = process_reorder_layerset_name(layer_name);
 
         // set all layer composite mode to normal
         if (is_set_composite_mode_to_normal == true) {
