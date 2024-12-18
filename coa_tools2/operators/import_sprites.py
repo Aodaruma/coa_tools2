@@ -210,9 +210,13 @@ class COATOOLS2_OT_CreateMaterialGroup(bpy.types.Operator):
             modulate_node.outputs["Color"], principled_node.inputs["Base Color"]
         )
         group_tree.links.new(
-            modulate_node.outputs["Color"], principled_node.inputs["Emission"]
+            modulate_node.outputs["Color"],
+            principled_node.inputs["Emission"]
+            if functions.b_version_smaller_than((4, 0, 0))
+            else principled_node.inputs["Emission Color"],
         )
 
+        group_tree.links.new(input_node.outputs["Texture Alpha"], alpha_node.inputs[0])
         group_tree.links.new(alpha_node.outputs[0], principled_node.inputs["Alpha"])
         group_tree.links.new(
             principled_node.outputs["BSDF"], output_node.inputs["BSDF"]
@@ -224,7 +228,6 @@ class COATOOLS2_OT_CreateMaterialGroup(bpy.types.Operator):
             principled_node.inputs["Roughness"].default_value = 0
             principled_node.inputs["Clearcoat Roughness"].default_value = 0
         else:
-            principled_node.inputs["Specular IOR Level"].default_value = 0
             principled_node.inputs["Roughness"].default_value = 0
             principled_node.inputs["Coat Roughness"].default_value = 0
             principled_node.inputs["Emission Strength"].default_value = 1
