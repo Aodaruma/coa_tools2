@@ -3,7 +3,7 @@
 var doc = app.activeDocument;
 var layers = doc.layers;
 var coords = [];
-var exporter_version = "v2.0.0";
+var exporter_version = "v2.0.1";
 
 //Save Options for PNGs
 var options = new ExportOptionsSaveForWeb();
