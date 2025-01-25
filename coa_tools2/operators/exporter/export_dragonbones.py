@@ -601,13 +601,10 @@ def get_skin_slot(self, sprite, armature, scale, slot_data=None):
     for area in context.screen.areas:
         if area.type == "VIEW_3D":
             for region in area.regions:
-                override = context.copy()
-                override["object"] = sprite
-                override["edit_object"] = sprite
-                # bpy.ops.object.vertex_group_clean(override, group_select_mode='BONE_DEFORM', keep_single=True)
-                bpy.ops.object.vertex_group_clean(
-                    override, group_select_mode="ALL", keep_single=True
-                )
+                with bpy.context.temp_override(object=sprite, edit_object=sprite):
+                    bpy.ops.object.vertex_group_clean(
+                        group_select_mode="ALL", keep_single=True
+                    )
     ###
 
     global tmp_sprites
@@ -1208,7 +1205,9 @@ def get_animation_data(self, sprite_object, armature, armature_orig):
                             slot_keyframe_duration[slot.name]["z_order_duration"] = 0
 
                         if property_key_on_frame(
-                            slot, ["coa_tools2.alpha", "coa_tools2.modulate_color"], frame
+                            slot,
+                            ["coa_tools2.alpha", "coa_tools2.modulate_color"],
+                            frame,
                         ):
                             keyframe_data = {}
                             keyframe_data["duration"] = slot_keyframe_duration[
@@ -1306,20 +1305,16 @@ def get_animation_data(self, sprite_object, armature, armature_orig):
                                             if bake_anim == False
                                             else [0, 0, 1, 1]
                                         )
-                                        keyframe_data_last[
-                                            "x"
-                                        ] = bone_keyframe_duration[bone.name][
-                                            "last_pos"
-                                        ][
-                                            0
-                                        ]
-                                        keyframe_data_last[
-                                            "y"
-                                        ] = bone_keyframe_duration[bone.name][
-                                            "last_pos"
-                                        ][
-                                            1
-                                        ]
+                                        keyframe_data_last["x"] = (
+                                            bone_keyframe_duration[bone.name][
+                                                "last_pos"
+                                            ][0]
+                                        )
+                                        keyframe_data_last["y"] = (
+                                            bone_keyframe_duration[bone.name][
+                                                "last_pos"
+                                            ][1]
+                                        )
                                         anim_data["bone"][j]["translateFrame"].insert(
                                             0, keyframe_data_last
                                         )
@@ -1414,9 +1409,9 @@ def get_animation_data(self, sprite_object, armature, armature_orig):
                                     0, keyframe_data
                                 )
                                 bone_keyframe_duration[bone.name]["rot_duration"] = 0
-                                bone_keyframe_duration[bone.name][
-                                    "last_rot"
-                                ] = keyframe_data["rotate"]
+                                bone_keyframe_duration[bone.name]["last_rot"] = (
+                                    keyframe_data["rotate"]
+                                )
 
                         ### bone scale
                         if (
@@ -1471,20 +1466,16 @@ def get_animation_data(self, sprite_object, armature, armature_orig):
                                             if bake_anim == False
                                             else [0, 0, 1, 1]
                                         )
-                                        keyframe_data_last[
-                                            "x"
-                                        ] = bone_keyframe_duration[bone.name][
-                                            "last_scale"
-                                        ][
-                                            0
-                                        ]
-                                        keyframe_data_last[
-                                            "y"
-                                        ] = bone_keyframe_duration[bone.name][
-                                            "last_scale"
-                                        ][
-                                            1
-                                        ]
+                                        keyframe_data_last["x"] = (
+                                            bone_keyframe_duration[bone.name][
+                                                "last_scale"
+                                            ][0]
+                                        )
+                                        keyframe_data_last["y"] = (
+                                            bone_keyframe_duration[bone.name][
+                                                "last_scale"
+                                            ][1]
+                                        )
                                         anim_data["bone"][j]["scaleFrame"].insert(
                                             0, keyframe_data_last
                                         )
@@ -1554,10 +1545,10 @@ def get_animation_data(self, sprite_object, armature, armature_orig):
                                             - Vector(vert_coords_default[slot.name][i])
                                         )
 
-                                    ffd_data[
-                                        "vertices"
-                                    ] = convert_vertex_data_to_pixel_space(
-                                        verts_relative
+                                    ffd_data["vertices"] = (
+                                        convert_vertex_data_to_pixel_space(
+                                            verts_relative
+                                        )
                                     )
 
                                     if (frame in [0, anim.frame_end]) or (
@@ -1836,6 +1827,14 @@ class COATOOLS2_PT_ExportPanel(bpy.types.Panel):
             subcol.prop(self.scene.coa_tools2, "atlas_resolution_y", text="Y")
         subcol.prop(self.scene.coa_tools2, "atlas_island_margin")
         # subcol.prop(self.scene.coa_tools2, "export_texture_bleed")
+
+        row = subcol.row()
+        row.prop(self.scene.coa_tools2, "image_format", expand=True)
+        if self.scene.coa_tools2.image_format == "WEBP":
+            subcol.prop(
+                self.scene.coa_tools2, "image_quality", text="WebP Quality", slider=True
+            )
+
         subcol.prop(self.scene.coa_tools2, "export_square_atlas")
 
         box_col.label(text="Data Settings:")
@@ -1905,15 +1904,15 @@ def generate_texture_atlas(
             if modifier.name == "coa_base_sprite" and modifier.type == "MASK":
                 if len(dupli_sprite.data.vertices) > 4:
                     modifier.invert_vertex_group = True
-                    override = bpy.context.copy()
-                    override["object"] = dupli_sprite
-                    override["active_object"] = dupli_sprite
-                    if b_version_smaller_than((2, 90, 0)):
-                        bpy.ops.object.modifier_apply(
-                            override, apply_as="DATA", modifier=modifier.name
-                        )
-                    else:
-                        bpy.ops.object.modifier_apply(override, modifier=modifier.name)
+                    with bpy.context.temp_override(
+                        object=dupli_sprite, active_object=dupli_sprite
+                    ):
+                        if b_version_smaller_than((2, 90, 0)):
+                            bpy.ops.object.modifier_apply(
+                                apply_as="DATA", modifier=modifier.name
+                            )
+                        else:
+                            bpy.ops.object.modifier_apply(modifier=modifier.name)
         for modifier in dupli_sprite.modifiers:
             dupli_sprite.modifiers.remove(modifier)
 
@@ -1930,13 +1929,14 @@ def generate_texture_atlas(
             if area.type == "VIEW_3D":
                 for region in area.regions:
                     if region.type == "WINDOW":
-                        override = context.copy()
-                        override["area"] = area
-                        override["edit_object"] = dupli_sprite
-                        override["active_object"] = dupli_sprite
-                        override["object"] = dupli_sprite
-                        override["region"] = region
-                        bpy.ops.object.vertex_group_assign(override)
+                        with bpy.context.temp_override(
+                            area=area,
+                            edict_object=dupli_sprite,
+                            active_object=dupli_sprite,
+                            object=dupli_sprite,
+                            region=region,
+                        ):
+                            bpy.ops.object.vertex_group_assign()
                         break
 
         bpy.ops.object.mode_set(mode="OBJECT")
@@ -1971,16 +1971,16 @@ def generate_texture_atlas(
                 for region in area.regions:
                     if region.type == "WINDOW":
                         override = context.copy()
-                        override["area"] = area
-                        override["edit_object"] = tex_atlas_obj
-                        override["active_object"] = tex_atlas_obj
-                        override["object"] = tex_atlas_obj
-                        override["region"] = region
-                        bpy.ops.object.vertex_group_set_active(
-                            override, group=group.name
-                        )
-                        bpy.ops.mesh.select_all(action="DESELECT")
-                        bpy.ops.object.vertex_group_select(override)
+                        with bpy.context.temp_override(
+                            area=area,
+                            edit_object=tex_atlas_obj,
+                            active_object=tex_atlas_obj,
+                            object=tex_atlas_obj,
+                            region=region,
+                        ):
+                            bpy.ops.object.vertex_group_set_active(group=group.name)
+                            bpy.ops.mesh.select_all(action="DESELECT")
+                            bpy.ops.object.vertex_group_select()
                         break
         bmesh.update_edit_mesh(tex_atlas_obj.data)
         x = 1.0

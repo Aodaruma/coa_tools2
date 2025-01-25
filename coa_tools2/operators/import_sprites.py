@@ -89,38 +89,82 @@ class COATOOLS2_OT_CreateMaterialGroup(bpy.types.Operator):
     def poll(cls, context):
         return True
 
-    def create_sockets(self, group_tree):
-        inputs = []
-        for input_socket in self.input_sockets:
-            inputs.append(input_socket["label"])
-            if input_socket["label"] not in group_tree.inputs:
-                socket = group_tree.inputs.new(
-                    input_socket["type"], input_socket["label"]
-                )
+    def create_sockets(self, group_tree: bpy.types.NodeTree):
+        if functions.b_version_smaller_than((4, 0, 0)):
+            inputs = []
+            for input_socket in self.input_sockets:
+                inputs.append(input_socket["label"])
+                if input_socket["label"] not in group_tree.inputs:
+                    socket = group_tree.inputs.new(
+                        input_socket["type"], input_socket["label"]
+                    )
 
-                if "min_value" in input_socket:
-                    socket.min_value = input_socket["min_value"]
-                if "max_value" in input_socket:
-                    socket.max_value = input_socket["max_value"]
+                    if "min_value" in input_socket:
+                        socket.min_value = input_socket["min_value"]
+                    if "max_value" in input_socket:
+                        socket.max_value = input_socket["max_value"]
 
-        outputs = []
-        for output_socket in self.output_sockets:
-            outputs.append(output_socket["label"])
-            if output_socket["label"] not in group_tree.outputs:
-                socket = group_tree.outputs.new(
-                    output_socket["type"], output_socket["label"]
-                )
-                if "min_value" in output_socket:
-                    socket.min_value = output_socket["min_value"]
-                if "max_value" in output_socket:
-                    socket.max = output_socket["max_value"]
+            outputs = []
+            for output_socket in self.output_sockets:
+                outputs.append(output_socket["label"])
+                if output_socket["label"] not in group_tree.outputs:
+                    socket = group_tree.outputs.new(
+                        output_socket["type"], output_socket["label"]
+                    )
+                    if "min_value" in output_socket:
+                        socket.min_value = output_socket["min_value"]
+                    if "max_value" in output_socket:
+                        socket.max = output_socket["max_value"]
 
-        for socket in group_tree.inputs:
-            if socket.name not in inputs:
-                group_tree.inputs.remove(socket)
-        for socket in group_tree.outputs:
-            if socket.name not in outputs:
-                group_tree.outputs.remove(socket)
+            for socket in group_tree.inputs:
+                if socket.name not in inputs:
+                    group_tree.inputs.remove(socket)
+            for socket in group_tree.outputs:
+                if socket.name not in outputs:
+                    group_tree.outputs.remove(socket)
+        else:
+            inputs = []
+            for input_socket in self.input_sockets:
+                inputs.append(input_socket["label"])
+                found = False
+                for socket in group_tree.interface.items_tree:
+                    if socket.name == input_socket["label"]:
+                        found = True
+                        break
+                if not found:
+                    socket = group_tree.interface.new_socket(
+                        name=input_socket["label"],
+                        in_out="INPUT",
+                        socket_type=input_socket["type"],
+                    )
+
+                    if "min_value" in input_socket:
+                        socket.min_value = input_socket["min_value"]
+                    if "max_value" in input_socket:
+                        socket.max_value = input_socket["max_value"]
+
+            outputs = []
+            for output_socket in self.output_sockets:
+                outputs.append(output_socket["label"])
+                found = False
+                for socket in group_tree.interface.items_tree:
+                    if socket.name == output_socket["label"]:
+                        found = True
+                        break
+                if not found:
+                    socket = group_tree.interface.new_socket(
+                        name=output_socket["label"],
+                        in_out="OUTPUT",
+                        socket_type=output_socket["type"],
+                    )
+                    if "min_value" in output_socket:
+                        socket.min_value = output_socket["min_value"]
+                    if "max_value" in output_socket:
+                        socket.max = output_socket["max_value"]
+
+            for socket in group_tree.interface.items_tree:
+                if socket.name not in inputs and socket.name not in outputs:
+                    group_tree.interface.remove_socket(socket)
 
     def create_coa_material_group(self):
         group_tree = None
@@ -166,7 +210,10 @@ class COATOOLS2_OT_CreateMaterialGroup(bpy.types.Operator):
             modulate_node.outputs["Color"], principled_node.inputs["Base Color"]
         )
         group_tree.links.new(
-            modulate_node.outputs["Color"], principled_node.inputs["Emission"]
+            modulate_node.outputs["Color"],
+            principled_node.inputs["Emission"]
+            if functions.b_version_smaller_than((4, 0, 0))
+            else principled_node.inputs["Emission Color"],
         )
 
         group_tree.links.new(input_node.outputs["Texture Alpha"], alpha_node.inputs[0])
@@ -176,9 +223,14 @@ class COATOOLS2_OT_CreateMaterialGroup(bpy.types.Operator):
         )
 
         # setup principled node
-        principled_node.inputs["Specular"].default_value = 0
-        principled_node.inputs["Roughness"].default_value = 0
-        principled_node.inputs["Clearcoat Roughness"].default_value = 0
+        if functions.b_version_smaller_than((4, 0, 0)):
+            principled_node.inputs["Specular"].default_value = 0
+            principled_node.inputs["Roughness"].default_value = 0
+            principled_node.inputs["Clearcoat Roughness"].default_value = 0
+        else:
+            principled_node.inputs["Roughness"].default_value = 0
+            principled_node.inputs["Coat Roughness"].default_value = 0
+            principled_node.inputs["Emission Strength"].default_value = 1
 
         # position nodes
         input_node.location = [0, 0]

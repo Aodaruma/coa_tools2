@@ -879,7 +879,8 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
                 # @ self.limit_cursor_by_bounds(
                 #     context, context.active_object.matrix_world @ vert.co
                 # )
-                @ context.active_object.matrix_world @ vert.co
+                @ context.active_object.matrix_world
+                @ vert.co
             )
         bmesh.update_edit_mesh(context.active_object.data)
 
@@ -1197,11 +1198,14 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
 
                 ### check if mouse is in 3d View
                 coord = mathutils.Vector((event.mouse_region_x, event.mouse_region_y))
-
-                if coord[0] < 0 or coord[0] > bpy.context.area.width:
+                view_3d_width = (
+                    bpy.context.area.width - bpy.context.area.regions[5].width
+                )
+                tools_width = bpy.context.area.regions[4].width
+                if coord[0] < tools_width or coord[0] > view_3d_width:
                     self.inside_area = False
                     bpy.context.window.cursor_set("DEFAULT")
-                elif coord[1] < 0 or coord[1] > bpy.context.area.height:
+                elif coord[1] < tools_width or coord[1] > bpy.context.area.height:
                     self.inside_area = False
                     bpy.context.window.cursor_set("DEFAULT")
                 else:
@@ -1214,7 +1218,8 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
                             bpy.context.window.cursor_set("KNIFE")
                         else:
                             bpy.context.window.cursor_set("PAINT_BRUSH")
-
+                if not self.inside_area:
+                    return {"PASS_THROUGH"}
                 ### Set Mouse click
                 if (
                     (event.value == "PRESS" or event.value == "CLICK")
@@ -1628,8 +1633,9 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
             font_id = 0
             line = str(round(length, 2))
             # bgl.glEnable(bgl.GL_BLEND)
-            blf.color(font_id, 1, 1, 1, 1)
+            # blf.color(font_id, 1, 1, 1, 1)
 
+            # commented in upstream
             blf.position(font_id, self.mouse_2d_x - 15, self.mouse_2d_y + 30, 0)
             blf.size(font_id, 20, 72)
             blf.draw(font_id, line)
@@ -1655,25 +1661,50 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
         self,
         coords=[],
         color=(1.0, 1.0, 1.0, 1.0),
-        draw_type="LINE_STRIP",
-        shader_type="2D_UNIFORM_COLOR",
+        draw_type="TRIS",
+        shader_type="UNIFORM_COLOR",
         line_width=2,
         point_size=None,
     ):  # draw_types -> LINE_STRIP, LINES, POINTS
-        bgl.glLineWidth(line_width)
-        if point_size != None:
-            bgl.glPointSize(point_size)
-        bgl.glEnable(bgl.GL_BLEND)
-        bgl.glEnable(bgl.GL_LINE_SMOOTH)
+        if functions.b_version_bigger_than((4, 0, 0)):
+            gpu.state.blend_set("ALPHA")
+            if shader_type == CONSTANTS.SHADER_2D_UNIFORM_COLOR:
+                shader_type = CONSTANTS.SHADER_UNIFORM_COLOR
+            elif (
+                shader_type == CONSTANTS.SHADER_3D_SMOOTH_COLOR
+                or shader_type == CONSTANTS.SHADER_2D_SMOOTH_COLOR
+            ):
+                shader_type = CONSTANTS.SHADER_SNMOOTH_COLOR
+        else:
+            # will be deprecated bgl
+            bgl.glLineWidth(line_width)
+            if point_size != None:
+                bgl.glPointSize(point_size)
+            bgl.glEnable(bgl.GL_BLEND)
+            bgl.glEnable(bgl.GL_LINE_SMOOTH)
 
         shader = gpu.shader.from_builtin(shader_type)
-        batch = batch_for_shader(shader, draw_type, {"pos": coords})
+        content = {"pos": coords}
+        if shader_type not in [
+            CONSTANTS.SHADER_2D_UNIFORM_COLOR,
+            CONSTANTS.SHADER_UNIFORM_COLOR,
+        ]:
+            content["color"] = color
+        batch = batch_for_shader(shader, draw_type, content)
         shader.bind()
-        shader.uniform_float("color", color)
+        if shader_type in [
+            CONSTANTS.SHADER_2D_UNIFORM_COLOR,
+            CONSTANTS.SHADER_UNIFORM_COLOR,
+        ]:
+            shader.uniform_float("color", color)
         batch.draw(shader)
 
-        bgl.glDisable(bgl.GL_BLEND)
-        bgl.glDisable(bgl.GL_LINE_SMOOTH)
+        if functions.b_version_bigger_than((4, 0, 0)):
+            gpu.state.blend_set("NONE")
+        else:
+            # will be deprecated bgl
+            bgl.glDisable(bgl.GL_BLEND)
+            bgl.glDisable(bgl.GL_LINE_SMOOTH)
         return shader
 
     def coord_3d_to_2d(self, coord):
@@ -1712,7 +1743,7 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
                 self.draw_coords(
                     coords=vecs,
                     color=[1, 0.7, 0.5, 1.0],
-                    draw_type=CONSTANTS.DRAW_LINE_STRIP,
+                    draw_type=CONSTANTS.DRAW_LINE_LOOP,
                     line_width=2,
                 )
 
@@ -1726,10 +1757,9 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
                     vertex_vec_new = self.snapped_vert_coord + y_offset
 
                     color = green
-                    # bgl.glLineWidth(2)
-
                     if self.selected_vert_coord != None:
-                        bgl.glEnable(bgl.GL_LINE_SMOOTH)
+                        if not functions.b_version_bigger_than((4, 0, 0)):
+                            bgl.glEnable(bgl.GL_LINE_SMOOTH)
                         vertex_vec = self.selected_vert_coord + y_offset
                         if self.point_type == "VERT":
                             color = green
@@ -1739,7 +1769,12 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
                         if not self.alt:
                             p1 = self.coord_3d_to_2d(vertex_vec)
                             p2 = self.coord_3d_to_2d(vertex_vec_new)
-                            self.draw_coords(coords=[p1, p2], color=color)
+                            self.draw_coords(
+                                coords=[p1, p2],
+                                color=color,
+                                draw_type=CONSTANTS.DRAW_LINE_STRIP,
+                                line_width=2,
+                            )
 
                     if self.point_type == "VERT":
                         if self.alt:
@@ -1757,7 +1792,11 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
                         p2 = self.coord_3d_to_2d(
                             obj.matrix_world @ self.verts_edges_data[1] + y_offset
                         )
-                        self.draw_coords(coords=[p1, p2], color=color)
+                        self.draw_coords(
+                            coords=[p1, p2],
+                            color=color,
+                            draw_type=CONSTANTS.DRAW_LINE_STRIP,
+                        )
                     else:
                         color = yellow
 

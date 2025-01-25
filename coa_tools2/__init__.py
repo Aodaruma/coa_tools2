@@ -22,7 +22,7 @@ bl_info = {
     "name": "COA Tools2",
     "description": "This Addon provides a Toolset for a 2D Animation Workflow.",
     "author": "Aodaruma",
-    "version": (1, 0, 0),
+    "version": (2, 0, 1),
     "blender": (3, 40, 0),
     "location": "View 3D > Tools > Cutout Animation Tools",
     "warning": "",
@@ -263,6 +263,7 @@ def register():
         bpy.utils.register_class(cls)
 
     # register tools
+    # deleted in upstream/master, need to be validated whether it is still needed
     bpy.utils.register_tool(
         edit_mesh.COATOOLS2_TO_DrawPolygon,
         after={"builtin.cursor"},
