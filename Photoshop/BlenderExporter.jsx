@@ -287,9 +287,14 @@ function process_prepending_layerset_name(layer, layer_name, is_omit_layer_name_
     }
     if (is_omit_layer_name_if_only_one == true) {
         // delete latest layer name
-        var layer_name_split = layer_name.split(".");
-        if (layer_name_split.length > 1) {
-            layer_name = layer_name_split.slice(0, -1).join(".");
+        for (var j = 0; j < parent_layersets.length; j++) {
+            var parent_layerset = parent_layersets[j];
+            var group_layers = parent_layerset.layers;
+            if (group_layers.length <= 1) {
+                layer_name = layer_name.split(".").slice(0, -1).join(".");
+            } else {
+                break;
+            }
         }
     }
     return layer_name;
@@ -345,6 +350,11 @@ function export_sprites(
     is_set_composite_mode_to_normal,
     is_omit_layer_name_if_only_one
 ) {
+    const layer_types = {
+        selected: "selected",
+        visible: "visible",
+    }
+
     // check
     if (export_path == "") {
         alert("Please select a folder to export the sprites.");
@@ -364,6 +374,8 @@ function export_sprites(
     for (var i = 0; i < layers.length; i++) {
         var layer = layers[i];
         var layer_name = layer.name;
+        if ((layer_type == layer_types.selected && layer.selected == false) || (layer_type == layer_types.visible && layer.visible == false))
+            continue;
         if (is_prepending_layerset_name == true)
             layer_name = process_prepending_layerset_name(layer, layer_name, is_omit_layer_name_if_only_one);
         if (is_reorder_layerset_name == true)
@@ -378,7 +390,7 @@ function export_sprites(
     var duplicated_layer_names = [];
     for (var key in unique_layer_names) {
         if (unique_layer_names[key] > 1) {
-            duplicated_layer_names.push(key);
+            duplicated_layer_names.push(key + " (" + unique_layer_names[key] + " times)");
         }
     }
     if (duplicated_layer_names.length > 0) {
