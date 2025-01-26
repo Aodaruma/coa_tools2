@@ -1,115 +1,181 @@
-# COA Tools 2 Properties Reference
+# Properties Documentation
+
+documentation for the [properties.py](https://github.com/Aodaruma/coa_tools2/blob/master/coa_tools2/properties.py) module
 
 ## Table of Contents
 
-- [COA Tools 2 Properties Reference](#coa-tools-2-properties-reference)
+- [Properties Documentation](#properties-documentation)
   - [Table of Contents](#table-of-contents)
-  - [Sprite Properties](#sprite-properties)
-    - [Sprite Object Properties](#sprite-object-properties)
-    - [Sprite Material Properties](#sprite-material-properties)
-  - [Armature Properties](#armature-properties)
-    - [Bone Properties](#bone-properties)
-    - [Weight Painting Properties](#weight-painting-properties)
-  - [Animation Properties](#animation-properties)
-    - [Keyframe Properties](#keyframe-properties)
-    - [Animation Collection Properties](#animation-collection-properties)
-  - [Material Properties](#material-properties)
-    - [Material Conversion Properties](#material-conversion-properties)
-    - [Texture Properties](#texture-properties)
-  - [Export Properties](#export-properties)
-    - [JSON Export Properties](#json-export-properties)
-    - [Texture Atlas Properties](#texture-atlas-properties)
+  - [`UVData` Class](#uvdata-class)
+  - [`SlotData` Class](#slotdata-class)
+  - [`Event` Class](#event-class)
+  - [`TimelineEvent` Class](#timelineevent-class)
+  - [`AnimationCollections` Class](#animationcollections-class)
+  - [`ObjectProperties` Class](#objectproperties-class)
+  - [`SceneProperties` Class](#sceneproperties-class)
+  - [`MeshProperties` Class](#meshproperties-class)
+  - [`BoneProperties` Class](#boneproperties-class)
+  - [`WindowManagerProperties` Class](#windowmanagerproperties-class)
 
-## Sprite Properties
+## `UVData` Class
 
-Properties related to sprite objects and their display in 2D animation.
+Class for storing UV coordinates.
 
-### Sprite Object Properties
-- **sprite_type**: `enum` - Type of sprite object  
-  - Values: `['IMAGE', 'MESH', 'EMPTY']`
-- **sprite_scale**: `float` - Scale factor for sprite display
-- **sprite_offset**: `float[2]` - Offset position from bone origin
-- **sprite_alpha**: `float` - Transparency value `(0.0 - 1.0)`
+- **uv**: `float[2]` - Stores UV coordinates
 
-### Sprite Material Properties
-Properties controlling sprite material appearance and blending.
+## `SlotData` Class
 
-- **material_type**: `enum` - Type of material  
-  - Values: `['PRINCIPLED', 'EMISSION']`
-- **blend_mode**: `enum` - Material blending mode  
-  - Values: `['OPAQUE', 'ALPHA', 'ADD']`
-- **use_shadeless**: `bool` - Enable/disable shading
-- **texture_slot**: `int` - Index of active texture slot
+Class for managing sprite slot information.
 
-## Armature Properties
+- **mesh**: `pointer[bpy.types.Mesh]` - Reference to a Mesh object
+- **offset**: `float[3]` - Offset values
+- **name**: `str` - Name of the slot
+- **active**: `bool` - Whether the slot is active
+- **index**: `int` - Index of the slot
 
-Properties related to armature and bone configuration.
+## `Event` Class
 
-### Bone Properties
-- **bone_shape**: `enum` - Display shape of bones  
-  - Values: `['DEFAULT', 'CIRCLE', 'SQUARE']`
-- **bone_size**: `float` - Display size of bones
-- **use_deform**: `bool` - Enable/disable deformation
-- **inherit_rotation**: `bool` - Enable/disable rotation inheritance
+Class representing animation events (sound, event, animation).
 
-### Weight Painting Properties
-Properties for weight painting and vertex group influence.
+- **name**: `str` - Name of the event
+- **type**: `enum["SOUND", "EVENT", "ANIMATION"]` - Type of event
+- **value**: `str` - Value associated with the event
+- **animation**: `enum[get_available_animations()]` - Animation associated with the event
+- **int**: `str` - Integer value
+- **float**: `str` - Float value
+- **string**: `str` - String value
+- **target**: `str` - Target of the event
 
-- **weight_value**: `float` - Current weight value `(0.0 - 1.0)`
-- **weight_radius**: `float` - Brush radius for weight painting
-- **weight_strength**: `float` - Brush strength for weight painting
+## `TimelineEvent` Class
 
-## Animation Properties
+Class for managing events on the timeline.
 
-Properties controlling animation playback and keyframing.
+- **event**: `collection[Event]` - Collection of [`Event`](#event-class) objects
+- **frame**: `int` - Frame number for the event
+- **collapsed**: `bool` - Whether the event is collapsed in UI
 
-### Keyframe Properties
-- **keyframe_type**: `enum` - Keyframe interpolation type  
-  - Values: `['LINEAR', 'BEZIER', 'CONSTANT']`
-- **keyframe_easing**: `enum` - Keyframe easing type
-- **use_auto_keyframe**: `bool` - Enable/disable auto keyframing
+## `AnimationCollections` Class
 
-### Animation Collection Properties
-Properties for managing animation collections.
+Class for managing animation collections.
 
-- **animation_name**: `string` - Name of animation collection
-- **animation_length**: `int` - Total frames in animation
-- **animation_fps**: `int` - Frame rate of animation
-- **use_loop**: `bool` - Enable/disable animation looping
+- **name**: `str` - Name of the animation collection
+- **name_change_to**: `str` - New name when changing
+- **name_old**: `str` - Previous name
+- **action_collection**: `bool` - Whether it's an action collection
+- **frame_start**: `int` - Start frame
+- **frame_end**: `int` - End frame
+- **timeline_events**: `collection[TimelineEvent]` - Collection of [`TimelineEvent`](#timelineevent-class) objects
+- **event_index**: `int` - Index of selected event
+- **export**: `bool` - Whether to export this collection
 
-## Material Properties
+## `ObjectProperties` Class
 
-Properties for material configuration and conversion.
+Class for managing object properties in the animation system.
 
-### Material Conversion Properties
-- **target_engine**: `enum` - Target rendering engine  
-  - Values: `['CYCLES', 'EEVEE']`
-- **preserve_alpha**: `bool` - Preserve alpha settings during conversion
-- **convert_textures**: `bool` - Enable/disable texture conversion
+- **anim_collections**: `collection[AnimationCollections]` - Collection of [`Animation collections`](#animationcollections-class)
+- **uv_default_state**: `collection[UVData]` - Default UV states ([`UVData`](#uvdata-class))
+- **slot**: `collection[SlotData]` - Slots of sprite objects ([`SlotData`](#slotdata-class))
+- **blend_mode**: `enum["BLEND", "ADD", "MULTIPLY"]` - Blend mode
+- **dimensions_old**: `float[3]` - Previous dimensions
+- **sprite_dimension**: `float[3]` - Sprite dimensions
+- **z_value**: `int` - Z depth value
+- **z_value_last**: `int` - Previous Z depth value
+- **alpha**: `float` - Alpha value
+- **alpha_last**: `float` - Previous alpha value
+- **show_bones**: `bool` - Whether to show bones
+- **filter_names**: `str` - Filter names
+- **favorite**: `bool` - Whether marked as favorite
+- **hide_base_sprite**: `bool` - Whether to hide base sprite
+- **animation_loop**: `bool` - Whether animation loops
+- **hide**: `bool` - Whether object is hidden
+- **hide_select**: `bool` - Whether object is selectable
+- **data_path**: `str` - Data path
+- **show_children**: `bool` - Whether to show children
+- **show_export_box**: `bool` - Whether to show export box
+- **sprite_frame_previews**: `enum[enum_sprite_previews()]` - Sprite frame previews
+- **sprite_updated**: `bool` - Whether sprite is updated
+- **modulate_color**: `float[3]` - Modulate color
+- **modulate_color_last**: `float[3]` - Previous modulate color
+- **type**: `enum["SPRITE", "MESH", "SLOT"]` - Object type
+- **slot_index**: `int` - Slot index
+- **slot_index_last**: `int` - Previous slot index
+- **slot_reset_index**: `int` - Slot reset index
+- **slot_show**: `bool` - Whether to show slot
+- **change_z_ordering**: `bool` - Whether Z ordering changed
+- **selected_shapekey**: `enum[get_shapekeys()]` - Selected shape key
+- **edit_mode**: `enum["OBJECT", "MESH", "ARMATURE", "WEIGHTS", "SHAPEKEY"]` - Edit mode
+- **edit_weights**: `bool` - Whether in weight edit mode
+- **edit_armature**: `bool` - Whether in armature edit mode
+- **edit_shapekey**: `bool` - Whether in shape key edit mode
+- **edit_mesh**: `bool` - Whether in mesh edit mode
+- **anim_collections_index**: `int` - Animation collection index
 
-### Texture Properties
-Properties for texture mapping and UV settings.
+## `SceneProperties` Class
 
-- **texture_scale**: `float[2]` - UV scaling factors
-- **texture_offset**: `float[2]` - UV offset values
-- **use_mipmaps**: `bool` - Enable/disable mipmap generation
+Class for managing scene-wide properties and settings.
 
-## Export Properties
+- **display_all**: `bool` - Whether to display all
+- **display_page**: `int` - Display page number
+- **display_length**: `int` - Number of items per page
+- **distance**: `float` - Paint stroke distance
+- **detail**: `float` - Detail level
+- **snap_distance**: `float` - Snap distance
+- **surface_snap**: `bool` - Whether to snap to surface
+- **automerge**: `bool` - Whether to auto-merge
+- **distance_constraint**: `bool` - Whether distance is constrained
+- **lock_to_bounds**: `bool` - Whether locked to bounds
+- **frame_last**: `int` - Last frame number
+- **view**: `enum["3D", "2D"]` - View mod
+- **active_collection**: `enum[get_available_collections()]` - Active collection
+- **nla_mode**: `enum["ACTION", "NLA"]` - NLA mode
+- **frame_start**: `int` - Start frame
+- **frame_end**: `int` - End frame
+- **deprecated_data_found**: `bool` - Whether deprecated data found
+- **old_coatools_found**: `bool` - Whether old COA tools found
+- **project_name**: `str` - Project name
+- **armature_name**: `str` - Armature name
+- **runtime_format**: `enum["CREATURE", "DRAGONBONES"]` - Runtime format
+- **image_format**: `enum["PNG", "WEBP"]` - Image format
+- **image_quality**: `int` - Image quality percentage
+- **export_path**: `str` - Export path
+- **export_image_mode**: `enum["ATLAS", "IMAGES"]` - Export image mode
+- **atlas_mode**: `enum["AUTO_SIZE", "LIMIT_SIZE"]` - Atlas mode
+- **sprite_scale**: `float` - Sprite output scale
+- **atlas_resolution_x**: `int` - Atlas X resolution
+- **atlas_resolution_y**: `int` - Atlas Y resolution
+- **atlas_island_margin**: `int` - Texture island margin
+- **export_bake_anim**: `bool` - Whether to bake animation
+- **export_bake_steps**: `int` - Bake steps
+- **minify_json**: `bool` - Whether to minify JSON
+- **export_square_atlas**: `bool` - Whether to force square atlas
+- **export_texture_bleed**: `int` - Texture bleed amount
+- **armature_scale**: `float` - Armature output scale
+- **outliner_filter_names**: `str` - Outliner filter names
+- **outliner_favorites**: `bool` - Whether outliner favorites shown
+- **outliner**: `collection[outliner.COAOutliner]` - Outliner items
+- **outliner_index**: `int` - Outliner index
 
-Properties controlling export settings and output formats.
+## `MeshProperties` Class
 
-### JSON Export Properties
-- **export_version**: `string` - JSON format version
-- **export_scale**: `float` - Global export scale factor
-- **export_path**: `string` - Output directory path
-- **use_compression**: `bool` - Enable/disable JSON compression
+Class for managing mesh-specific properties and settings.
 
-### Texture Atlas Properties
-Properties for texture atlas generation.
+- **hide_base_sprite**: `bool` - Whether to hide base sprite
 
-- **atlas_size**: `enum` - Maximum atlas texture size  
-  - Values: `[1024, 2048, 4096]`
-- **atlas_padding**: `int` - Padding between sprites in atlas
-- **use_power_of_two**: `bool` - Force power-of-two texture sizes
-- **atlas_format**: `enum` - Texture format  
-  - Values: `['PNG', 'JPEG']`
+## `BoneProperties` Class
+
+Class for managing bone-specific properties and settings.
+
+- **favorite**: `bool` - Whether marked as favorite
+- **draw_bone**: `bool` - Whether to draw bone
+- **z_value**: `int` - Z depth value
+- **data_path**: `str` - Data path
+- **hide_select**: `bool` - Whether bone is selectable
+- **hide**: `bool` - Whether bone is hidden
+- **bone_name**: `str` - Bone name
+- **show_children**: `bool` - Whether to show children bones
+
+## `WindowManagerProperties` Class
+
+Class for managing window manager properties and UI settings.
+
+- **show_help**: `bool` - Whether to show help
