@@ -6,6 +6,176 @@ documentation for the [properties.py](https://github.com/Aodaruma/coa_tools2/blo
 
 - [Properties Documentation](#properties-documentation)
   - [Table of Contents](#table-of-contents)
+  - [Class Diagram](#class-diagram)
+  - [`UVData` Class](#uvdata-class)
+  - [`SlotData` Class](#slotdata-class)
+  - [`Event` Class](#event-class)
+  - [`TimelineEvent` Class](#timelineevent-class)
+  - [`AnimationCollections` Class](#animationcollections-class)
+  - [`ObjectProperties` Class](#objectproperties-class)
+  - [`SceneProperties` Class](#sceneproperties-class)
+  - [`MeshProperties` Class](#meshproperties-class)
+  - [`BoneProperties` Class](#boneproperties-class)
+  - [`WindowManagerProperties` Class](#windowmanagerproperties-class)
+  
+## Class Diagram
+
+```mermaid
+classDiagram
+    class UVData {
+        +float[2] uv
+    }
+
+    class SlotData {
+        +pointer[bpy.types.Mesh] mesh
+        +float[3] offset
+        +str name
+        +bool active
+        +int index
+    }
+
+    class Event {
+        +str name
+        +enum["SOUND", "EVENT", "ANIMATION"] type
+        +str value
+        +enum[get_available_animations()] animation
+        +str int
+        +str float
+        +str string
+        +str target
+    }
+
+    class TimelineEvent {
+        +collection[Event] event
+        +int frame
+        +bool collapsed
+    }
+
+    class AnimationCollections {
+        +str name
+        +str name_change_to
+        +str name_old
+        +bool action_collection
+        +int frame_start
+        +int frame_end
+        +collection[TimelineEvent] timeline_events
+        +int event_index
+        +bool export
+    }
+
+    class ObjectProperties {
+        +collection[AnimationCollections] anim_collections
+        +collection[UVData] uv_default_state
+        +collection[SlotData] slot
+        +enum["BLEND", "ADD", "MULTIPLY"] blend_mode
+        +float[3] dimensions_old
+        +float[3] sprite_dimension
+        +int z_value
+        +int z_value_last
+        +float alpha
+        +float alpha_last
+        +bool show_bones
+        +str filter_names
+        +bool favorite
+        +bool hide_base_sprite
+        +bool animation_loop
+        +bool hide
+        +bool hide_select
+        +str data_path
+        +bool show_children
+        +bool show_export_box
+        +enum[enum_sprite_previews()] sprite_frame_previews
+        +bool sprite_updated
+        +float[3] modulate_color
+        +float[3] modulate_color_last
+        +enum["SPRITE", "MESH", "SLOT"] type
+        +int slot_index
+        +int slot_index_last
+        +int slot_reset_index
+        +bool slot_show
+        +bool change_z_ordering
+        +enum[get_shapekeys()] selected_shapekey
+        +enum["OBJECT", "MESH", "ARMATURE", "WEIGHTS", "SHAPEKEY"] edit_mode
+        +bool edit_weights
+        +bool edit_armature
+        +bool edit_shapekey
+        +bool edit_mesh
+        +int anim_collections_index
+    }
+
+    class SceneProperties {
+        +bool display_all
+        +int display_page
+        +int display_length
+        +float distance
+        +float detail
+        +float snap_distance
+        +bool surface_snap
+        +bool automerge
+        +bool distance_constraint
+        +bool lock_to_bounds
+        +int frame_last
+        +enum["3D", "2D"] view
+        +enum[get_available_collections()] active_collection
+        +enum["ACTION", "NLA"] nla_mode
+        +int frame_start
+        +int frame_end
+        +bool deprecated_data_found
+        +bool old_coatools_found
+        +str project_name
+        +str armature_name
+        +enum["CREATURE", "DRAGONBONES"] runtime_format
+        +enum["PNG", "WEBP"] image_format
+        +int image_quality
+        +str export_path
+        +enum["ATLAS", "IMAGES"] export_image_mode
+        +enum["AUTO_SIZE", "LIMIT_SIZE"] atlas_mode
+        +float sprite_scale
+        +int atlas_resolution_x
+        +int atlas_resolution_y
+        +int atlas_island_margin
+        +bool export_bake_anim
+        +int export_bake_steps
+        +bool minify_json
+        +bool export_square_atlas
+        +int export_texture_bleed
+        +float armature_scale
+        +str outliner_filter_names
+        +bool outliner_favorites
+        +collection[outliner.COAOutliner] outliner
+        +int outliner_index
+    }
+
+    class MeshProperties {
+        +bool hide_base_sprite
+    }
+
+    class BoneProperties {
+        +bool favorite
+        +bool draw_bone
+        +int z_value
+        +str data_path
+        +bool hide_select
+        +bool hide
+        +str bone_name
+        +bool show_children
+    }
+
+    class WindowManagerProperties {
+        +bool show_help
+    }
+
+    ObjectProperties "1" *-- "many" AnimationCollections
+    ObjectProperties "1" *-- "many" UVData
+    ObjectProperties "1" *-- "many" SlotData
+    TimelineEvent "1" *-- "many" Event
+    SceneProperties "1" --> "many" ObjectProperties
+    MeshProperties --|> ObjectProperties
+    BoneProperties --|> ObjectProperties
+```
+- [Properties Documentation](#properties-documentation)
+  - [Table of Contents](#table-of-contents)
+  - [Class Diagram](#class-diagram)
   - [`UVData` Class](#uvdata-class)
   - [`SlotData` Class](#slotdata-class)
   - [`Event` Class](#event-class)
@@ -20,12 +190,14 @@ documentation for the [properties.py](https://github.com/Aodaruma/coa_tools2/blo
 ## `UVData` Class
 
 Class for storing UV coordinates.
+([properties.py#L275](https://github.com/Aodaruma/coa_tools2/blob/master/coa_tools2/properties.py#L275))
 
 - **uv**: `float[2]` - Stores UV coordinates
 
 ## `SlotData` Class
 
 Class for managing sprite slot information.
+([properties.py#L278](https://github.com/Aodaruma/coa_tools2/blob/master/coa_tools2/properties.py#L278))
 
 - **mesh**: `pointer[bpy.types.Mesh]` - Reference to a Mesh object
 - **offset**: `float[3]` - Offset values
@@ -36,6 +208,7 @@ Class for managing sprite slot information.
 ## `Event` Class
 
 Class representing animation events (sound, event, animation).
+([properties.py#L296](https://github.com/Aodaruma/coa_tools2/blob/master/coa_tools2/properties.py#L296))
 
 - **name**: `str` - Name of the event
 - **type**: `enum["SOUND", "EVENT", "ANIMATION"]` - Type of event
@@ -49,6 +222,7 @@ Class representing animation events (sound, event, animation).
 ## `TimelineEvent` Class
 
 Class for managing events on the timeline.
+([properties.py#L306](https://github.com/Aodaruma/coa_tools2/blob/master/coa_tools2/properties.py#L306))
 
 - **event**: `collection[Event]` - Collection of [`Event`](#event-class) objects
 - **frame**: `int` - Frame number for the event
@@ -57,6 +231,7 @@ Class for managing events on the timeline.
 ## `AnimationCollections` Class
 
 Class for managing animation collections.
+([properties.py#L320](https://github.com/Aodaruma/coa_tools2/blob/master/coa_tools2/properties.py#L320))
 
 - **name**: `str` - Name of the animation collection
 - **name_change_to**: `str` - New name when changing
@@ -71,6 +246,7 @@ Class for managing animation collections.
 ## `ObjectProperties` Class
 
 Class for managing object properties in the animation system.
+([properties.py#L367](https://github.com/Aodaruma/coa_tools2/blob/master/coa_tools2/properties.py#L367))
 
 - **anim_collections**: `collection[AnimationCollections]` - Collection of [`Animation collections`](#animationcollections-class)
 - **uv_default_state**: `collection[UVData]` - Default UV states ([`UVData`](#uvdata-class))
@@ -113,6 +289,7 @@ Class for managing object properties in the animation system.
 ## `SceneProperties` Class
 
 Class for managing scene-wide properties and settings.
+([properties.py#L424](https://github.com/Aodaruma/coa_tools2/blob/master/coa_tools2/properties.py#L424))
 
 - **display_all**: `bool` - Whether to display all
 - **display_page**: `int` - Display page number
@@ -158,12 +335,14 @@ Class for managing scene-wide properties and settings.
 ## `MeshProperties` Class
 
 Class for managing mesh-specific properties and settings.
+([properties.py#L474](https://github.com/Aodaruma/coa_tools2/blob/master/coa_tools2/properties.py#L474))
 
 - **hide_base_sprite**: `bool` - Whether to hide base sprite
 
 ## `BoneProperties` Class
 
 Class for managing bone-specific properties and settings.
+([properties.py#L478](https://github.com/Aodaruma/coa_tools2/blob/master/coa_tools2/properties.py#L478))
 
 - **favorite**: `bool` - Whether marked as favorite
 - **draw_bone**: `bool` - Whether to draw bone
@@ -177,5 +356,6 @@ Class for managing bone-specific properties and settings.
 ## `WindowManagerProperties` Class
 
 Class for managing window manager properties and UI settings.
+([properties.py#L488](https://github.com/Aodaruma/coa_tools2/blob/master/coa_tools2/properties.py#L488))
 
 - **show_help**: `bool` - Whether to show help
