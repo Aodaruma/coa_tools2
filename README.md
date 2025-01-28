@@ -43,8 +43,9 @@ Since development is a time and resource-intensive process, it's not easy to bei
 You can download coa_tools2 from these sources:
 
 1. [releases page](https://github.com/Aodaruma/coa_tools2/releases) (stable)
-2. [master branch zip](https://github.com/Aodaruma/coa_tools2/archive/refs/heads/master.zip) (unstable)
-3. [develop branch zip](https://github.com/Aodaruma/coa_tools2/archive/refs/heads/develop.zip) (very unstable; new feature included)
+2. [master branch zip](https://github.com/Aodaruma/coa_tools2/archive/refs/heads/master.zip) (stable)
+3. [prerelease branch zip](https://github.com/Aodaruma/coa_tools2/archive/refs/heads/prerelease.zip) (unstable; may contains bugs)
+4. [develop branch zip](https://github.com/Aodaruma/coa_tools2/archive/refs/heads/develop.zip) (very unstable; new feature included)
 
 ### Installation
 
