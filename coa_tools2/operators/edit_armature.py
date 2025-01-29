@@ -564,7 +564,7 @@ class COATOOLS2_OT_QuickArmature(bpy.types.Operator):
                     armature: bpy.types.Armature = context.active_object.data
                     if (
                         "default_bones" in [c.name for c in armature.collections]
-                        and bone.bone.collections == None
+                        and bone.collections == None
                     ):
                         armature.collections["default_bones"].assign(bone)
                     bone.color.palette = "THEME08"
