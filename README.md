@@ -8,12 +8,18 @@ the Addon of Cutout Animation Tools for Blender, which allows you to create cuto
 
 ## Table of Contents
 
-- [Description](#description)
-- [Download and Installation](#download-and-installation)
-  - [Photoshop Exporter](#photoshop-exporter)
-  - [GIMP Exporter](#gimp-exporter)
-  - [Blender Addon](#blender-addon)
-- [Development](#development)
+- [COA tools 2](#coa-tools-2)
+  - [Table of Contents](#table-of-contents)
+  - [Description](#description)
+  - [Download and Installation](#download-and-installation)
+    - [Download](#download)
+    - [Installation](#installation)
+      - [Photoshop Exporter](#photoshop-exporter)
+      - [GIMP Exporter](#gimp-exporter)
+      - [Blender Addon](#blender-addon)
+      - [Krita PLugin](#krita-plugin)
+  - [Development](#development)
+    - [Documentation for development](#documentation-for-development)
 
 ## Description
 
@@ -37,8 +43,9 @@ Since development is a time and resource-intensive process, it's not easy to bei
 You can download coa_tools2 from these sources:
 
 1. [releases page](https://github.com/Aodaruma/coa_tools2/releases) (stable)
-2. [master branch zip](https://github.com/Aodaruma/coa_tools2/archive/refs/heads/master.zip) (unstable)
-3. [develop branch zip](https://github.com/Aodaruma/coa_tools2/archive/refs/heads/develop.zip) (very unstable; new feature included)
+2. [master branch zip](https://github.com/Aodaruma/coa_tools2/archive/refs/heads/master.zip) (stable)
+3. [prerelease branch zip](https://github.com/Aodaruma/coa_tools2/archive/refs/heads/prerelease.zip) (unstable; may contains bugs)
+4. [develop branch zip](https://github.com/Aodaruma/coa_tools2/archive/refs/heads/develop.zip) (very unstable; new feature included)
 
 ### Installation
 
@@ -121,3 +128,13 @@ New-Item -ItemType Junction -Path "$LatestBlenderDir\scripts\addons\coa_tools2" 
 I'm using pipenv for dependency management. You can install the dependencies with `pipenv sync` if you have already installed pipenv.
 
 Some extensions of vscode are recommended for development and written in `.vscode/extensions.json`. Feel free to use them.
+
+### Documentation for development
+
+The project includes several markdown documentation files in the `docs/` directory:
+
+- **[docs/overview.md](https://github.com/Aodaruma/coa_tools2/blob/master/docs/overview.md)**: Provides a general introduction to developing COA Tools 2
+
+- **[docs/specification.md](https://github.com/Aodaruma/coa_tools2/blob/master/docs/specification.md)**: Contains technical specifications and requirements for the Blender addon, including class structure, core features, and utility functions.
+
+- **[docs/properties.md](https://github.com/Aodaruma/coa_tools2/blob/master/docs/properties.md)**: Comprehensive reference documentation for all COA Tools 2 properties in Blender addon, organized by category with detailed descriptions and type information.

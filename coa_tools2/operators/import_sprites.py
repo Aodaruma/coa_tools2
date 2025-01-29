@@ -620,9 +620,16 @@ class COATOOLS2_OT_ReImportSprite(bpy.types.Operator, ImportHelper):
     reposition: BoolProperty(default=True)
 
     def move_verts(self, obj, ratio_x, ratio_y):
-        bpy.ops.object.mode_set(mode="EDIT")
+        # override context if object is not active
+        ctx = bpy.context.copy()
+        if obj != bpy.context.active_object:
+            ctx["active_object"] = obj
+
+        with bpy.context.temp_override(**ctx):
+            bpy.ops.object.mode_set(mode="EDIT")
         bpy.ops.mesh.reveal()
-        bpy.ops.object.mode_set(mode="OBJECT")
+        with bpy.context.temp_override(**ctx):
+            bpy.ops.object.mode_set(mode="OBJECT")
 
         shapekeys = [obj.data.vertices]
         if obj.data.shape_keys != None:
