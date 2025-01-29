@@ -336,6 +336,9 @@ class COATOOLS2_OT_GenerateMeshFromEdgesAndVerts(bpy.types.Operator):
         print("generating triangle mesh....")
 
         # old_faces = bm.faces
+        if not any([v.select for v in bm.verts]):
+            for v in bm.verts:
+                v.select_set(True)
         bm.select_history.clear()
         for face in faces:
             for v in face.verts:
@@ -402,7 +405,7 @@ class COATOOLS2_OT_GenerateMeshFromEdgesAndVerts(bpy.types.Operator):
                         use_axis_z=True,
                     )
                 if self.is_beautify:
-                    # todo: beautify only edited faces\
+                    # todo: beautify only edited faces
                     meshes = bmesh.ops.beautify_fill(
                         # bm, faces=meshes["faces"], edges=meshes["edges"]
                         bm,
@@ -413,6 +416,9 @@ class COATOOLS2_OT_GenerateMeshFromEdgesAndVerts(bpy.types.Operator):
                     # g = bmesh.ops.beautify_fill(bm, faces=[face], edges=face.edges)
                     # print(g["geom"], len(g["geom"]))
             bmesh.update_edit_mesh(obj.data)
+
+            # clear verts selections
+            bpy.ops.mesh.select_all(action="DESELECT")
 
     def cleanup_and_fill_mesh(self, obj, bm):
         context = bpy.context
