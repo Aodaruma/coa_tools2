@@ -101,7 +101,8 @@ class COATOOLS2_OT_CreatureExport(bpy.types.Operator):
         name="Project Name", default="", description="Creature Project Name"
     )
 
-    def __init__(self):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.json_data = self.setup_json_data()
         self.texture_export_scale = 1.0
         self.armature_export_scale = 1.0

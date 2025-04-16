@@ -904,7 +904,8 @@ class COATOOLS2_OT_SelectChild(bpy.types.Operator):
     outliner_index_old = 0
     bone_name: StringProperty()
 
-    def __init__(self):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.sprite_object = None
 
     mode: EnumProperty(items=(("object", "object", "object"), ("bone", "bone", "bone")))

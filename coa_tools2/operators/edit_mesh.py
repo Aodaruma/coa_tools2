@@ -588,7 +588,8 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
     mode: StringProperty(default="EDIT_MESH")
     new_shape_name: StringProperty()
 
-    def __init__(self):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.type = ""
         self.value = ""
         self.ctrl = False

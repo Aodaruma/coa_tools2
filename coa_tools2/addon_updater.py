@@ -58,7 +58,9 @@ class Singleton_updater(object):
     This is the singleton class to reference a copy from,
     it is the shared module level class
     """
-    def __init__(self):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
         self._engine = GithubEngine()
         self._user = None
@@ -1355,8 +1357,8 @@ class Singleton_updater(object):
 
 class BitbucketEngine(object):
 
-    def __init__(self):
-        self.api_url = 'https://api.bitbucket.org'
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.token = None
         self.name = "bitbucket"
 
@@ -1383,8 +1385,8 @@ class BitbucketEngine(object):
 
 class GithubEngine(object):
 
-    def __init__(self):
-        self.api_url = 'https://api.github.com'
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.token = None
         self.name = "github"
 
@@ -1408,8 +1410,8 @@ class GithubEngine(object):
 
 class GitlabEngine(object):
 
-    def __init__(self):
-        self.api_url = 'https://gitlab.com'
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.token = None
         self.name = "gitlab"
 
