@@ -729,13 +729,25 @@ class COATOOLS2_OT_CreatureExport(bpy.types.Operator):
         action = animation_data.action if animation_data != None else None
         type = "." + type.lower()
         if action != None:
-            for fcurve in action.fcurves:
-                if bone.name in fcurve.data_path and (
-                    type in fcurve.data_path or type == ".any"
-                ):
-                    for keyframe in fcurve.keyframe_points:
-                        if keyframe.co[0] == frame:
-                            return True
+            if b_version_smaller_than((4, 4, 0)):
+                for fcurve in action.fcurves:
+                    if bone.name in fcurve.data_path and (
+                        type in fcurve.data_path or type == ".any"
+                    ):
+                        for keyframe in fcurve.keyframe_points:
+                            if keyframe.co[0] == frame:
+                                return True
+            else:
+                for layer in action.layers:
+                    for strip in layer.strips:
+                        for slot in action.slots:
+                            for fcurve in strip.channelbag(slot).fcurves:
+                                if bone.name in fcurve.data_path and (
+                                    type in fcurve.data_path or type == ".any"
+                                ):
+                                    for keyframe in fcurve.keyframe_points:
+                                        if keyframe.co[0] == frame:
+                                            return True
         return False
 
     def create_animation_data(self, context):

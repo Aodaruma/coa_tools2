@@ -73,11 +73,22 @@ class COATOOLS2_OT_AddKeyframe(bpy.types.Operator):
         row.prop(self, "interpolation", expand=True)
 
     def set_fcurve_interpolation(self, context, sprite, data_path):
-        for fcurve in sprite.animation_data.action.fcurves:
-            if data_path in fcurve.data_path:
-                for key in fcurve.keyframe_points:
-                    if key.co[0] == context.scene.frame_current:
-                        key.interpolation = self.interpolation
+        if b_version_smaller_than((4, 4, 0)):
+            for fcurve in sprite.animation_data.action.fcurves:
+                if data_path in fcurve.data_path:
+                    for key in fcurve.keyframe_points:
+                        if key.co[0] == context.scene.frame_current:
+                            key.interpolation = self.interpolation
+        else:
+            action = sprite.animation_data.action
+            for layer in action.layers:
+                for strip in layer.strips:
+                    for slot in action.slots:
+                        for fcurve in strip.channelbag(slot).fcurves:
+                            if data_path in fcurve.data_path:
+                                for key in fcurve.keyframe_points:
+                                    if key.co[0] == context.scene.frame_current:
+                                        key.interpolation = self.interpolation
 
     def create_keyframe(self, context, event, data_path, group=""):
         sprite = context.active_object
@@ -127,9 +138,20 @@ class COATOOLS2_OT_AddKeyframe(bpy.types.Operator):
                         action_name = collection.name + "_" + sprite.name
                         if action_name in bpy.data.actions:
                             action = bpy.data.actions[action_name]
-                            if len(action.fcurves) == 0:
-                                action.use_fake_user = False
-                                action.user_clear()
+                            if b_version_smaller_than((4, 4, 0)):
+                                if len(action.fcurves) == 0:
+                                    action.use_fake_user = False
+                                    action.user_clear()
+                            else:
+                                no_fcurves = True
+                                for layer in action.layers:
+                                    for strip in layer.strips:
+                                        for slot in action.slots:
+                                            if len(strip.channelbag(slot).fcurves) != 0:
+                                                no_fcurves = False
+                                if no_fcurves:
+                                    action.use_fake_user = False
+                                    action.user_clear()
                         self.report(
                             {"INFO"},
                             str(
@@ -355,7 +377,10 @@ class COATOOLS2_OT_AddAnimationCollection(bpy.types.Operator):
                 action.use_fake_user = True
                 if child.animation_data == None:
                     child.animation_data_create()
-                child.animation_data.action = action
+                if b_version_smaller_than((4, 4, 0)):
+                    child.animation_data.action = action
+                else:
+                    child.animation_data.action_slot = action.slots[0]
 
     def rename_actions(self, action_name):
         for action in bpy.data.actions:

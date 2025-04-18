@@ -1685,7 +1685,7 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
             bgl.glEnable(bgl.GL_LINE_SMOOTH)
 
         shader = gpu.shader.from_builtin(shader_type)
-        content = {"pos": coords}
+        content = {"pos": [float(x) for x in coords]}
         if shader_type not in [
             CONSTANTS.SHADER_2D_UNIFORM_COLOR,
             CONSTANTS.SHADER_UNIFORM_COLOR,

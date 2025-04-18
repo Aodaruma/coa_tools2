@@ -950,13 +950,25 @@ def bone_key_on_frame(
     action = animation_data.action if animation_data != None else None
     type = "." + type.lower()
     if action != None:
-        for fcurve in action.fcurves:
-            if bone.name in fcurve.data_path and (
-                type in fcurve.data_path or type == ".any"
-            ):
-                for keyframe in fcurve.keyframe_points:
-                    if keyframe.co[0] == frame:
-                        return True
+        if b_version_smaller_than((4, 4, 0)):
+            for fcurve in action.fcurves:
+                if bone.name in fcurve.data_path and (
+                    type in fcurve.data_path or type == ".any"
+                ):
+                    for keyframe in fcurve.keyframe_points:
+                        if keyframe.co[0] == frame:
+                            return True
+        else:
+            for layer in action.layers:
+                for strip in layer.strips:
+                    for slot in action.slots:
+                        for fcurve in strip.channelbag(slot).fcurves:
+                            if slot.name in fcurve.data_path and (
+                                type in fcurve.data_path or type == ".any"
+                            ):
+                                for keyframe in fcurve.keyframe_points:
+                                    if keyframe.co[0] == frame:
+                                        return True
     return False
 
 
@@ -968,12 +980,23 @@ def property_key_on_frame(obj, prop_names, frame, type="PROPERTY"):
         ### check if property has a key set
         action = obj.animation_data.action
         if action != None:
-            for fcurve in action.fcurves:
-                for prop_name in prop_names:
-                    if prop_name in fcurve.data_path:
-                        for keyframe in fcurve.keyframe_points:
-                            if keyframe.co[0] == frame:
-                                return True
+            if b_version_smaller_than((4, 4, 0)):
+                for fcurve in action.fcurves:
+                    for prop_name in prop_names:
+                        if prop_name in fcurve.data_path:
+                            for keyframe in fcurve.keyframe_points:
+                                if keyframe.co[0] == frame:
+                                    return True
+            else:
+                for layer in action.layers:
+                    for strip in layer.strips:
+                        for slot in action.slots:
+                            for fcurve in strip.channelbag(slot).fcurves:
+                                for prop_name in prop_names:
+                                    if prop_name in fcurve.data_path:
+                                        for keyframe in fcurve.keyframe_points:
+                                            if keyframe.co[0] == frame:
+                                                return True
         ### check if property has a bone driver and bone has a key set
         for driver in obj.animation_data.drivers:
             for prop_name in prop_names:

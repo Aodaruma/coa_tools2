@@ -83,7 +83,10 @@ class COATOOLS2_PT_Info(bpy.types.Panel):
             and addon_updater_ops.updater.json["ignore"] == False
         ):
             return context
-        if context.scene.coa_tools2.deprecated_data_found or context.scene.coa_tools2.old_coatools_found:
+        if (
+            context.scene.coa_tools2.deprecated_data_found
+            or context.scene.coa_tools2.old_coatools_found
+        ):
             return context
         if (
             context.space_data.shading.type != "RENDERED"
