@@ -29,7 +29,8 @@ except Exception as e:
     print(str(e))
 
     class Singleton_updater_none(object):
-        def __init__(self):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
             self.addon = None
             self.verbose = False
             self.invalidupdater = True  # used to distinguish bad install
@@ -343,9 +344,9 @@ class addon_updater_install_manually(bpy.types.Operator):
         row = layout.row()
 
         if updater.update_link != None:
-            row.operator(
-                "wm.url_open", text="Direct download"
-            ).url = updater.update_link
+            row.operator("wm.url_open", text="Direct download").url = (
+                updater.update_link
+            )
         else:
             row.operator("wm.url_open", text="(failed to retrieve)")
             row.enabled = False

@@ -118,7 +118,8 @@ class COATOOLS2_OT_QuickArmature(bpy.types.Operator):
     bl_idname = "coa_tools2.quick_armature"
     bl_label = "Quick Armature"
 
-    def __init__(self):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.distance = 0.1
         self.cur_distance = 0
         self.old_coord = Vector((0, 0, 0))
