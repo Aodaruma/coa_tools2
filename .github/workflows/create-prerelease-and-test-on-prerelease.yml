@@ -34,8 +34,7 @@ jobs:
           - GIMP/coatools_exporter.py
           - Photoshop/BlenderExporter.jsx
           - coa_tools2/__init__.py
-          - Krita/some_krita_script.py
-          - Godot/coa_importer/some_importer_script.py
+          - Krita/coa_tools2_exporter/__init__.py
 
     steps:
       - uses: actions/checkout@v4
