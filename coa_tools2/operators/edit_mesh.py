@@ -588,7 +588,8 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
     mode: StringProperty(default="EDIT_MESH")
     new_shape_name: StringProperty()
 
-    def __init__(self):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.type = ""
         self.value = ""
         self.ctrl = False
@@ -1684,7 +1685,7 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
             bgl.glEnable(bgl.GL_LINE_SMOOTH)
 
         shader = gpu.shader.from_builtin(shader_type)
-        content = {"pos": coords}
+        content = {"pos": [float(x) for x in coords]}
         if shader_type not in [
             CONSTANTS.SHADER_2D_UNIFORM_COLOR,
             CONSTANTS.SHADER_UNIFORM_COLOR,

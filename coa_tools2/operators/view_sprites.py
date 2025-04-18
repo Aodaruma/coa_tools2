@@ -45,7 +45,8 @@ class COATOOLS2_OT_ChangeZOrdering(bpy.types.Operator):
     index: IntProperty()
     direction: StringProperty()  ## UP - DOWN
 
-    def __init__(self):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.sprites = eval(self.all_sprites_string)
 
     @classmethod

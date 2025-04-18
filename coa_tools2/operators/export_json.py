@@ -435,9 +435,20 @@ class ExportToJson(bpy.types.Operator, bpy_extras.io_utils.ExportHelper):
 
         fcurve_data_found = False
         if action != None:
-            for fcurve in action.fcurves:
-                if channel in fcurve.data_path and bone in fcurve.data_path:
-                    fcurve_data_found = True
+            if b_version_smaller_than((4, 4, 0)):
+                for fcurve in action.fcurves:
+                    if channel in fcurve.data_path and bone in fcurve.data_path:
+                        fcurve_data_found = True
+            else:
+                for layer in action.layers:
+                    for strip in layer.strips:
+                        for slot in action.slots:
+                            for fcurve in strip.channelbag(slot).fcurves:
+                                if (
+                                    channel in fcurve.data_path
+                                    and bone in fcurve.data_path
+                                ):
+                                    fcurve_data_found = True
         return fcurve_data_found
 
     def has_keyframe(self, animation_data, name, property="any", frame=0):
@@ -447,14 +458,30 @@ class ExportToJson(bpy.types.Operator, bpy_extras.io_utils.ExportHelper):
         else:
             return False
         keyframe_found = False
-        for fcurve in action.fcurves:
-            for keyframe in fcurve.keyframe_points:
-                if (
-                    keyframe.co[0] == frame
-                    and name in fcurve.data_path
-                    and (property in fcurve.data_path or property == "any")
-                ):
-                    keyframe_found = True
+        if b_version_smaller_than((4, 4, 0)):
+            for fcurve in action.fcurves:
+                for keyframe in fcurve.keyframe_points:
+                    if (
+                        keyframe.co[0] == frame
+                        and name in fcurve.data_path
+                        and (property in fcurve.data_path or property == "any")
+                    ):
+                        keyframe_found = True
+        else:
+            for layer in action.layers:
+                for strip in layer.strips:
+                    for slot in action.slots:
+                        for fcurve in strip.channelbag(slot).fcurves:
+                            for keyframe in fcurve.keyframe_points:
+                                if (
+                                    keyframe.co[0] == frame
+                                    and name in fcurve.data_path
+                                    and (
+                                        property in fcurve.data_path
+                                        or property == "any"
+                                    )
+                                ):
+                                    keyframe_found = True
         return keyframe_found
 
     def keyframe_to_dict(self, track, property, value, channels, key):
@@ -789,7 +816,7 @@ class ExportToJson(bpy.types.Operator, bpy_extras.io_utils.ExportHelper):
 
         self.export_dict["name"] = self.sprite_object.name
         self.export_dict["changelog"] = [
-            (time.strftime("%d/%m/%Y") + " - " + time.strftime("%H:%M:%S"))
+            time.strftime("%d/%m/%Y") + " - " + time.strftime("%H:%M:%S")
         ]
         self.export_dict["nodes"] = []
 
