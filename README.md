@@ -4,7 +4,7 @@
 
 the Addon of Cutout Animation Tools for Blender, which allows you to create cutout animations in Blender.
 
-[![GitHub release](https://img.shields.io/github/release/Aodaruma/coa_tools2.svg)](https://github.com/Aodaruma/coa_tools2/releases)
+[![GitHub release](https://img.shields.io/github/release/Aodaruma/coa_tools2.svg)](https://github.com/Aodaruma/coa_tools2/releases) [![Discord](https://img.shields.io/badge/Discord-fff.svg?logo=discord&style=social)](https://discord.gg/5vhZmCXczr)
 
 ## Table of Contents
 
