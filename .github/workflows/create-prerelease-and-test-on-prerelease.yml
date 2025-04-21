@@ -22,7 +22,7 @@ jobs:
           tag_name: ${{ env.TAG }}
           release_name: "Prerelease ${{ env.TAG }}"
           body: "Automatic prerelease from prelease branch"
-          draft: false
+          draft: true
           prerelease: true
 
   syntax_checks:
