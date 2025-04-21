@@ -1,0 +1,57 @@
+# .github/workflows/release-on-master.yml
+name: Release on Master
+on:
+  push:
+    branches: [ master ]
+
+permissions:
+  contents: write
+
+jobs:
+  build_and_zip:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create zip
+        run: |
+          for dir in GIMP Krita coa_tools2 Photoshop Godot; do
+            zip -r "${dir}.zip" "./${dir}"
+          done
+
+  create_release:
+    needs: build_and_zip
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.tag_bump.outputs.new_tag }}
+          release_name: Release ${{ steps.tag_bump.outputs.new_tag }}
+          body: |
+            Changes since last release...
+          draft: true
+          prerelease: false
+      - name: Upload Assets
+        uses: actions/upload-release-asset@v1
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: '*.zip'
+          asset_name: ${{ basename(asset_path) }}
+          asset_content_type: application/zip
+
+  bump_tag:
+    needs: create_release
+    runs-on: ubuntu-latest
+    outputs:
+      new_tag: ${{ steps.bump.outputs.new_tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate version tag
+        id: bump
+        uses: mathieudutour/github-tag-action@v5
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
