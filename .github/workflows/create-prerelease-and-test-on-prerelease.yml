@@ -1,0 +1,50 @@
+# .github/workflows/prerelease-on-prelease.yml
+name: Prerelease on Prelease
+on:
+  push:
+    branches: [ prelease ]
+
+permissions:
+  contents: write
+
+jobs:
+  prerelease:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate version tag
+        run: echo "TAG=v2.${{ github.run_number }}.${{ github.run_attempt }}-beta_${{ github.sha::7 }}" >> $GITHUB_ENV
+      - name: Create Prerelease
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ env.TAG }}
+          release_name: "Prerelease ${{ env.TAG }}"
+          body: "Automatic prerelease from prelease branch"
+          draft: true
+          prerelease: true
+
+  syntax_checks:
+    needs: prerelease
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        script_path:
+          - GIMP/coatools_exporter.py
+          - Photoshop/BlenderExporter.jsx
+          - coa_tools2/__init__.py
+          - Krita/coa_tools2_exporter/__init__.py
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax Check
+        run: |
+          case "${{ matrix.script_path##*. }}" in
+            py)
+              python -m py_compile "${{ matrix.script_path }}";;
+            jsx)
+              node -c "${{ matrix.script_path }}";;
+            *)
+              echo "Unknown extension"; exit 1;;
+          esac

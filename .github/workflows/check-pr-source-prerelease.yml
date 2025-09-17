@@ -1,0 +1,17 @@
+# .github/workflows/check-pr-source-prerelease.yml
+name: check-pr-source-prelease
+on:
+  pull_request:
+    branches: [ prelease ]
+
+jobs:
+  validate_source:
+    runs-on: ubuntu-latest
+    steps:
+      - name: source branch check
+        if: >
+          github.head_ref != 'develop' &&
+          !startsWith(github.head_ref, 'hotfix-')
+        run: |
+          echo "ERROR: Only develop and hotfix-* branches can be merged into prelease."
+          exit 1

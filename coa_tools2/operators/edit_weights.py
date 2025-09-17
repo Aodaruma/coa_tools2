@@ -59,7 +59,8 @@ class COATOOLS2_OT_EditWeights(bpy.types.Operator):
     def poll(cls, context):
         return True
 
-    def __init__(self):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.sprite_object_name = None
         self.obj_name = None
         self.armature_name = None

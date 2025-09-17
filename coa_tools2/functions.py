@@ -519,7 +519,10 @@ def create_action(context, item=None, obj=None):
     action.use_fake_user = True
     if obj.animation_data == None:
         obj.animation_data_create()
-    obj.animation_data.action = action
+    if b_version_smaller_than((4, 4, 0)):
+        obj.animation_data.action = action
+    else:
+        obj.animation_data.action_slot = action.slots[0]
     context.view_layer.update()
 
 
@@ -588,7 +591,10 @@ def set_action(context, item=None):
                 action.use_fake_user = True
                 if child.animation_data == None:
                     child.animation_data_create()
-                child.animation_data.action = action
+                if b_version_smaller_than((4, 4, 0)):
+                    child.animation_data.action = action
+                else:
+                    child.animation_data.action_slot = action.slots[0]
     context.scene.frame_set(context.scene.frame_current)
     context.view_layer.update()
 

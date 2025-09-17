@@ -15,6 +15,16 @@
             }
         ]
     },
-    "default": {},
+    "default": {
+        "fake-bpy-module-latest": {
+            "hashes": [
+                "sha256:d96f852521352798aecaf2810afcbaf9dbd739247c3d0506dc512fb58eacd0a9",
+                "sha256:e82caaa559cf91f624a8858795047d87ab3566c7d4180c260d85bfa18eef2db5"
+            ],
+            "index": "pypi",
+            "markers": "python_version >= '3.8'",
+            "version": "==20250416"
+        }
+    },
     "develop": {}
 }
