@@ -961,7 +961,7 @@ class COATOOLS2_OT_SelectChild(bpy.types.Operator):
     def shift_select_child(self, context, event):
         self.change_object_mode(context)
 
-        self.outliner_index_old = context.scene.coa_tools2["outliner_index"]
+        self.outliner_index_old = context.scene.coa_tools2.outliner_index
         outliner = context.scene.coa_tools2.outliner
 
         start_index = min(self.outliner_index_old, self.outliner_index)

@@ -122,22 +122,18 @@ def draw_sculpt_ui(self, context, layout):
             col.template_ID_preview(settings, "brush", new="brush.add", rows=3, cols=8)
 
         row = layout.row(align=True)
-        settings = (
-            toolsettings.unified_paint_settings
-            if toolsettings.unified_paint_settings.use_unified_size
-            else toolsettings.sculpt.brush
-        )
+        unified = getattr(toolsettings, "unified_paint_settings", None)
+        sculpt = getattr(toolsettings, "sculpt", None)
+        brush = sculpt.brush if sculpt and getattr(sculpt, "brush", None) else None
 
-        if settings.use_locked_size:
-            icon = "UNLOCKED"
-        elif not settings.use_locked_size:
-            icon = "LOCKED"
-
-        col = layout.column(align=True)
-
-        subrow = col.row(align=True)
-        subrow.prop(settings, "use_locked_size", text="", toggle=True, icon=icon)
-        subrow.prop(settings, "size", slider=True)
+        settings = unified if (unified and getattr(unified, "use_unified_size", False)) else brush
+        # 5.0 では unified_paint_settings が無い環境があるため存在チェック
+        if settings and hasattr(settings, "size"):
+            icon = "UNLOCKED" if getattr(settings, "use_locked_size", False) else "LOCKED"
+            col = layout.column(align=True)
+            subrow = col.row(align=True)
+            subrow.prop(settings, "use_locked_size", text="", toggle=True, icon=icon)
+            subrow.prop(settings, "size", slider=True)
         subrow.prop(settings, "use_unified_size", text="")
         col.prop(settings, "strength")
 
@@ -885,9 +881,15 @@ def set_alpha(obj, context, alpha):
 def change_slot_mesh_data(context, obj, obj_eval=None):
     if len(obj.coa_tools2.slot) > 0:
         slot_len = len(obj.coa_tools2.slot) - 1
-        obj.coa_tools2["slot_index"] = min(
+        new_index = min(
             obj.coa_tools2.slot_index, max(0, len(obj.coa_tools2.slot) - 1)
         )
+        if obj.coa_tools2.slot_index != new_index:
+            object.__setattr__(obj.coa_tools2, "_lock_slot_index_update", True)
+            try:
+                obj.coa_tools2.slot_index = new_index
+            finally:
+                object.__setattr__(obj.coa_tools2, "_lock_slot_index_update", False)
         if obj_eval == None:
             obj_eval = obj
         idx = max(min(obj_eval.coa_tools2.slot_index, len(obj.coa_tools2.slot) - 1), 0)
@@ -897,10 +899,18 @@ def change_slot_mesh_data(context, obj, obj_eval=None):
         obj.data = slot.mesh
         set_alpha(obj, context, obj.coa_tools2.alpha)
         for slot2 in obj.coa_tools2.slot:
-            if slot != slot2:
-                slot2["active"] = False
-            else:
-                slot2["active"] = True
+            if slot != slot2 and slot2.active:
+                object.__setattr__(slot2, "_lock_active_update", True)
+                try:
+                    slot2.active = False
+                finally:
+                    object.__setattr__(slot2, "_lock_active_update", False)
+            elif slot == slot2 and not slot2.active:
+                object.__setattr__(slot2, "_lock_active_update", True)
+                try:
+                    slot2.active = True
+                finally:
+                    object.__setattr__(slot2, "_lock_active_update", False)
         if "coa_base_sprite" in obj.modifiers:
             if slot.mesh.coa_tools2.hide_base_sprite:
                 obj.modifiers["coa_base_sprite"].show_render = True
