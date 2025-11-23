@@ -1666,6 +1666,21 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
         line_width=2,
         point_size=None,
     ):  # draw_types -> LINE_STRIP, LINES, POINTS
+        def _coerce_pos(seq):
+            pos = []
+            for c in seq:
+                try:
+                    if hasattr(c, "to_tuple"):
+                        pos.append(tuple(c))
+                    else:
+                        pos.append(tuple(c))
+                except TypeError:
+                    try:
+                        pos.append((float(c),))
+                    except Exception:
+                        pass
+            return pos
+
         gpu.state.blend_set("ALPHA")
         gpu.state.line_width_set(line_width)
         if point_size != None:
@@ -1687,7 +1702,7 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
                 shader_type_used = CONSTANTS.SHADER_UNIFORM_COLOR
             shader = gpu.shader.from_builtin(shader_type_used)
 
-        content = {"pos": [float(x) for x in coords]}
+        content = {"pos": _coerce_pos(coords)}
         if shader_type_used not in [
             CONSTANTS.SHADER_2D_UNIFORM_COLOR,
             CONSTANTS.SHADER_UNIFORM_COLOR,
