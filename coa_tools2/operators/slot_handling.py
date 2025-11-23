@@ -197,7 +197,11 @@ class COATOOLS2_OT_CreateSlotObject(bpy.types.Operator):
                             # item.name = slot.name
                             item.mesh = slot.mesh
                     if item != None:
-                        item["active"] = False
+                        object.__setattr__(item, "_lock_active_update", True)
+                        try:
+                            item.active = False
+                        finally:
+                            object.__setattr__(item, "_lock_active_update", False)
         obj.coa_tools2.slot[0].active = True
         ### delete original sprite
         for sprite in objs:

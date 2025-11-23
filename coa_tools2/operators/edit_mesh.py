@@ -38,7 +38,6 @@ from bpy.props import (
 )
 from .. import functions
 from ..functions_draw import *
-import bgl
 import blf
 from math import radians, degrees
 import traceback
@@ -1667,45 +1666,61 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
         line_width=2,
         point_size=None,
     ):  # draw_types -> LINE_STRIP, LINES, POINTS
-        if functions.b_version_bigger_than((4, 0, 0)):
-            gpu.state.blend_set("ALPHA")
-            if shader_type == CONSTANTS.SHADER_2D_UNIFORM_COLOR:
-                shader_type = CONSTANTS.SHADER_UNIFORM_COLOR
-            elif (
-                shader_type == CONSTANTS.SHADER_3D_SMOOTH_COLOR
-                or shader_type == CONSTANTS.SHADER_2D_SMOOTH_COLOR
-            ):
-                shader_type = CONSTANTS.SHADER_SNMOOTH_COLOR
-        else:
-            # will be deprecated bgl
-            bgl.glLineWidth(line_width)
-            if point_size != None:
-                bgl.glPointSize(point_size)
-            bgl.glEnable(bgl.GL_BLEND)
-            bgl.glEnable(bgl.GL_LINE_SMOOTH)
+        def _coerce_pos(seq):
+            pos = []
+            for c in seq:
+                try:
+                    if hasattr(c, "to_tuple"):
+                        pos.append(tuple(c))
+                    else:
+                        pos.append(tuple(c))
+                except TypeError:
+                    try:
+                        pos.append((float(c),))
+                    except Exception:
+                        pass
+            return pos
 
-        shader = gpu.shader.from_builtin(shader_type)
-        content = {"pos": [float(x) for x in coords]}
-        if shader_type not in [
+        gpu.state.blend_set("ALPHA")
+        gpu.state.line_width_set(line_width)
+        if point_size != None:
+            gpu.state.point_size_set(point_size)
+
+        # fallbacks for older builtin names
+        shader_type_used = shader_type
+        try:
+            shader = gpu.shader.from_builtin(shader_type_used)
+        except (ValueError, TypeError):
+            if shader_type == CONSTANTS.SHADER_2D_UNIFORM_COLOR:
+                shader_type_used = CONSTANTS.SHADER_UNIFORM_COLOR
+            elif shader_type in (
+                CONSTANTS.SHADER_3D_SMOOTH_COLOR,
+                CONSTANTS.SHADER_2D_SMOOTH_COLOR,
+            ):
+                shader_type_used = CONSTANTS.SHADER_SMOOTH_COLOR
+            else:
+                shader_type_used = CONSTANTS.SHADER_UNIFORM_COLOR
+            shader = gpu.shader.from_builtin(shader_type_used)
+
+        content = {"pos": _coerce_pos(coords)}
+        if shader_type_used not in [
             CONSTANTS.SHADER_2D_UNIFORM_COLOR,
             CONSTANTS.SHADER_UNIFORM_COLOR,
         ]:
             content["color"] = color
         batch = batch_for_shader(shader, draw_type, content)
         shader.bind()
-        if shader_type in [
+        if shader_type_used in [
             CONSTANTS.SHADER_2D_UNIFORM_COLOR,
             CONSTANTS.SHADER_UNIFORM_COLOR,
         ]:
             shader.uniform_float("color", color)
         batch.draw(shader)
 
-        if functions.b_version_bigger_than((4, 0, 0)):
-            gpu.state.blend_set("NONE")
-        else:
-            # will be deprecated bgl
-            bgl.glDisable(bgl.GL_BLEND)
-            bgl.glDisable(bgl.GL_LINE_SMOOTH)
+        gpu.state.line_width_set(1.0)
+        if point_size != None:
+            gpu.state.point_size_set(1.0)
+        gpu.state.blend_set("NONE")
         return shader
 
     def coord_3d_to_2d(self, coord):
@@ -1759,8 +1774,6 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
 
                     color = green
                     if self.selected_vert_coord != None:
-                        if not functions.b_version_bigger_than((4, 0, 0)):
-                            bgl.glEnable(bgl.GL_LINE_SMOOTH)
                         vertex_vec = self.selected_vert_coord + y_offset
                         if self.point_type == "VERT":
                             color = green

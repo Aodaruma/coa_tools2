@@ -1,5 +1,7 @@
 import bpy
-import bgl,blf
+import gpu
+from gpu_extras.batch import batch_for_shader
+import blf
 
 def clamp(n, minn, maxn):
     return max(min(maxn, n), minn)
@@ -20,20 +22,23 @@ def draw_edit_mode(self,context,color=[0.41, 0.38, 1.0, 1.0],text="Edit Shapekey
     b_width = int(240*scale)
     b_height = int(36*scale)
     
-    bgl.glEnable(bgl.GL_BLEND)
-    bgl.glColor4f(color[0],color[1],color[2],color[3])
-    
-    bgl.glBegin(bgl.GL_QUADS)
-    bgl.glVertex2i(x-b_width, 0)
-    bgl.glVertex2i(x, 0)
-    bgl.glVertex2i(x, b_height)
-    bgl.glVertex2i(x-b_width, b_height)
-    bgl.glVertex2i(x-b_width, 0) 
-    bgl.glEnd()
+    gpu.state.blend_set("ALPHA")
+
+    # fill box
+    quad_coords = [
+        (x - b_width, 0),
+        (x, 0),
+        (x, b_height),
+        (x - b_width, b_height),
+    ]
+    shader = gpu.shader.from_builtin("2D_UNIFORM_COLOR")
+    batch = batch_for_shader(shader, "TRI_FAN", {"pos": quad_coords})
+    shader.bind()
+    shader.uniform_float("color", color)
+    batch.draw(shader)
     
     ### draw edit type
     font_id = 0  # XXX, need to find out how best to get this.
-    bgl.glColor4f(0.041613, 0.041613, 0.041613, 1.000000)
     text_offset = int((220+offset)*scale)
     text_y_offset = int(11 * scale)
     blf.position(font_id, x-text_offset, text_y_offset, 0)
@@ -41,20 +46,18 @@ def draw_edit_mode(self,context,color=[0.41, 0.38, 1.0, 1.0],text="Edit Shapekey
     blf.draw(font_id, text)
     
     ### draw viewport outline
-    bgl.glEnable(bgl.GL_BLEND)
-    bgl.glColor4f(color[0],color[1],color[2],color[3])
-    bgl.glLineWidth(4)
+    gpu.state.line_width_set(4.0)
+    outline_coords = [
+        (r_offset, 0),
+        (r_offset + x, 0),
+        (r_offset + x, y),
+        (r_offset, y),
+        (r_offset, 0),
+    ]
+    outline_batch = batch_for_shader(shader, "LINE_STRIP", {"pos": outline_coords})
+    shader.uniform_float("color", color)
+    outline_batch.draw(shader)
 
-    bgl.glBegin(bgl.GL_LINE_STRIP)
-    bgl.glVertex2i(r_offset, 0)
-    bgl.glVertex2i(r_offset+x, 0)
-    bgl.glVertex2i(r_offset+x, y)
-    bgl.glVertex2i(r_offset+0, y)
-    bgl.glVertex2i(r_offset, 0)
-
-    bgl.glEnd()
-
-    # restore opengl defaults
-    bgl.glLineWidth(1)
-    bgl.glDisable(bgl.GL_BLEND)
-    bgl.glColor4f(0.0, 0.0, 0.0, 1.0)
+    # restore state
+    gpu.state.line_width_set(1.0)
+    gpu.state.blend_set("NONE")

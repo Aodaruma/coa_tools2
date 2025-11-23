@@ -1,5 +1,5 @@
 import bpy
-import blf, bgl
+import blf
 from mathutils import Vector
 from ..functions import get_sprite_object
 import gpu
@@ -123,45 +123,44 @@ class COATOOLS2_OT_ShowHelp(bpy.types.Operator):
         line_width=2,
         point_size=None,
     ):  # draw_types -> LINE_STRIP, LINES, POINTS
-        if b_version_bigger_than((4, 0, 0)):
-            gpu.state.blend_set("ALPHA")
-            if shader_type == CONSTANTS.SHADER_2D_UNIFORM_COLOR:
-                shader_type = CONSTANTS.SHADER_UNIFORM_COLOR
-            elif (
-                shader_type == CONSTANTS.SHADER_3D_SMOOTH_COLOR
-                or shader_type == CONSTANTS.SHADER_2D_SMOOTH_COLOR
-            ):
-                shader_type = CONSTANTS.SHADER_SNMOOTH_COLOR
-        else:
-            # will be deprecated bgl
-            bgl.glLineWidth(line_width)
-            if point_size != None:
-                bgl.glPointSize(point_size)
-            bgl.glEnable(bgl.GL_BLEND)
-            bgl.glEnable(bgl.GL_LINE_SMOOTH)
+        gpu.state.blend_set("ALPHA")
+        gpu.state.line_width_set(line_width)
+        if point_size != None:
+            gpu.state.point_size_set(point_size)
 
-        shader = gpu.shader.from_builtin(shader_type)
+        shader_type_used = shader_type
+        try:
+            shader = gpu.shader.from_builtin(shader_type_used)
+        except (ValueError, TypeError):
+            if shader_type == CONSTANTS.SHADER_2D_UNIFORM_COLOR:
+                shader_type_used = CONSTANTS.SHADER_UNIFORM_COLOR
+            elif shader_type in (
+                CONSTANTS.SHADER_3D_SMOOTH_COLOR,
+                CONSTANTS.SHADER_2D_SMOOTH_COLOR,
+            ):
+                shader_type_used = CONSTANTS.SHADER_SMOOTH_COLOR
+            else:
+                shader_type_used = CONSTANTS.SHADER_UNIFORM_COLOR
+            shader = gpu.shader.from_builtin(shader_type_used)
         content = {"pos": coords}
-        if shader_type not in [
+        if shader_type_used not in [
             CONSTANTS.SHADER_2D_UNIFORM_COLOR,
             CONSTANTS.SHADER_UNIFORM_COLOR,
         ]:
             content["color"] = color
         batch = batch_for_shader(shader, draw_type, content)
         shader.bind()
-        if shader_type in [
+        if shader_type_used in [
             CONSTANTS.SHADER_2D_UNIFORM_COLOR,
             CONSTANTS.SHADER_UNIFORM_COLOR,
         ]:
             shader.uniform_float("color", color)
         batch.draw(shader)
 
-        if b_version_bigger_than((4, 0, 0)):
-            gpu.state.blend_set("NONE")
-        else:
-            # will be deprecated bgl
-            bgl.glDisable(bgl.GL_BLEND)
-            bgl.glDisable(bgl.GL_LINE_SMOOTH)
+        gpu.state.line_width_set(1.0)
+        if point_size != None:
+            gpu.state.point_size_set(1.0)
+        gpu.state.blend_set("NONE")
         return shader
 
     def draw_callback_px(self):
@@ -380,6 +379,5 @@ class COATOOLS2_OT_ShowHelp(bpy.types.Operator):
 
         # restore opengl defaults
         if not b_version_bigger_than((4, 0, 0)):
-            bgl.glLineWidth(1)
-            bgl.glDisable(bgl.GL_BLEND)
-        # bgl.glColor4f(0.0, 0.0, 0.0, 1.0)
+            gpu.state.line_width_set(1.0)
+            gpu.state.blend_set("NONE")
