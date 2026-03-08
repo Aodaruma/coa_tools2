@@ -22,7 +22,7 @@ bl_info = {
     "name": "COA Tools2",
     "description": "This Addon provides a Toolset for a 2D Animation Workflow.",
     "author": "Aodaruma",
-    "version": (1, 0, 0),
+    "version": (2, 0, 1),
     "blender": (3, 40, 0),
     "location": "View 3D > Tools > Cutout Animation Tools",
     "warning": "",
@@ -39,6 +39,9 @@ import tempfile
 from bpy.app.handlers import persistent
 
 from . import addon_updater_ops
+from . import dependency_manager
+
+dependency_manager.ensure_vendor_path()
 
 # load and reload submodules
 ##################################
@@ -53,6 +56,7 @@ from .functions import *
 
 from .operators import create_sprite_object
 from .operators import help_display
+from .operators import install_dependencies
 
 from .operators import advanced_settings
 from .operators import animation_handling
@@ -73,6 +77,7 @@ from .operators import view_sprites
 from .operators import version_converter
 from .operators import change_alpha_mode
 from .operators import convert_from_old
+from .operators import copy_mesh_data
 
 from .operators.exporter import export_dragonbones
 from .operators.exporter import export_creature
@@ -86,14 +91,15 @@ import traceback
 class COATools2Preferences(bpy.types.AddonPreferences):
     bl_idname = __package__
 
-    sprite_import_export_scale: bpy.props.FloatProperty(
-        name="Sprite import/export scale", default=0.01
+    enable_updater: bpy.props.BoolProperty(
+        name="Enable Updater",
+        description="If enabled, an update notification will appear when a new version is available",
+        default=True,
     )
-
     auto_check_update: bpy.props.BoolProperty(
         name="Auto-check for Update",
         description="If enabled, auto-check for updates using an interval",
-        default=True,
+        default=False,
     )
     updater_intrval_months: bpy.props.IntProperty(
         name="Months",
@@ -121,12 +127,46 @@ class COATools2Preferences(bpy.types.AddonPreferences):
         min=0,
         max=59,
     )
+    sprite_import_export_scale: bpy.props.FloatProperty(
+        name="Scale",
+        description="Import/Export scale factor, 1 px = X units",
+        default=0.01,
+    )
 
     def draw(self, context):
         layout = self.layout
         layout.prop(self, "sprite_import_export_scale")
 
-        addon_updater_ops.update_settings_ui(self, context)
+        deps_state = dependency_manager.dependency_state()
+        deps_ok = all(deps_state.values())
+
+        box = layout.box()
+        box.label(text="Automesh Dependencies (Optional)")
+        row = box.row(align=True)
+        row.label(
+            text="numpy: " + ("Installed" if deps_state["numpy"] else "Missing"),
+            icon="CHECKMARK" if deps_state["numpy"] else "ERROR",
+        )
+        row = box.row(align=True)
+        row.label(
+            text="opencv (cv2): " + ("Installed" if deps_state["cv2"] else "Missing"),
+            icon="CHECKMARK" if deps_state["cv2"] else "ERROR",
+        )
+        row = box.row(align=True)
+        row.operator(
+            "coa_tools2.install_python_dependencies",
+            icon="IMPORT",
+            text="Install numpy / opencv",
+        )
+        if not deps_ok:
+            box.label(text="After install, restart Blender or re-enable addon.", icon="INFO")
+
+        row = layout.row(align=True)
+        row.prop(self, "enable_updater")
+        row.prop(self, "auto_check_update", text="Auto-check for Update")
+
+        if self.enable_updater:
+            addon_updater_ops.update_settings_ui(self, context)
 
 
 classes = (
@@ -148,6 +188,7 @@ classes = (
     # operator
     create_sprite_object.COATOOLS2_OT_CreateSpriteObject,
     create_sprite_object.COATOOLS2_OT_DefineSpriteObject,
+    install_dependencies.COATOOLS2_OT_InstallPythonDependencies,
     import_sprites.JsonImportData,
     import_sprites.COATOOLS2_OT_CreateMaterialGroup,
     import_sprites.COATOOLS2_OT_ImportSprite,
@@ -170,6 +211,7 @@ classes = (
     edit_mesh.COATOOLS2_OT_GenerateMeshFromEdgesAndVerts,
     edit_mesh.COATOOLS2_OT_DrawContour,
     edit_mesh.COATOOLS2_OT_PickEdgeLength,
+    copy_mesh_data.COATOOLS2_OT_CopyMeshData,
     automesh.COATOOLS2_OT_AutomeshFromTexture,
     edit_armature.COATOOLS2_OT_TooglePoseMode,
     edit_armature.COATOOLS2_OT_BindMeshToBones,
@@ -254,6 +296,7 @@ def register():
         bpy.utils.register_class(cls)
 
     # register tools
+    # deleted in upstream/master, need to be validated whether it is still needed
     bpy.utils.register_tool(
         edit_mesh.COATOOLS2_TO_DrawPolygon,
         after={"builtin.cursor"},

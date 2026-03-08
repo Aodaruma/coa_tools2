@@ -18,13 +18,19 @@ from bpy.props import (
 )
 from .. import functions
 from ..functions_draw import *
-import bgl
-import blf
 from math import radians, degrees
 import pdb
-import cv2
 from typing import Optional
-import numpy as np
+
+try:
+    import cv2
+except ModuleNotFoundError:
+    cv2 = None
+
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
 
 # ======================================================================================================================
 
@@ -50,6 +56,9 @@ def get_contour(
     padding: Optional[int] = 50,
 ):
     """Get the contour points of image"""
+    if cv2 is None or np is None:
+        return [], []
+
     # get image with alpha
     img = cv2.imread(filepath, cv2.IMREAD_UNCHANGED)
     # check if image has alpha channel
@@ -212,6 +221,7 @@ class COATOOLS2_OT_AutomeshFromTexture(bpy.types.Operator):
     padding = 50
     old_resolution = 0.25
     old_margin = 5.0
+    old_threshold = 127.0
 
     @classmethod
     def poll(cls, context):
@@ -220,11 +230,24 @@ class COATOOLS2_OT_AutomeshFromTexture(bpy.types.Operator):
         )
 
     def execute(self, context):
+        if cv2 is None or np is None:
+            self.report(
+                {"ERROR"},
+                "Automesh requires cv2 and numpy in Blender Python environment.",
+            )
+            return {"CANCELLED"}
+
+        wm = context.window_manager
+        wm["coa_tools2_automesh_nonce"] = int(
+            wm.get("coa_tools2_automesh_nonce", 0)
+        ) + 1
+
         print("Automesh from texture...")
         if (
             self.outer_contours is None
             or self.inner_contours is None
             or self.resolution != self.old_resolution
+            or self.threshold != self.old_threshold
             or self.margin != self.old_margin
         ):
             print("get contours...")
@@ -252,6 +275,7 @@ class COATOOLS2_OT_AutomeshFromTexture(bpy.types.Operator):
 
         self.old_resolution = self.resolution
         self.old_margin = self.margin
+        self.old_threshold = self.threshold
 
         if self.outer_contours is not None and len(self.outer_contours) > 0:
             print("reconstruct contours...")
@@ -270,6 +294,11 @@ class COATOOLS2_OT_AutomeshFromTexture(bpy.types.Operator):
                 self.resolution,
                 self.is_create_faces,
             )
+            obj = context.active_object
+            if obj is not None and obj.type == "MESH":
+                if hasattr(obj.data, "coa_tools2"):
+                    obj.data.coa_tools2.hide_base_sprite = True
+                functions.hide_base_sprite(obj)
             print("done")
             return {"FINISHED"}
         else:
