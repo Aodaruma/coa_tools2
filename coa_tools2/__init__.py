@@ -193,6 +193,7 @@ classes = (
     edit_shapekey.COATOOLS2_OT_ShapekeyRemove,
     edit_shapekey.COATOOLS2_OT_ShapekeyRename,
     edit_shapekey.COATOOLS2_OT_EditShapekeyMode,
+    edit_shapekey.COATOOLS2_OT_CreateShapekeySliderDriver,
     edit_weights.COATOOLS2_OT_EditWeights,
     slot_handling.COATOOLS2_OT_ExtractSlots,
     slot_handling.COATOOLS2_OT_CreateSlotObject,
@@ -262,6 +263,16 @@ def register():
     for cls in classes:
         bpy.utils.register_class(cls)
 
+    try:
+        bpy.types.VIEW3D_MT_armature_add.remove(
+            edit_shapekey.add_armature_menu_shapekey_slider_driver
+        )
+    except Exception:
+        pass
+    bpy.types.VIEW3D_MT_armature_add.append(
+        edit_shapekey.add_armature_menu_shapekey_slider_driver
+    )
+
     # register tools
     bpy.utils.register_tool(
         edit_mesh.COATOOLS2_TO_DrawPolygon,
@@ -286,6 +297,13 @@ def register():
 
 def unregister():
     addon_updater_ops.unregister()
+
+    try:
+        bpy.types.VIEW3D_MT_armature_add.remove(
+            edit_shapekey.add_armature_menu_shapekey_slider_driver
+        )
+    except Exception:
+        pass
 
     # unregister classes
     for cls in classes:
