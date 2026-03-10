@@ -1,0 +1,17 @@
+name: check-pr-source-master
+
+on:
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  validate_source:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate source branch
+        run: |
+          if [ "${{ github.head_ref }}" != "prerelease" ]; then
+            echo "ERROR: Only prerelease branch can be merged into master."
+            exit 1
+          fi
