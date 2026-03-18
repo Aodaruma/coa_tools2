@@ -82,8 +82,20 @@ def exit_edit_shapekey(self, context):
 
 
 def hide_base_sprite(self, context):
-    # hide_base_sprite(self)
-    functions.hide_base_sprite(context.active_object)
+    mesh = self.id_data if hasattr(self, "id_data") else None
+    if mesh is None:
+        return
+
+    target_objects = [
+        obj for obj in bpy.data.objects if obj.type == "MESH" and obj.data == mesh
+    ]
+    active_obj = context.active_object if context is not None else None
+    if active_obj in target_objects:
+        target_objects.remove(active_obj)
+        target_objects.insert(0, active_obj)
+
+    for obj in target_objects:
+        functions.hide_base_sprite(obj)
 
 
 def change_slot_mesh(self, context):
@@ -98,6 +110,18 @@ def change_slot_mesh(self, context):
 
 def change_edit_mode(self, context):
     if self.edit_mesh == False:
+        wm = context.window_manager if context is not None else None
+        if wm is not None and bool(wm.get("coa_tools2_edit_mesh_modal_running", False)):
+            return
+        active_obj = context.active_object
+        # Avoid breaking local-view isolation when edit_mesh is toggled off temporarily
+        # by undo/redo while edit mesh modal operator is still running.
+        if (
+            active_obj is not None
+            and active_obj.type == "MESH"
+            and active_obj.mode == "EDIT"
+        ):
+            return
         bpy.ops.object.mode_set(mode="OBJECT")
         functions.set_local_view(False)
 

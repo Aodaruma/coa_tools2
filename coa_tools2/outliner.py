@@ -62,100 +62,91 @@ def select_outliner_object(self, context):
 
 
 def set_hide(self, value):
-    try:
-        if self.entry_type in ["OBJECT", "SPRITE", "BONE_PARENT"]:
-            selected_object = bpy.context.view_layer.objects[self.name]
-            selected_object.hide_set(value)
-            selected_object.hide_viewport = value
-            selected_object.hide_render = value
-            outliner_list = getattr(self.id_data.coa_tools2, "outliner", None)
-            idx = getattr(self.id_data.coa_tools2, "outliner_index", -1)
-            if outliner_list is not None and 0 <= idx < len(outliner_list):
-                try:
-                    if outliner_list[idx].name == self.name:
-                        selected_object.select_set(not value)
-                except Exception:
-                    pass
-        elif self.entry_type in ["BONE"]:
-            selected_object = bpy.context.view_layer.objects[self.name]
-            bone = selected_object.data.bones[self.display_name]
-            bone.hide = value
-    except KeyError:
-        pass
+    if self.entry_type in ["OBJECT", "SPRITE", "BONE_PARENT"]:
+        selected_object = bpy.context.view_layer.objects[self.name]
+        selected_object.hide_set(value)
+        selected_object.hide_viewport = value
+        selected_object.hide_render = value
+        self["hide"] = value
+        if (
+            self.id_data.coa_tools2.outliner[
+                self.id_data.coa_tools2.outliner_index
+            ].name
+            == self.name
+        ):
+            selected_object.select_set(not value)
+
+    elif self.entry_type in ["BONE"]:
+        selected_object = bpy.context.view_layer.objects[self.name]
+        bone = selected_object.data.bones[self.display_name]
+        self["hide"] = value
+        bone.hide = value
 
 
 def get_hide(self):
-    try:
-        if self.entry_type in ["OBJECT", "SPRITE", "BONE_PARENT"]:
-            selected_object = bpy.context.view_layer.objects[self.name]
-            return (
-                True
-                if selected_object.hide_viewport
-                or selected_object.hide_get()
-                or selected_object.hide_render
-                else False
-            )
-        elif self.entry_type in ["BONE"]:
-            selected_object = bpy.context.view_layer.objects[self.name]
-            bone = selected_object.data.bones[self.display_name]
-            return bone.hide
-    except KeyError:
+    if self.entry_type in ["OBJECT", "SPRITE", "BONE_PARENT"]:
+        selected_object = bpy.context.view_layer.objects[self.name]
+        return (
+            True
+            if selected_object.hide_viewport
+            or selected_object.hide_get()
+            or selected_object.hide_render
+            else False
+        )
+    elif self.entry_type in ["BONE"]:
+        selected_object = bpy.context.view_layer.objects[self.name]
+        bone = selected_object.data.bones[self.display_name]
+        return bone.hide
+    else:
         return False
-    return False
 
 
 def set_hide_select(self, value):
-    try:
-        if self.entry_type in ["OBJECT", "SPRITE", "BONE_PARENT"]:
-            selected_object = bpy.context.view_layer.objects[self.name]
-            selected_object.hide_select = value
-        elif self.entry_type in ["BONE"]:
-            selected_object = bpy.context.view_layer.objects[self.name]
-            bone = selected_object.data.bones[self.display_name]
-            bone.hide_select = value
-    except KeyError:
-        pass
+    if self.entry_type in ["OBJECT", "SPRITE", "BONE_PARENT"]:
+        selected_object = bpy.context.view_layer.objects[self.name]
+        selected_object.hide_select = value
+        self["hide_select"] = value
+    elif self.entry_type in ["BONE"]:
+        selected_object = bpy.context.view_layer.objects[self.name]
+        bone = selected_object.data.bones[self.display_name]
+        self["hide_select"] = value
+        bone.hide_select = value
 
 
 def get_hide_select(self):
-    try:
-        if self.entry_type in ["OBJECT", "SPRITE", "BONE_PARENT"]:
-            selected_object = bpy.context.view_layer.objects[self.name]
-            return selected_object.hide_select
-        elif self.entry_type in ["BONE"]:
-            selected_object = bpy.context.view_layer.objects[self.name]
-            bone = selected_object.data.bones[self.display_name]
-            return bone.hide_select
-    except KeyError:
+    if self.entry_type in ["OBJECT", "SPRITE", "BONE_PARENT"]:
+        selected_object = bpy.context.view_layer.objects[self.name]
+        return selected_object.hide_select
+    elif self.entry_type in ["BONE"]:
+        selected_object = bpy.context.view_layer.objects[self.name]
+        bone = selected_object.data.bones[self.display_name]
+        return bone.hide_select
+    else:
         return False
-    return False
 
 
 def set_favorite(self, value):
-    try:
-        if self.entry_type in ["OBJECT", "SPRITE", "BONE_PARENT"]:
-            selected_object = bpy.context.view_layer.objects[self.name]
-            selected_object.coa_tools2.favorite = value
-        elif self.entry_type in ["BONE"]:
-            selected_object = bpy.context.view_layer.objects[self.name]
-            bone = selected_object.data.bones[self.display_name]
-            bone.coa_tools2.favorite = value
-    except KeyError:
-        pass
+    if self.entry_type in ["OBJECT", "SPRITE", "BONE_PARENT"]:
+        selected_object = bpy.context.view_layer.objects[self.name]
+        selected_object.coa_tools2.favorite = value
+        self["favorite"] = value
+    elif self.entry_type in ["BONE"]:
+        selected_object = bpy.context.view_layer.objects[self.name]
+        bone = selected_object.data.bones[self.display_name]
+        self["favorite"] = value
+        bone.coa_tools2.favorite = value
 
 
 def get_favorite(self):
-    try:
-        if self.entry_type in ["OBJECT", "SPRITE", "BONE_PARENT"]:
-            selected_object = bpy.context.view_layer.objects[self.name]
-            return selected_object.coa_tools2.favorite
-        elif self.entry_type in ["BONE"]:
-            selected_object = bpy.context.view_layer.objects[self.name]
-            bone = selected_object.data.bones[self.display_name]
-            return bone.coa_tools2.favorite
-    except KeyError:
+    if self.entry_type in ["OBJECT", "SPRITE", "BONE_PARENT"]:
+        selected_object = bpy.context.view_layer.objects[self.name]
+        return selected_object.coa_tools2.favorite
+    elif self.entry_type in ["BONE"]:
+        selected_object = bpy.context.view_layer.objects[self.name]
+        bone = selected_object.data.bones[self.display_name]
+        return bone.coa_tools2.favorite
+    else:
         return False
-    return False
 
 
 class COAOutliner(bpy.types.PropertyGroup):
@@ -184,15 +175,9 @@ class COATOOLS2_UL_Outliner(bpy.types.UIList):
         self, context, layout, data, item, icon, active_data, active_propname
     ):
         active_object = context.active_object
-        if not item.name:
-            layout.label(text="(missing)")
-            return
         obj = (
             bpy.data.objects[item.name]
-            if (
-                item.entry_type in ["SPRITE", "OBJECT"]
-                and item.name in bpy.data.objects
-            )
+            if item.entry_type in ["SPRITE", "OBJECT"]
             else None
         )
 
@@ -212,10 +197,7 @@ class COATOOLS2_UL_Outliner(bpy.types.UIList):
             row_active = layout.row(align=True)
             sprite_object = (
                 bpy.data.objects[item.sprite_object_name]
-                if (
-                    item.sprite_object_name
-                    and item.sprite_object_name in bpy.data.objects
-                )
+                if item.sprite_object_name in bpy.data.objects
                 else None
             )
 
@@ -551,7 +533,7 @@ def create_outliner_items(dummy):
             if "sprite_object" in obj.coa_tools2 and obj.type == "EMPTY":
                 i += 1
                 item = outliner.add()
-                item.entry_type = "UPDATE_SPRITE_OBJECT"
+                item["entry_type"] = "UPDATE_SPRITE_OBJECT"
                 break
 
             elif sprite_object == obj or (
@@ -560,91 +542,91 @@ def create_outliner_items(dummy):
             ):
                 i += 1
                 item = outliner.add()
-                item.name = obj.name
-                item.display_name = obj.name
-                item.index = i
-                item.entry_type = (
+                item["name"] = obj.name
+                item["display_name"] = obj.name
+                item["index"] = i
+                item["entry_type"] = (
                     "SPRITE"
                     if obj.type == "MESH" and "sprite" in obj.coa_tools2
                     else "OBJECT"
                 )
-                item.object_type = obj.type
-                item.hierarchy_level = 0 if obj == sprite_object else 1
-                item.slot_type = obj.coa_tools2.type
-                item.selected = obj.select_get()
-                item.active = obj == active_object
-                item.hide = (
+                item["object_type"] = obj.type
+                item["hierarchy_level"] = 0 if obj == sprite_object else 1
+                item["slot_type"] = obj.coa_tools2.type
+                item["selected"] = obj.select_get()
+                item["active"] = obj == active_object
+                item["hide"] = (
                     True
                     if (obj.hide_viewport or obj.hide_get() or obj.hide_render)
                     else False
                 )
-                item.hide_select = obj.hide_select
-                item.favorite = obj.coa_tools2.favorite
-                item.sprite_object_name = sprite_object.name
-            # if obj.type != "ARMATURE":
-            #     break
+                item["hide_select"] = obj.hide_select
+                item["favorite"] = obj.coa_tools2.favorite
+                item["sprite_object_name"] = sprite_object.name
+                # if obj.type != "ARMATURE":
+                #     break
 
-            if not sprite_object.coa_tools2.change_z_ordering:
-                # retrieve bones
-                search_active = context.scene.coa_tools2.outliner_filter_names != ""
-                if (
-                    obj.type == "ARMATURE"
-                    and sprite_object.coa_tools2.show_children
-                    and (
-                        (
-                            scene.coa_tools2.outliner_favorites
-                            and sprite_object.coa_tools2.favorite
-                        )
-                        or not scene.coa_tools2.outliner_favorites
-                    )
-                ):
-                    i += 1
-                    bone_item = outliner.add()
-                    bone_item.name = sprite_object.name
-                    bone_item.index = i
-                    bone_item.entry_type = "BONE_PARENT"
-                    bone_item.display_name = "Bones"
-                    bone_item.sprite_object_name = sprite_object.name
-                    bone_item.hide = sprite_object.hide_get()
-                    bone_item.hide_select = sprite_object.hide_select
-                    bone_item.hierarchy_level = 1
-
-                    if sprite_object.coa_tools2.show_bones or search_active:
-                        for bone in obj.data.bones:
-                            bone_name_found = substring_found(
-                                context.scene.coa_tools2.outliner_filter_names,
-                                bone.name,
+                if not sprite_object.coa_tools2.change_z_ordering:
+                    # retrieve bones
+                    search_active = context.scene.coa_tools2.outliner_filter_names != ""
+                    if (
+                        obj.type == "ARMATURE"
+                        and sprite_object.coa_tools2.show_children
+                        and (
+                            (
+                                scene.coa_tools2.outliner_favorites
+                                and sprite_object.coa_tools2.favorite
                             )
-                            if (bone.parent == None and not search_active) or (
-                                search_active and bone_name_found
-                            ):
-                                hierarchy_level = bone_item.hierarchy_level
-                                recursive_bone_iteration(
-                                    scene,
-                                    outliner,
-                                    sprite_object,
-                                    sprite_object,
-                                    item,
-                                    bone,
-                                    hierarchy_level,
-                                )
-
-                # retrieve slots
-                if (
-                    obj.coa_tools2.type == "SLOT"
-                    and obj.coa_tools2.slot_show
-                    and not sprite_object.coa_tools2.change_z_ordering
-                ):
-                    for slot in obj.coa_tools2.slot:
+                            or not scene.coa_tools2.outliner_favorites
+                        )
+                    ):
                         i += 1
-                        slot_item = outliner.add()
-                        slot_item.name = obj.name
-                        slot_item.display_name = slot.mesh.name
-                        slot_item.index = i
-                        slot_item.entry_type = "SLOT"
-                        slot_item.hierarchy_level = item.hierarchy_level + 1
-                        slot_item.slot_index = slot.index
-                        slot_item.sprite_object_name = sprite_object.name
+                        bone_item = outliner.add()
+                        bone_item["name"] = sprite_object.name
+                        bone_item["index"] = i
+                        bone_item["entry_type"] = "BONE_PARENT"
+                        bone_item["display_name"] = "Bones"
+                        bone_item["sprite_object_name"] = sprite_object.name
+                        bone_item["hide"] = sprite_object.hide_get()
+                        bone_item["hide_select"] = sprite_object.hide_select
+                        bone_item["hierarchy_level"] = 1
+
+                        if sprite_object.coa_tools2.show_bones or search_active:
+                            for bone in obj.data.bones:
+                                bone_name_found = substring_found(
+                                    context.scene.coa_tools2.outliner_filter_names,
+                                    bone.name,
+                                )
+                                if (bone.parent == None and not search_active) or (
+                                    search_active and bone_name_found
+                                ):
+                                    hierarchy_level = bone_item["hierarchy_level"]
+                                    recursive_bone_iteration(
+                                        scene,
+                                        outliner,
+                                        sprite_object,
+                                        sprite_object,
+                                        item,
+                                        bone,
+                                        hierarchy_level,
+                                    )
+
+                    # retrieve slots
+                    if (
+                        obj.coa_tools2.type == "SLOT"
+                        and obj.coa_tools2.slot_show
+                        and not sprite_object.coa_tools2.change_z_ordering
+                    ):
+                        for slot in obj.coa_tools2.slot:
+                            i += 1
+                            slot_item = outliner.add()
+                            slot_item["name"] = obj.name
+                            slot_item["display_name"] = slot.mesh.name
+                            slot_item["index"] = i
+                            slot_item["entry_type"] = "SLOT"
+                            slot_item["hierarchy_level"] = item["hierarchy_level"] + 1
+                            slot_item["slot_index"] = slot.index
+                            slot_item["sprite_object_name"] = sprite_object.name
 
     if active_object != None and active_object.name in outliner:
         item = outliner[active_object.name]
@@ -674,15 +656,17 @@ def recursive_bone_iteration(
     ) or not scene.coa_tools2.outliner_favorites:  # or (search_active and bone_name_found):
         i += 1
         bone_item = outliner.add()
-        bone_item.name = obj.name
-        bone_item.display_name = bone.name
-        bone_item.entry_type = "BONE"
-        bone_item.index = i
-        bone_item.sprite_object_name = sprite_object.name
-        bone_item.hide = bone.hide
-        bone_item.hide_select = bone.hide_select
-        bone_item.selected = bone.select
-        bone_item.hierarchy_level = parent_item.hierarchy_level + 1 + hierarchy_level
+        bone_item["name"] = obj.name
+        bone_item["display_name"] = bone.name
+        bone_item["entry_type"] = "BONE"
+        bone_item["index"] = i
+        bone_item["sprite_object_name"] = sprite_object.name
+        bone_item["hide"] = bone.hide
+        bone_item["hide_select"] = bone.hide_select
+        bone_item["selected"] = bone.select
+        bone_item["hierarchy_level"] = (
+            parent_item["hierarchy_level"] + 1 + hierarchy_level
+        )
         if not search_active:
             for child in bone.children:
                 if bone.coa_tools2.show_children:

@@ -302,48 +302,61 @@ def set_weights(self, context, obj):
 
 def hide_base_sprite(obj):
     context = bpy.context
-    selected_object = (
-        bpy.data.objects[context.active_object.name]
-        if bpy.context.active_object != None
-        else None
-    )
-    if selected_object != None:
-        if obj.type == "MESH" and "coa_base_sprite" in obj.vertex_groups:
-            orig_mode = obj.mode
-            context.view_layer.objects.active = obj
-            bpy.ops.object.mode_set(mode="OBJECT")
-            bpy.ops.object.mode_set(mode="EDIT")
-            me = obj.data
-            bm = bmesh.from_edit_mesh(me)
-            bm.verts.ensure_lookup_table()
+    if obj is None or obj.type != "MESH" or "coa_base_sprite" not in obj.vertex_groups:
+        return
 
-            vertex_idxs = []
-            if "coa_base_sprite" in obj.vertex_groups:
-                v_group_idx = obj.vertex_groups["coa_base_sprite"].index
-                for i, vert in enumerate(obj.data.vertices):
-                    for g in vert.groups:
-                        if g.group == v_group_idx:
-                            vertex_idxs.append(i)
+    active_object_before = context.view_layer.objects.active
+    selected_objects_before = [selected.name for selected in context.selected_objects]
+    orig_mode = obj.mode
 
-            for idx in vertex_idxs:
-                vert = bm.verts[idx]
-                vert.hide = True
-                vert.select = False
-                for edge in vert.link_edges:
-                    edge.hide = True
-                    edge.select = False
-                for face in vert.link_faces:
-                    face.hide = obj.data.coa_tools2.hide_base_sprite
-                    face.select = False
+    try:
+        for selected in context.selected_objects:
+            selected.select_set(False)
+        obj.select_set(True)
+        context.view_layer.objects.active = obj
 
-            if "coa_base_sprite" in obj.modifiers:
-                mod = obj.modifiers["coa_base_sprite"]
-                mod.show_viewport = obj.data.coa_tools2.hide_base_sprite
-                mod.show_render = obj.data.coa_tools2.hide_base_sprite
+        bpy.ops.object.mode_set(mode="OBJECT")
+        bpy.ops.object.mode_set(mode="EDIT")
+        me = obj.data
+        bm = bmesh.from_edit_mesh(me)
+        bm.verts.ensure_lookup_table()
 
-            bmesh.update_edit_mesh(me)
-            bpy.ops.object.mode_set(mode=orig_mode)
-        context.view_layer.objects.active = selected_object
+        vertex_idxs = []
+        v_group_idx = obj.vertex_groups["coa_base_sprite"].index
+        for i, vert in enumerate(obj.data.vertices):
+            for g in vert.groups:
+                if g.group == v_group_idx:
+                    vertex_idxs.append(i)
+
+        for idx in vertex_idxs:
+            vert = bm.verts[idx]
+            vert.hide = True
+            vert.select = False
+            for edge in vert.link_edges:
+                edge.hide = True
+                edge.select = False
+            for face in vert.link_faces:
+                face.hide = obj.data.coa_tools2.hide_base_sprite
+                face.select = False
+
+        if "coa_base_sprite" in obj.modifiers:
+            mod = obj.modifiers["coa_base_sprite"]
+            mod.show_viewport = obj.data.coa_tools2.hide_base_sprite
+            mod.show_render = obj.data.coa_tools2.hide_base_sprite
+
+        bmesh.update_edit_mesh(me)
+        bpy.ops.object.mode_set(mode=orig_mode)
+    finally:
+        for selected in context.selected_objects:
+            selected.select_set(False)
+        for name in selected_objects_before:
+            if name in bpy.data.objects:
+                bpy.data.objects[name].select_set(True)
+        if (
+            active_object_before is not None
+            and active_object_before.name in bpy.data.objects
+        ):
+            context.view_layer.objects.active = bpy.data.objects[active_object_before.name]
 
 
 def get_uv_from_vert(uv_layer, v):
@@ -465,11 +478,39 @@ def get_local_dimension(obj):
         return [(x1 - x0), (y1 - y0), offset]
 
 
+class _FallbackAddonPrefs:
+    # Safe defaults used when addon preferences are temporarily unavailable.
+    sprite_import_export_scale = 0.01
+    sprite_thumb_size = 64
+    dragon_bones_export = False
+
+
 def get_addon_prefs(context):
-    addon_name = __name__.split(".")[0]
     user_preferences = context.preferences
-    addon_prefs = user_preferences.addons[addon_name].preferences
-    return addon_prefs
+    addons = user_preferences.addons
+
+    candidates = []
+    for name in (__package__, __name__.rsplit(".", 1)[0], "coa_tools2"):
+        if name and name not in candidates:
+            candidates.append(name)
+
+    # Blender extension modules are typically named like:
+    # bl_ext.<publisher>.<addon_name>
+    try:
+        for key in addons.keys():
+            if key.endswith(".coa_tools2") and key not in candidates:
+                candidates.append(key)
+    except Exception:
+        pass
+
+    for addon_name in candidates:
+        try:
+            addon = addons[addon_name]
+            return addon.preferences
+        except Exception:
+            continue
+
+    return _FallbackAddonPrefs()
 
 
 def get_local_view(context):

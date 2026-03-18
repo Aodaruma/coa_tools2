@@ -1,16 +1,17 @@
-# .github/workflows/check-pr-source-master.yml
 name: check-pr-source-master
+
 on:
   pull_request:
-    branches: [ master ]
+    branches:
+      - master
 
 jobs:
   validate_source:
     runs-on: ubuntu-latest
     steps:
-      - name: source branch check
-        if: >
-          github.head_ref != 'prerelease'
+      - name: Validate source branch
         run: |
-          echo "ERROR: Only prerelease branch can be merged into master."
-          exit 1
+          if [ "${{ github.head_ref }}" != "prerelease" ]; then
+            echo "ERROR: Only prerelease branch can be merged into master."
+            exit 1
+          fi
