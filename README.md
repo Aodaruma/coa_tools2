@@ -4,16 +4,22 @@
 
 the Addon of Cutout Animation Tools for Blender, which allows you to create cutout animations in Blender.
 
-[![GitHub release](https://img.shields.io/github/release/Aodaruma/coa_tools2.svg)](https://github.com/Aodaruma/coa_tools2/releases)
+[![GitHub release](https://img.shields.io/github/release/Aodaruma/coa_tools2.svg)](https://github.com/Aodaruma/coa_tools2/releases) [![Discord](https://img.shields.io/badge/Discord-fff.svg?logo=discord&style=social)](https://discord.gg/5vhZmCXczr)
 
 ## Table of Contents
 
-- [Description](#description)
-- [Download and Installation](#download-and-installation)
-  - [Photoshop Exporter](#photoshop-exporter)
-  - [GIMP Exporter](#gimp-exporter)
-  - [Blender Addon](#blender-addon)
-- [Development](#development)
+- [COA tools 2](#coa-tools-2)
+  - [Table of Contents](#table-of-contents)
+  - [Description](#description)
+  - [Download and Installation](#download-and-installation)
+    - [Download](#download)
+    - [Installation](#installation)
+      - [Photoshop Exporter](#photoshop-exporter)
+      - [GIMP Exporter](#gimp-exporter)
+      - [Blender Addon](#blender-addon)
+      - [Krita PLugin](#krita-plugin)
+  - [Development](#development)
+    - [Documentation for development](#documentation-for-development)
 
 ## Description
 
@@ -34,30 +40,68 @@ Since development is a time and resource-intensive process, it's not easy to bei
 
 ### Download
 
-Download the latest release from the [releases page](https://github.com/Aodaruma/coa_tools2/releases).
+You can download coa_tools2 from these sources:
 
+1. [releases page](https://github.com/Aodaruma/coa_tools2/releases) (stable)
+2. [master branch zip](https://github.com/Aodaruma/coa_tools2/archive/refs/heads/master.zip) (stable)
+3. [prerelease branch zip](https://github.com/Aodaruma/coa_tools2/archive/refs/heads/prerelease.zip) (unstable; may contains bugs)
+4. [develop branch zip](https://github.com/Aodaruma/coa_tools2/archive/refs/heads/develop.zip) (very unstable; new feature included)
 
 ### Installation
 
 #### Photoshop Exporter
 
-The .jsx file has to be copied into the photoshop scripts folder which is located in: `C:\Program Files\Adobe\Adobe Photoshop CC 2015\Presets\Scripts`
+![Photoshop Exporter](./assets/PS_exporter.png)
 
-Don’t forget to restart Photoshop and then go to File -> Scripts -> BlenderExporter.jsx
+1. Download exporter from [releases page](https://github.com/Aodaruma/coa_tools2/releases) or [master branch zip](https://github.com/Aodaruma/coa_tools2/archive/refs/heads/master.zip) and unzip it.
+2. Copy `Photoshop/BlenderExporter.jsx` to the Photoshop scripts folder.
+    - Windows: `C:\Program Files\Adobe\Adobe Photoshop CC 20XX\Presets\Scripts`
+    - MacOS: `/Applications/Adobe Photoshop CC 20XX/Presets/Scripts`
+3. Open Photoshop and psd file you want to export.
+4. Run the script from `File -> Scripts -> BlenderExporter.jsx` to export sprites
 
 #### GIMP Exporter
 
-The coatools_exporter.py should be copied to your GIMP plug-ins folder which is located in:
+![GIMP Exporter](./assets/GIMP_exporter.png)
 
-It should show up under Files>Export to CoaTools... after your restart GIMP
+Referenced from [here](https://docs.gimp.org/en/install-script-fu.html)
 
-It should show up under Files>Export to CoaTools... after your restart GIMP
+1. Download exporter from [releases page](https://github.com/Aodaruma/coa_tools2/releases) or [master branch zip](https://github.com/Aodaruma/coa_tools2/archive/refs/heads/master.zip) and unzip it.
+2. Open GIMP and go to `Edit -> Preferences -> Folders -> Plugins` to find the plugin folder.
+3. Copy `GIMP/coatools_exporter.py` to the GIMP plugin folder.
+4. Restart GIMP.
+5. Open GIMP and xcf file you want to export.
+6. Run the script from `File -> Export to CoaTools...` to export sprites
 
 #### Blender Addon
 
-Zip the coa_folder.
-Go to File -> User Preferences -> Add-ons and click the “Install from file...” button.
-This will install and enable the Addon for Blender. Don’t forget to save the user preferences, otherwise the addon will not be activated after restart.
+1. Download exporter from [releases page](https://github.com/Aodaruma/coa_tools2/releases) or [master branch zip](https://github.com/Aodaruma/coa_tools2/archive/refs/heads/master.zip) and unzip it.
+    - if you downloaded from master branch, zip `/coa_tools2` folder after unzip master branch zip.
+2. Open Blender and go to `Edit -> Preferences -> Add-ons -> Install...`
+3. Select `coa_tools2.zip` and click `Install Add-on from File...` to install.
+4. Enable `COA Tools 2` add-on.
+5. Once the add-on is activated, go to `View -> Sidebar -> COA Tools 2` to open the COA Tools 2 panel.
+
+#### Krita PLugin
+
+![Krita Plugin](./assets/Krita_exporter.png)
+
+Referenced from [here](https://docs.krita.org/en/user_manual/python_scripting/install_custom_python_plugin.html)
+
+1. Download plugins from [releases page](https://github.com/Aodaruma/coa_tools2/releases) or [master branch zip](https://github.com/Aodaruma/coa_tools2/archive/refs/heads/master.zip) and unzip it.
+2. Copy all content from the `/Krita` directory into these directories:
+    - Windows: `%APPDATA%\krita\pykrita`
+    - Linux: `$HOME/.local/share/krita/pykrita`
+    - MacOS: `$HOME/Library/Application Support/krita/pykrita`
+3. Open Krita.
+4. Go to `Settings` -> `Configure Krita`.
+5. Access the `Python Plugin Manager`.
+6. Enable the `COA Tools Exporter` plugin.
+7. Once the plugin is activated, go to `Settings` -> `Dockers`.
+8. Enable the `COA Tools Exporter` docker.
+
+To use the plugin select all the layers that should be exported, select export path, export name and press
+Export Selected Sprites button.
 
 ## Development
 
@@ -84,3 +128,13 @@ New-Item -ItemType Junction -Path "$LatestBlenderDir\scripts\addons\coa_tools2" 
 I'm using pipenv for dependency management. You can install the dependencies with `pipenv sync` if you have already installed pipenv.
 
 Some extensions of vscode are recommended for development and written in `.vscode/extensions.json`. Feel free to use them.
+
+### Documentation for development
+
+The project includes several markdown documentation files in the `docs/` directory:
+
+- **[docs/overview.md](https://github.com/Aodaruma/coa_tools2/blob/master/docs/overview.md)**: Provides a general introduction to developing COA Tools 2
+
+- **[docs/specification.md](https://github.com/Aodaruma/coa_tools2/blob/master/docs/specification.md)**: Contains technical specifications and requirements for the Blender addon, including class structure, core features, and utility functions.
+
+- **[docs/properties.md](https://github.com/Aodaruma/coa_tools2/blob/master/docs/properties.md)**: Comprehensive reference documentation for all COA Tools 2 properties in Blender addon, organized by category with detailed descriptions and type information.

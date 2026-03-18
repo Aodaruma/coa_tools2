@@ -99,6 +99,9 @@ def hide_base_sprite(self, context):
 
 
 def change_slot_mesh(self, context):
+    if getattr(self, "_lock_slot_index_update", False):
+        return
+
     self.slot_index_last = -1
     self.slot_index_last = self.id_data.coa_tools2.slot_index
     functions.change_slot_mesh_data(context, self.id_data)
@@ -184,7 +187,7 @@ def lock_view(self,context):
 
     for scene in scenes:
         if scene != self.id_data:
-            scene.coa_tools2["view"] = self["view"]
+            scene.coa_tools2.view = self.view
         if self.view == "3D":
             functions.set_view(scene, "3D")
         elif self.view == "2D":
@@ -301,15 +304,27 @@ class UVData(bpy.types.PropertyGroup):
 
 class SlotData(bpy.types.PropertyGroup):
     def change_slot_mesh(self, context):
-        context
         obj = self.id_data
-        self["active"] = True
-        if self.active:
+
+        if getattr(self, "_lock_active_update", False):
+            return
+
+        object.__setattr__(self, "_lock_active_update", True)
+        try:
+            if not self.active:
+                self.active = True
+
             obj.coa_tools2.slot_index = self.index
             functions.hide_base_sprite(obj)
             for slot in obj.coa_tools2.slot:
-                if slot != self:
-                    slot["active"] = False
+                if slot != self and slot.active:
+                    object.__setattr__(slot, "_lock_active_update", True)
+                    try:
+                        slot.active = False
+                    finally:
+                        object.__setattr__(slot, "_lock_active_update", False)
+        finally:
+            object.__setattr__(self, "_lock_active_update", False)
 
     mesh: bpy.props.PointerProperty(type=bpy.types.Mesh)
     offset: FloatVectorProperty()
@@ -393,7 +408,6 @@ class ObjectProperties(bpy.types.PropertyGroup):
         return self.id_data.active_shape_key_index
     def set_selected_shapekey(self, value):
         self.id_data.active_shape_key_index = value
-        self["selected_shapekey"] = value
 
     anim_collections: bpy.props.CollectionProperty(type=AnimationCollections)
     uv_default_state: bpy.props.CollectionProperty(type=UVData)
@@ -473,6 +487,8 @@ class SceneProperties(bpy.types.PropertyGroup):
     project_name: bpy.props.StringProperty(default="New Project", name="Project Name")
     armature_name: bpy.props.StringProperty(default="Armature", name="Armature Name")
     runtime_format: bpy.props.EnumProperty(default="CREATURE", description="Exports for choosen runtime.",items=(("CREATURE","Creature","Creature"),("DRAGONBONES","Dragonbones","Dragonbones")))
+    image_format: bpy.props.EnumProperty(name="Image Format", default="PNG", description="Exports Atlas in the chosen format.",items=(("PNG","PNG","PNG"),("WEBP","WEBP","WEBP")))
+    image_quality: bpy.props.IntProperty(name="Image Quality", default=90, min=0, max=100, description="Defines the Image Quality for the chosen Image Format. 100 is the best quality.", subtype="PERCENTAGE")
     export_path: bpy.props.StringProperty(default="", name="Export Path",subtype="DIR_PATH")
     export_image_mode: bpy.props.EnumProperty(default="ATLAS", name="Image Mode",items=(("ATLAS","Atlas","Atlas"),("IMAGES","Images","Images")))
     atlas_mode: bpy.props.EnumProperty(default="LIMIT_SIZE", name="Atlas Mode",items=(("AUTO_SIZE", "Auto Size", "Auto Size"),("LIMIT_SIZE","Limit Size","Limit Size")))

@@ -66,27 +66,24 @@ class COATOOLS2_OT_ConvertOldVersionCoatools(bpy.types.Operator):
             if obj.get("coa_tools") is not None:
                 objects.append(obj)
 
-        if len(objects) == 0:
-            self.report(
-                {"ERROR"},
-                "objects registered with old_version COA Tools was not found.",
-            )
-            # context.scene.coa_tools2.old_coatools_found = False
-            return {"CANCELLED"}
+        if len(objects) > 0:
+            # search sprite in each armature and convert to new version
+            for obj in objects:
+                if obj.type == "ARMATURE":
+                    for child in obj.children:
+                        if child.type == "MESH":
+                            # convert object
+                            self.change_customdata_name(context, child)
 
-        # search sprite in each armature and convert to new version
-        for obj in objects:
-            if obj.type == "ARMATURE":
-                for child in obj.children:
-                    if child.type == "MESH":
-                        # convert object
-                        self.change_customdata_name(context, child)
+                            # convert mesh of object
+                            self.change_customdata_name(context, child.data)
 
-                        # convert mesh of object
-                        self.change_customdata_name(context, child.data)
+                # convert armature
+                self.change_customdata_name(context, obj)
 
-            # convert armature
-            self.change_customdata_name(context, obj)
+        if "coa_tools" in context.scene:
+            context.scene["coa_tools2"] = context.scene["coa_tools"]
+            del context.scene["coa_tools"]
 
         # finish
         self.report(

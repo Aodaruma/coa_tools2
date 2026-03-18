@@ -1,0 +1,62 @@
+name: create-prerelease-and-test-on-prerelease
+
+on:
+  push:
+    branches:
+      - prerelease
+
+permissions:
+  contents: write
+
+jobs:
+  syntax_checks:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        script_path:
+          - GIMP/coatools_exporter.py
+          - Photoshop/BlenderExporter.jsx
+          - coa_tools2/__init__.py
+          - Krita/coa_tools2_exporter/__init__.py
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Run syntax checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          file="${{ matrix.script_path }}"
+          case "${file##*.}" in
+            py)
+              python -m py_compile "$file"
+              ;;
+            jsx)
+              node --check "$file"
+              ;;
+            *)
+              echo "Unknown extension: $file"
+              exit 1
+              ;;
+          esac
+
+  create_prerelease:
+    needs: syntax_checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate prerelease tag
+        shell: bash
+        run: |
+          short_sha="$(echo "${GITHUB_SHA}" | cut -c1-7)"
+          echo "TAG=v2.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}-beta_${short_sha}" >> "$GITHUB_ENV"
+      - name: Create prerelease draft
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: Prerelease ${{ env.TAG }}
+          body: Automatic prerelease from prerelease branch
+          draft: true
+          prerelease: true

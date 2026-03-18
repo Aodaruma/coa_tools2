@@ -22,8 +22,8 @@ bl_info = {
     "name": "COA Tools2",
     "description": "This Addon provides a Toolset for a 2D Animation Workflow.",
     "author": "Aodaruma",
-    "version": (2, 0, 1),
-    "blender": (3, 40, 0),
+    "version": (2, 0, 2),
+    "blender": (5, 0, 0),
     "location": "View 3D > Tools > Cutout Animation Tools",
     "warning": "",
     "wiki_url": "https://github.com/aodaruma/coa_tools2/wiki",
@@ -160,7 +160,6 @@ class COATools2Preferences(bpy.types.AddonPreferences):
         )
         if not deps_ok:
             box.label(text="After install, restart Blender or re-enable addon.", icon="INFO")
-
         row = layout.row(align=True)
         row.prop(self, "enable_updater")
         row.prop(self, "auto_check_update", text="Auto-check for Update")
@@ -289,7 +288,15 @@ def unregister_keymaps():
 
 
 def register():
-    addon_updater_ops.register(bl_info)
+    # 一部環境で bl_info が見えず NameError になることがあるため安全に取得
+    info = globals().get("bl_info")
+    if info is None:
+        info = {
+            "name": "COA Tools2",
+            "version": (2, 0, 2),
+            "blender": (5, 0, 0),
+        }
+    addon_updater_ops.register(info)
 
     # register classes
     for cls in classes:

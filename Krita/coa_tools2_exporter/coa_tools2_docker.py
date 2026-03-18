@@ -5,10 +5,10 @@ import os
 import json
 from collections import OrderedDict
 
-class COAToolsDocker(DockWidget):
 
-    def __init__(self):
-        super().__init__()
+class COATools2Docker(DockWidget):
+    def __init__(self, *args, **kwargs):
+        super().__init__(self, *args, **kwargs)
         # self.COAToolsExporter = COAToolsExporter()
         self.generateUi()
         ### exporter variables
@@ -20,22 +20,25 @@ class COAToolsDocker(DockWidget):
         # self.exportPath = "C:/Users/g041481/Desktop/tmp/krita_export"
         self.coaObjectName = "test"
         self.coaObject = OrderedDict({"name": "", "nodes": []})
-        self.coaNode = OrderedDict({
-            "name": "",
-            "type": "SPRITE",
-            "node_path": "file.png",
-            "resource_path": "sprites/file.png",
-            "pivot_offset": [0, 0],
-            "offset": [0, 0],
-            "position": [0, 0],
-            "rotation": 0,
-            "scale": [1, 1],
-            "opacity": [0, 0],
-            "z": 0,
-            "tiles_x": 1,
-            "tiles_y": 1,
-            "frame_index": 0,
-            "children": []})
+        self.coaNode = OrderedDict(
+            {
+                "name": "",
+                "type": "SPRITE",
+                "node_path": "file.png",
+                "resource_path": "sprites/file.png",
+                "pivot_offset": [0, 0],
+                "offset": [0, 0],
+                "position": [0, 0],
+                "rotation": 0,
+                "scale": [1, 1],
+                "opacity": [0, 0],
+                "z": 0,
+                "tiles_x": 1,
+                "tiles_y": 1,
+                "frame_index": 0,
+                "children": [],
+            }
+        )
 
     def alert(self, message):
         QtWidgets.QMessageBox.about(self, "Alert", str(message))
@@ -51,14 +54,19 @@ class COAToolsDocker(DockWidget):
     def exportDataToLayerName(self):
         self.doc = self.app.activeDocument()
         if self.doc != None and self.doc.rootNode() != None:
-            if self.storedData["export_name"] != "" and self.storedData["export_path"] != "":
+            if (
+                self.storedData["export_name"] != ""
+                and self.storedData["export_path"] != ""
+            ):
                 dataNode = None
                 for node in self.doc.rootNode().childNodes():
                     if "COA_TOOLS2_DATA" in node.name():
                         dataNode = node
 
                 if dataNode == None:
-                    dataNode = self.doc.createNode(json.dumps(self.storedData), "paintlayer")
+                    dataNode = self.doc.createNode(
+                        json.dumps(self.storedData), "paintlayer"
+                    )
                     self.doc.rootNode().addChildNode(dataNode, None)
                 else:
                     dataNode.setName(json.dumps(self.storedData))
@@ -84,7 +92,9 @@ class COAToolsDocker(DockWidget):
 
     def selectPath(self):
         self.doc = self.app.activeDocument()
-        self.exportPath.setText(QtWidgets.QFileDialog.getExistingDirectory(self, "Select Export Directory"))
+        self.exportPath.setText(
+            QtWidgets.QFileDialog.getExistingDirectory(self, "Select Export Directory")
+        )
         self.storedData["export_path"] = self.exportPath.text()
         self.exportDataToLayerName()
 
@@ -124,7 +134,9 @@ class COAToolsDocker(DockWidget):
         self.selectPathButton = QtWidgets.QPushButton(Form)
         self.selectPathButton.setObjectName("selectPathButton")
         self.horizontalLayout.addWidget(self.selectPathButton)
-        self.formLayout.setLayout(0, QtWidgets.QFormLayout.FieldRole, self.horizontalLayout)
+        self.formLayout.setLayout(
+            0, QtWidgets.QFormLayout.FieldRole, self.horizontalLayout
+        )
         self.horizontalLayout_2.addLayout(self.formLayout)
 
         self.retranslateUi(Form)
@@ -134,7 +146,6 @@ class COAToolsDocker(DockWidget):
         self.exportButton.clicked.connect(self.export)
         self.exportName.textChanged.connect(self.textExportNameChanged)
         self.exportPath.textChanged.connect(self.textExportPathChanged)
-
 
     def canvasChanged(self, canvas):
         self.doc = Application.activeDocument()
@@ -146,15 +157,18 @@ class COAToolsDocker(DockWidget):
         self.doc = self.app.activeDocument()
 
         if self.doc == None:
-            QtWidgets.QMessageBox.about(self, "Warning", "First open or create a Document to export from.")
+            QtWidgets.QMessageBox.about(
+                self, "Warning", "First open or create a Document to export from."
+            )
             return
 
         if self.exportPath.text() != "" and self.exportName.text() != "":
             self.exportSelectedNodes(self.exportPath.text(), self.exportName.text())
             QtWidgets.QMessageBox.about(self, "Info", "Exported finished.")
         else:
-            QtWidgets.QMessageBox.about(self,"Warning", "Please select an Export Path and Name.")
-
+            QtWidgets.QMessageBox.about(
+                self, "Warning", "Please select an Export Path and Name."
+            )
 
     def exportSelectedNodes(self, exportPath, coaObjectName):
         selectedNodes = self.app.activeWindow().activeView().selectedNodes()
@@ -179,7 +193,10 @@ class COAToolsDocker(DockWidget):
             newCoaNode["path"] = name
             newCoaNode["node_path"] = name
             newCoaNode["resource_path"] = "sprites/" + name
-            newCoaNode["offset"] = [int(-self.doc.width() / 2), int(self.doc.height() / 2)]
+            newCoaNode["offset"] = [
+                int(-self.doc.width() / 2),
+                int(self.doc.height() / 2),
+            ]
             newCoaNode["position"] = [node.bounds().x(), node.bounds().y()]
             newCoaNode["z"] = len(selectedNodes) - i - 1
 
@@ -190,22 +207,35 @@ class COAToolsDocker(DockWidget):
         ### write json data
         jsonPath = os.path.join(exportPath, coaObjectName + ".json")
         jsonFile = json.dumps(jsonData, indent="\t", sort_keys=False)
-        textFile = open(jsonPath, "w")
+        textFile = open(jsonPath, "w", encoding="utf-8")
         textFile.write(jsonFile)
         textFile.close()
 
     def exportNode(self, node, path):
         ### get pixel data of given node
-        pixelData = node.projectionPixelData(node.bounds().x(), node.bounds().y(), node.bounds().width(),
-                                             node.bounds().height())
+        pixelData = node.projectionPixelData(
+            node.bounds().x(),
+            node.bounds().y(),
+            node.bounds().width(),
+            node.bounds().height(),
+        )
 
         ### create new doc with dimensions of node
-        newDoc = self.app.createDocument(node.bounds().width(), node.bounds().height(), node.name(), "RGBA", "U8", "",
-                                         300.0)
+        newDoc = self.app.createDocument(
+            node.bounds().width(),
+            node.bounds().height(),
+            node.name(),
+            "RGBA",
+            "U8",
+            "",
+            300.0,
+        )
 
         ### paste pixel data into layer of new document
         newNode = newDoc.rootNode().childNodes()[0]
-        newNode.setPixelData(pixelData, 0.0, 0.0, node.bounds().width(), node.bounds().height())
+        newNode.setPixelData(
+            pixelData, 0, 0, node.bounds().width(), node.bounds().height()
+        )
         newNode.setOpacity(255)
         newDoc.refreshProjection()
 
@@ -221,5 +251,8 @@ class COAToolsDocker(DockWidget):
         newDoc.close()
 
 
-
-Krita.instance().addDockWidgetFactory(DockWidgetFactory("COAToolsDocker", DockWidgetFactoryBase.DockRight, COAToolsDocker))
+Krita.instance().addDockWidgetFactory(
+    DockWidgetFactory(
+        "COATools2Docker", DockWidgetFactoryBase.DockRight, COATools2Docker
+    )
+)
