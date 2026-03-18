@@ -742,6 +742,7 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
         self.inside_area = False
         self.cursor_pos_hist = Vector((1000000000, 0, 1000000))
         self.sprite_object = None
+        self.sprite_object_name = ""
         self.in_view_3d = False
         self.nearest_vertex_co = Vector((0, 0, 0))
         self.contour_length = 0
@@ -772,6 +773,7 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
 
         self.armature = None
         self.armature_pose_mode = ""
+        self.last_automesh_nonce = 0
 
         self.snapped_vert_coord, self.point_type, self.bm_obj, self.verts_edges_data = [
             Vector((0, 0, 0)),
@@ -783,6 +785,63 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
         self.click_drag = False
         self.first_added_vert = None
         self.delete_stroke_points = []
+
+    def get_valid_sprite_object(self, context):
+        if self.sprite_object_name != "" and self.sprite_object_name in bpy.data.objects:
+            self.sprite_object = bpy.data.objects[self.sprite_object_name]
+            return self.sprite_object
+
+        active_object = context.active_object if context is not None else None
+        sprite_object = functions.get_sprite_object(active_object)
+        if sprite_object is not None:
+            try:
+                self.sprite_object_name = str(sprite_object.name)
+                self.sprite_object = bpy.data.objects[self.sprite_object_name]
+                return self.sprite_object
+            except ReferenceError:
+                pass
+
+        self.sprite_object = None
+        self.sprite_object_name = ""
+        return None
+
+    def restore_edit_local_view(self, context):
+        if self.mode != "EDIT_MESH":
+            return
+        target_obj = None
+        if self.edit_object_name in bpy.data.objects:
+            candidate = bpy.data.objects[self.edit_object_name]
+            if candidate.type == "MESH":
+                target_obj = candidate
+
+        if target_obj is None:
+            active_obj = context.active_object
+            if active_obj is None or active_obj.type != "MESH":
+                return
+            target_obj = active_obj
+
+        if target_obj is None:
+            return
+
+        if hasattr(target_obj.data, "coa_tools2"):
+            target_obj.data.coa_tools2.hide_base_sprite = True
+
+        selected_objects = list(context.selected_objects)
+        for selected_obj in selected_objects:
+            selected_obj.select_set(False)
+        target_obj.select_set(True)
+
+        preview_obj = None
+        if self.texture_preview_object_name in bpy.data.objects:
+            preview_obj = bpy.data.objects[self.texture_preview_object_name]
+            preview_obj.select_set(True)
+
+        context.view_layer.objects.active = target_obj
+        functions.set_local_view(True)
+        functions.hide_base_sprite(target_obj)
+
+        if preview_obj is not None:
+            preview_obj.select_set(False)
 
     def project_cursor(self, event):
         coord = mathutils.Vector((event.mouse_region_x, event.mouse_region_y))
@@ -1219,8 +1278,13 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
         return "PASS_THROUGH"
 
     def modal(self, context, event):
-        if context.active_object.active_shape_key_index != 0:
-            context.active_object.active_shape_key_index = 0
+        active_object = context.active_object
+        if (
+            active_object is not None
+            and active_object.type == "MESH"
+            and active_object.active_shape_key_index != 0
+        ):
+            active_object.active_shape_key_index = 0
         if self.suspend_area_fullscreen(context, event) == "SUSPEND":
             return {"RUNNING_MODAL"}
 
@@ -1240,6 +1304,45 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
             self.shift = bool(event.shift)
             self.in_view_3d = functions.check_region(context, event)
             scene = context.scene
+            automesh_nonce = int(context.window_manager.get("coa_tools2_automesh_nonce", 0))
+            automesh_rerun_detected = automesh_nonce != self.last_automesh_nonce
+            if automesh_rerun_detected:
+                self.last_automesh_nonce = automesh_nonce
+                if (
+                    context.active_object is not None
+                    and context.active_object.type == "MESH"
+                    and context.active_object.mode == "EDIT"
+                    and not self.draw_handler_removed
+                ):
+                    self.restore_edit_local_view(context)
+            sprite_object = self.get_valid_sprite_object(context)
+            sprite_edit_mesh = False
+            if sprite_object is not None:
+                try:
+                    sprite_edit_mesh = bool(sprite_object.coa_tools2.edit_mesh)
+                except ReferenceError:
+                    sprite_edit_mesh = False
+                    self.sprite_object = None
+                    self.sprite_object_name = ""
+
+            # Automesh redo/undo can roll back runtime flags temporarily while this modal is active.
+            # If we are still editing a mesh, recover the edit_mesh flag instead of exiting.
+            if (
+                sprite_object is not None
+                and not sprite_edit_mesh
+                and automesh_rerun_detected
+                and context.active_object is not None
+                and context.active_object.type == "MESH"
+                and context.active_object.mode == "EDIT"
+                and not self.draw_handler_removed
+            ):
+                try:
+                    sprite_object.coa_tools2.edit_mesh = True
+                    sprite_edit_mesh = True
+                except ReferenceError:
+                    sprite_edit_mesh = False
+                    self.sprite_object = None
+                    self.sprite_object_name = ""
 
             ### map mouse button
             click_button = None
@@ -1247,6 +1350,18 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
             keyconfig = wm.keyconfigs.active
             click_button = "LEFTMOUSE"
             select_button = "RIGHTMOUSE"
+
+            if (
+                context.active_object is not None
+                and context.active_object.type == "MESH"
+                and context.active_object.mode != "EDIT"
+                and sprite_edit_mesh
+                and not self.draw_handler_removed
+            ):
+                try:
+                    bpy.ops.object.mode_set(mode="EDIT")
+                except RuntimeError:
+                    pass
 
             ### leave edit mode
             if (
@@ -1257,7 +1372,7 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
                     and context.active_object.mode != "EDIT"
                     and not self.draw_handler_removed
                 )
-                or self.sprite_object.coa_tools2.edit_mesh == False
+                or sprite_edit_mesh == False
                 or context.active_object.type != "MESH"
             ):
                 return self.exit_edit_mode(context, event)
@@ -1279,7 +1394,7 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
                 self.in_view_3d
                 and context.active_object != None
                 and self.type not in ["MIDDLEMOUSE"]
-                and self.sprite_object.coa_tools2.edit_mesh
+                and sprite_edit_mesh
                 and click_button not in [select_button]
             ):
                 ### set click drag
@@ -1464,7 +1579,8 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
                         face.select = False
 
                 if event.type in {"TAB"} and not event.ctrl:
-                    self.sprite_object.coa_tools2.edit_mesh = False
+                    if sprite_object is not None:
+                        sprite_object.coa_tools2.edit_mesh = False
                     bpy.ops.object.mode_set(mode="OBJECT")
 
             self.type_prev = str(event.type)
@@ -1479,6 +1595,7 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
         return {"PASS_THROUGH"}
 
     def exit_edit_mode(self, context, event, error=False):
+        context.window_manager["coa_tools2_edit_mesh_modal_running"] = False
         if not error:
             self.finish_edit_object(context)
         if self.draw_handler != None:
@@ -1487,14 +1604,21 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
         # bpy.types.SpaceView3D.draw_handler_remove(self.draw_handler2, "WINDOW")
 
         self.draw_handler_removed = True
-        self.sprite_object = functions.get_sprite_object(context.active_object)
-        self.sprite_object.coa_tools2.edit_mesh = False
-        self.sprite_object.coa_tools2.edit_mode = "OBJECT"
+        sprite_object = self.get_valid_sprite_object(context)
+        if sprite_object is not None:
+            try:
+                sprite_object.coa_tools2.edit_mesh = False
+                sprite_object.coa_tools2.edit_mode = "OBJECT"
+            except ReferenceError:
+                sprite_object = None
+                self.sprite_object = None
+                self.sprite_object_name = ""
 
         bpy.context.window.cursor_set("CROSSHAIR")
         if context.active_object != None:
             bpy.ops.object.mode_set(mode="OBJECT")
-        self.sprite_object.coa_tools2.edit_mesh = False
+        if sprite_object is not None:
+            sprite_object.coa_tools2.edit_mesh = False
         functions.set_local_view(False)
 
         obj = context.active_object
@@ -1519,10 +1643,11 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
         bpy.context.window.cursor_set("CROSSHAIR")
         bpy.ops.object.mode_set(mode="OBJECT")
 
-        self.sprite_object.coa_tools2.edit_mesh = False
+        if sprite_object is not None:
+            sprite_object.coa_tools2.edit_mesh = False
         functions.set_local_view(False)
 
-        self.armature = functions.get_armature(self.sprite_object)
+        self.armature = functions.get_armature(sprite_object)
         if self.armature != None:
             self.armature.data.pose_position = self.armature_pose_mode
 
@@ -1618,6 +1743,7 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
             bpy.ops.coa_tools2.reproject_sprite_texture()
 
     def execute(self, context):
+        context.window_manager["coa_tools2_edit_mesh_modal_running"] = True
         try:
             bpy.utils.register_tool(
                 COATOOLS2_TO_DrawPolygon,
@@ -1648,12 +1774,15 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
         self.sprite_object = functions.get_sprite_object(context.active_object)
         if self.sprite_object != None:
             self.sprite_object = bpy.data.objects[self.sprite_object.name]
+            self.sprite_object_name = self.sprite_object.name
 
             self.armature = functions.get_armature(self.sprite_object)
             if self.armature != None:
                 self.armature_pose_mode = self.armature.data.pose_position
                 if self.mode == "EDIT_MESH":
                     self.armature.data.pose_position = "REST"
+        else:
+            self.sprite_object_name = ""
 
         ### get Sprite Boundaries
         if (
@@ -1726,9 +1855,10 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
             self.display_type = self.armature.display_type
             self.armature.display_type = "WIRE"
 
-        if self.sprite_object != None:
-            self.sprite_object.coa_tools2.edit_mode = "MESH"
-            self.sprite_object.coa_tools2.edit_mesh = True
+        sprite_object = self.get_valid_sprite_object(context)
+        if sprite_object != None:
+            sprite_object.coa_tools2.edit_mode = "MESH"
+            sprite_object.coa_tools2.edit_mesh = True
 
         wm = context.window_manager
 
@@ -1738,6 +1868,9 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
             self.texture_preview_object.select_set(False)
         self.prev_coa_view = str(context.scene.coa_tools2.view)
         context.scene.coa_tools2.view = "2D"
+        self.last_automesh_nonce = int(
+            context.window_manager.get("coa_tools2_automesh_nonce", 0)
+        )
 
         bpy.ops.object.mode_set(mode="EDIT")
         functions.set_active_tool(self, context, "coa_tools2.draw_polygon")
@@ -1756,6 +1889,7 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
         return {"RUNNING_MODAL"}
 
     def cancel(self, context):
+        context.window_manager["coa_tools2_edit_mesh_modal_running"] = False
         return {"CANCELLED"}
 
     def draw_callback_text(self):
@@ -1773,7 +1907,10 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
 
             # commented in upstream
             blf.position(font_id, self.mouse_2d_x - 15, self.mouse_2d_y + 30, 0)
-            blf.size(font_id, 20, 72)
+            try:
+                blf.size(font_id, 20)
+            except TypeError:
+                blf.size(font_id, 20, 72)
             blf.draw(font_id, line)
 
         if self.mode == "EDIT_MESH":
