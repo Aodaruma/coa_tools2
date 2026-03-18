@@ -1,11 +1,12 @@
 import bpy
-import blf, bgl
+import blf
 from mathutils import Vector
 from ..functions import get_sprite_object
 import gpu
 from gpu_extras.batch import batch_for_shader
 from .. import constants as CONSTANTS
 from ..functions import b_version_bigger_than
+from ..bgl_compat import bgl
 
 
 class COATOOLS2_OT_ShowHelp(bpy.types.Operator):
@@ -48,9 +49,9 @@ class COATOOLS2_OT_ShowHelp(bpy.types.Operator):
             blf.position(
                 self.font_id, 15 + self.region_offset, pos_y - (line_height * i), 0
             )
-            if b_version_bigger_than((4, 0, 0)):
+            try:
                 blf.size(self.font_id, size)
-            else:
+            except TypeError:
                 blf.size(self.font_id, size, 72)
             blf.draw(self.font_id, line)
 
@@ -131,7 +132,7 @@ class COATOOLS2_OT_ShowHelp(bpy.types.Operator):
                 shader_type == CONSTANTS.SHADER_3D_SMOOTH_COLOR
                 or shader_type == CONSTANTS.SHADER_2D_SMOOTH_COLOR
             ):
-                shader_type = CONSTANTS.SHADER_SNMOOTH_COLOR
+                shader_type = CONSTANTS.SHADER_SMOOTH_COLOR
         else:
             # will be deprecated bgl
             bgl.glLineWidth(line_width)

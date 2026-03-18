@@ -1,17 +1,17 @@
-# .github/workflows/check-pr-source-prerelease.yml
-name: check-pr-source-prelease
+name: check-pr-source-prerelease
+
 on:
   pull_request:
-    branches: [ prelease ]
+    branches:
+      - prerelease
 
 jobs:
   validate_source:
     runs-on: ubuntu-latest
     steps:
-      - name: source branch check
-        if: >
-          github.head_ref != 'develop' &&
-          !startsWith(github.head_ref, 'hotfix-')
+      - name: Validate source branch
         run: |
-          echo "ERROR: Only develop and hotfix-* branches can be merged into prelease."
-          exit 1
+          if [ "${{ github.head_ref }}" != "develop" ] && [[ "${{ github.head_ref }}" != hotfix-* ]]; then
+            echo "ERROR: Only develop and hotfix-* branches can be merged into prerelease."
+            exit 1
+          fi
