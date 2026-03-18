@@ -478,11 +478,39 @@ def get_local_dimension(obj):
         return [(x1 - x0), (y1 - y0), offset]
 
 
+class _FallbackAddonPrefs:
+    # Safe defaults used when addon preferences are temporarily unavailable.
+    sprite_import_export_scale = 0.01
+    sprite_thumb_size = 64
+    dragon_bones_export = False
+
+
 def get_addon_prefs(context):
-    addon_name = __name__.split(".")[0]
     user_preferences = context.preferences
-    addon_prefs = user_preferences.addons[addon_name].preferences
-    return addon_prefs
+    addons = user_preferences.addons
+
+    candidates = []
+    for name in (__package__, __name__.rsplit(".", 1)[0], "coa_tools2"):
+        if name and name not in candidates:
+            candidates.append(name)
+
+    # Blender extension modules are typically named like:
+    # bl_ext.<publisher>.<addon_name>
+    try:
+        for key in addons.keys():
+            if key.endswith(".coa_tools2") and key not in candidates:
+                candidates.append(key)
+    except Exception:
+        pass
+
+    for addon_name in candidates:
+        try:
+            addon = addons[addon_name]
+            return addon.preferences
+        except Exception:
+            continue
+
+    return _FallbackAddonPrefs()
 
 
 def get_local_view(context):
