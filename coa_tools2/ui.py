@@ -579,6 +579,20 @@ class COATOOLS2_PT_Tools(bpy.types.Panel):
                     icon="OUTLINER_DATA_CAMERA",
                 )
                 op.create = True
+
+                if (
+                    obj.type == "MESH"
+                    and obj.data != None
+                    and obj.data.shape_keys != None
+                    and len(obj.data.shape_keys.key_blocks) > 1
+                ):
+                    row = layout.row(align=True)
+                    row.enabled = obj.active_shape_key_index > 0
+                    row.operator(
+                        "coa_tools2.create_shapekey_slider_driver",
+                        text="Create Shapekey Slider Driver",
+                        icon="DRIVER",
+                    )
         if obj != None and obj.type == "CAMERA":
             row = layout.row(align=True)
             op = row.operator(
