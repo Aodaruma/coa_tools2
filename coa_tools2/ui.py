@@ -806,11 +806,6 @@ class COATOOLS2_PT_Tools(bpy.types.Panel):
                 operator = col.operator(
                     "coa_tools2.automesh_from_texture", text="Automesh from Texture"
                 )
-        if obj != None and obj.mode == "OBJECT" and obj.type == "MESH":
-            col = layout.column(align=True)
-            operator = col.operator(
-                "coa_tools2.copy_mesh_data", text="Copy Mesh Data", icon="COPYDOWN"
-            )
 
 
 ### Custom template_list look
@@ -969,7 +964,7 @@ class COATOOLS2_OT_SelectChild(bpy.types.Operator):
     def shift_select_child(self, context, event):
         self.change_object_mode(context)
 
-        self.outliner_index_old = context.scene.coa_tools2["outliner_index"]
+        self.outliner_index_old = context.scene.coa_tools2.outliner_index
         outliner = context.scene.coa_tools2.outliner
 
         start_index = min(self.outliner_index_old, self.outliner_index)

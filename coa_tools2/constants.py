@@ -1,6 +1,6 @@
 COA_NODE_GROUP_NAME = "COATools Material"
 
-COA_VERSION = "2.0.0"
+COA_VERSION = "2.0.2"
 
 # draw type constants for gpu drawing
 DRAW_LINE_STRIP = "LINE_STRIP"

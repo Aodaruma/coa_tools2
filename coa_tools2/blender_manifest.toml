@@ -1,0 +1,11 @@
+schema_version = "1.0.0"
+id = "coa_tools2"
+version = "2.0.2"
+name = "COA Tools 2"
+tagline = "2D cutout animation tools for Blender"
+maintainer = "Aodaruma"
+type = "add-on"
+blender_version_min = "4.2.0"
+website = "https://github.com/aodaruma/coa_tools2"
+license = ["GPL-3.0-or-later"]
+tags = ["animation", "2d", "tools", "workflow"]

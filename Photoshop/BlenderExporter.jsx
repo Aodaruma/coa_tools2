@@ -57,6 +57,86 @@ function write_line(tabs, text) {
     return line;
 }
 
+function create_export_progress_dialog(total_count) {
+    var progress_win = new Window("palette", "COA Tools2 Export Progress");
+    progress_win.orientation = "column";
+    progress_win.alignChildren = "fill";
+
+    var status_text = progress_win.add("statictext", undefined, "Preparing export...");
+    var count_text = progress_win.add("statictext", undefined, "0 / " + total_count);
+    var progress_bar = progress_win.add("progressbar", undefined, 0, 100);
+    progress_bar.preferredSize = [360, 16];
+    var percent_text = progress_win.add("statictext", undefined, "0%");
+
+    progress_win.center();
+    progress_win.show();
+
+    return {
+        window: progress_win,
+        status_text: status_text,
+        count_text: count_text,
+        progress_bar: progress_bar,
+        percent_text: percent_text,
+        total_count: total_count,
+        last_update_time_ms: 0,
+        min_update_interval_ms: 150
+    };
+}
+
+function update_export_progress_dialog(progress_ctx, completed_count, status_message, force_update) {
+    if (!progress_ctx) {
+        return;
+    }
+    if (typeof force_update === "undefined") {
+        force_update = false;
+    }
+
+    var now_ms = (new Date()).getTime();
+    if (
+        force_update === false &&
+        progress_ctx.last_update_time_ms > 0 &&
+        (now_ms - progress_ctx.last_update_time_ms) < progress_ctx.min_update_interval_ms
+    ) {
+        return;
+    }
+
+    if (typeof status_message !== "undefined" && status_message !== null) {
+        progress_ctx.status_text.text = String(status_message);
+    }
+    progress_ctx.count_text.text = completed_count + " / " + progress_ctx.total_count;
+
+    var percent = 100;
+    if (progress_ctx.total_count > 0) {
+        percent = Math.floor((completed_count / progress_ctx.total_count) * 100);
+    }
+    if (percent < 0) {
+        percent = 0;
+    }
+    if (percent > 100) {
+        percent = 100;
+    }
+
+    progress_ctx.progress_bar.value = percent;
+    progress_ctx.percent_text.text = percent + "%";
+
+    try {
+        progress_ctx.window.update();
+    } catch (e) {
+    }
+    app.refresh();
+    progress_ctx.last_update_time_ms = now_ms;
+}
+
+function close_export_progress_dialog(progress_ctx) {
+    if (!progress_ctx) {
+        return;
+    }
+    try {
+        progress_ctx.window.close();
+    } catch (e) {
+    }
+}
+
 function save_coords(center_sprites, export_path, export_name) {
     if (center_sprites == true) {
         var offset = [doc.width.as("px") * -.5 + ',' + doc.height.as("px") * .5];
@@ -74,22 +154,27 @@ function save_coords(center_sprites, export_path, export_name) {
 
     for (var i = 0; i < coords.length; i++) {
         json_file.writeln('        {');
-        json_file.writeln(write_dict_entry(tabs = 3, key = "name", value = coords[i][0]));
+        json_file.writeln(write_dict_entry(tabs = 3, key = "name", value = coords[i].node_name));
         json_file.writeln(write_dict_entry(tabs = 3, key = "type", value = "SPRITE"));
-        json_file.writeln(write_dict_entry(tabs = 3, key = "node_path", value = coords[i][0]));
-        json_file.writeln(write_dict_entry(tabs = 3, key = "resource_path", value = "sprites/" + coords[i][0]));
+        json_file.writeln(write_dict_entry(tabs = 3, key = "node_path", value = coords[i].node_name));
+        json_file.writeln(write_dict_entry(tabs = 3, key = "resource_path", value = "sprites/" + coords[i].file_name));
         json_file.writeln(write_dict_entry(tabs = 3, key = "pivot_offset", value = [0, 0]));
         json_file.writeln(write_dict_entry(tabs = 3, key = "offset", value = offset));
-        json_file.writeln(write_dict_entry(tabs = 3, key = "position", value = [coords[i][1][0], coords[i][1][2]]));
+        json_file.writeln(write_dict_entry(tabs = 3, key = "position", value = [coords[i].layer_pos[0], coords[i].layer_pos[2]]));
         json_file.writeln(write_dict_entry(tabs = 3, key = "rotation", value = 0.0));
         json_file.writeln(write_dict_entry(tabs = 3, key = "scale", value = [1.0, 1.0]));
         json_file.writeln(write_dict_entry(tabs = 3, key = "opacity", value = 1.0));
-        json_file.writeln(write_dict_entry(tabs = 3, key = "z", value = coords[i][1][1]));
-        json_file.writeln(write_dict_entry(tabs = 3, key = "tiles_x", value = coords[i][2][0]));
-        json_file.writeln(write_dict_entry(tabs = 3, key = "tiles_y", value = coords[i][2][1]));
+        json_file.writeln(write_dict_entry(tabs = 3, key = "z", value = coords[i].layer_pos[1]));
+        json_file.writeln(write_dict_entry(tabs = 3, key = "tiles_x", value = coords[i].tile_size[0]));
+        json_file.writeln(write_dict_entry(tabs = 3, key = "tiles_y", value = coords[i].tile_size[1]));
         json_file.writeln(write_dict_entry(tabs = 3, key = "frame_index", value = 0));
         json_file.writeln(write_dict_entry(tabs = 3, key = "children", value = []));
-        json_file.writeln(write_dict_entry(tabs = 3, key = "blend_mode", value = coords[i][3], comma = false));
+        if (coords[i].clipping_mask_target) {
+            json_file.writeln(write_dict_entry(tabs = 3, key = "blend_mode", value = coords[i].blend_mode));
+            json_file.writeln(write_dict_entry(tabs = 3, key = "clipping_mask_target", value = coords[i].clipping_mask_target, comma = false));
+        } else {
+            json_file.writeln(write_dict_entry(tabs = 3, key = "blend_mode", value = coords[i].blend_mode, comma = false));
+        }
         if (i < coords.length - 1) {
             json_file.writeln(write_line(tabs = 2, '},'));
         } else {
@@ -281,10 +366,182 @@ function get_target_layers(layers) {
     return target_layers;
 }
 
+function normalize_layer_name(layer_name) {
+    layer_name = String(layer_name);
+    layer_name = layer_name.split(' ').join('_');
+    layer_name = layer_name.replace(/\.png$/i, "");
+    layer_name = layer_name.replace(/\._/g, ".");
+    layer_name = layer_name.replace(/_\./g, ".");
+    layer_name = layer_name.replace(/_+/g, "_");
+    layer_name = layer_name.replace(/^\.+/, "");
+    layer_name = layer_name.replace(/\.+$/, "");
+    layer_name = layer_name.replace(/^_+/, "");
+    layer_name = layer_name.replace(/_+$/, "");
+    layer_name = layer_name.replace(/\.\.+/g, ".");
+    return layer_name;
+}
+
+function strip_layer_commands(layer_name) {
+    var keyword_pos = 100000;
+    if (layer_name.indexOf("--sprites") != -1 && layer_name.indexOf("--sprites") < keyword_pos) {
+        keyword_pos = layer_name.indexOf("--sprites");
+    }
+    if (layer_name.indexOf("c=") != -1 && layer_name.indexOf("c=") < keyword_pos) {
+        keyword_pos = layer_name.indexOf("c=");
+    }
+    if (layer_name.indexOf("m=") != -1 && layer_name.indexOf("m=") < keyword_pos) {
+        keyword_pos = layer_name.indexOf("m=");
+    }
+
+    if (keyword_pos != 100000) {
+        layer_name = layer_name.substring(0, keyword_pos);
+    }
+    return normalize_layer_name(layer_name);
+}
+
+function parse_int_option(layer_name, option_name) {
+    var regex = new RegExp(option_name + "=(-?\\d+)");
+    var match = layer_name.match(regex);
+    if (match == null || match.length < 2) {
+        return null;
+    }
+    var parsed = Number(match[1]);
+    if (isNaN(parsed)) {
+        return null;
+    }
+    return Math.ceil(parsed);
+}
+
+function pad_left_zeros(value, min_length) {
+    value = String(value);
+    while (value.length < min_length) {
+        value = "0" + value;
+    }
+    return value;
+}
+
+function is_layer_clipping_mask(layer) {
+    try {
+        return layer != null && layer.typename != "LayerSet" && layer.grouped === true;
+    } catch (e) {
+        return false;
+    }
+}
+
+function get_layer_document(layer) {
+    try {
+        var parent = layer;
+        while (parent != null && parent.typename != "Document") {
+            parent = parent.parent;
+        }
+        if (parent != null && parent.typename == "Document") {
+            return parent;
+        }
+    } catch (e) {
+    }
+    return null;
+}
+
+function run_menu_event_string(event_name) {
+    try {
+        app.runMenuItem(stringIDToTypeID(event_name));
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+function run_menu_event_char(event_char_id) {
+    try {
+        executeAction(charIDToTypeID(event_char_id), undefined, DialogModes.NO);
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+function set_layer_clipping_mask(layer, enabled) {
+    var layer_doc = get_layer_document(layer);
+    var prev_doc = null;
+    var prev_layer = null;
+    try {
+        prev_doc = app.activeDocument;
+        prev_layer = prev_doc.activeLayer;
+    } catch (e) {
+    }
+
+    try {
+        if (layer == null || layer.typename == "LayerSet") {
+            return false;
+        }
+
+        if (layer_doc != null) {
+            app.activeDocument = layer_doc;
+            layer_doc.activeLayer = layer;
+        }
+
+        try {
+            layer.grouped = enabled;
+        } catch (e) {
+        }
+        try {
+            if (layer.grouped === enabled) {
+                return true;
+            }
+        } catch (e) {
+        }
+
+        if (enabled) {
+            if (run_menu_event_string("groupEvent") || run_menu_event_char("GrpL")) {
+                try {
+                    if (layer.grouped === true) {
+                        return true;
+                    }
+                } catch (e) {
+                }
+            }
+        } else {
+            var ungrouped = false;
+            ungrouped = ungrouped || run_menu_event_string("ungroup");
+            ungrouped = ungrouped || run_menu_event_char("Ungr");
+            // Compatibility fallback for older/newer builds.
+            ungrouped = ungrouped || run_menu_event_string("ungroupEvent");
+            if (ungrouped) {
+                try {
+                    if (layer.grouped === false) {
+                        return true;
+                    }
+                } catch (e) {
+                }
+            }
+        }
+
+        try {
+            return layer.grouped === enabled;
+        } catch (e) {
+            return false;
+        }
+    } catch (e) {
+        return false;
+    } finally {
+        try {
+            if (prev_doc != null) {
+                app.activeDocument = prev_doc;
+                if (prev_layer != null) {
+                    prev_doc.activeLayer = prev_layer;
+                }
+            }
+        } catch (e) {
+        }
+    }
+}
+
 function process_prepending_layerset_name(layer, layer_name, is_omit_layer_name_if_only_one) {
+    layer_name = normalize_layer_name(layer_name);
     var parent_layersets = get_parent_layersets(layer);
     for (var j = 0; j < parent_layersets.length; j++) {
-        layer_name = parent_layersets[j].name + "." + layer_name;
+        var parent_name = strip_layer_commands(normalize_layer_name(parent_layersets[j].name));
+        layer_name = parent_name + "." + layer_name;
     }
     if (is_omit_layer_name_if_only_one == true) {
         // delete latest layer name
@@ -298,43 +555,137 @@ function process_prepending_layerset_name(layer, layer_name, is_omit_layer_name_
             }
         }
     }
-    return layer_name;
+    return normalize_layer_name(layer_name);
 }
 
 function process_reorder_layerset_name(layer_name) {
-    // check the name contains these patterns and reorder them to the end of the name (name + sequence_number + mirror_name)
-    // - sequence numbers (e.g. "1", "002", "03")
-    // - mirror names (e.g. "left", "right", "L", "R")
+    // Normalize layer names like Blender's ".L/.R" convention.
+    // Example:
+    // "forearm.L.003.L" -> "forearm.003.L"
+    layer_name = normalize_layer_name(layer_name);
 
-    var sequence_regex = new RegExp(/\.?(\d+)/);
-    var sequence_match = layer_name.match(sequence_regex);
-    if (sequence_match != null) {
-        var sequence_number = sequence_match[1];
-        layer_name = layer_name.replace("." + sequence_number, "");
-        // sequence_number must be padded with zeros to 3 digits
-        // layer_name += "." + sequence_number.padStart(3, "0"); // cant use; not supported in extended script (locked at ES3)
-        var seq_length = sequence_number.length;
-        var seq_padding = 3 - seq_length;
-        var seq_padding_str = "";
-        if (seq_padding < 0) {
-            seq_padding = 0;
-        }
-        for (var p = 0; p < seq_padding; p++) {
-            seq_padding_str += "0";
-        }
-        layer_name += "." + seq_padding_str + sequence_number;
-    }
+    var tokens = layer_name.split(".");
+    var sequence_token_index = -1;
+    var side_token = "";
 
-    var mirror_names = ["left", "right", "L", "R", "Left", "Right"];
-    for (var m = 0; m < mirror_names.length; m++) {
-        var mname = mirror_names[m];
-        if (layer_name.indexOf(mname) != -1) {
-            layer_name = layer_name.replace("." + mname, "");
-            layer_name += "." + mname;
+    for (var i = tokens.length - 1; i >= 0; i--) {
+        var token_for_sequence = normalize_layer_name(tokens[i]);
+        if (/^\d+$/.test(token_for_sequence)) {
+            sequence_token_index = i;
+            break;
         }
     }
 
-    return layer_name;
+    var output_tokens = [];
+    for (var j = 0; j < tokens.length; j++) {
+        var token = normalize_layer_name(tokens[j]);
+        if (token == "") {
+            continue;
+        }
+
+        var token_lower = token.toLowerCase();
+        if (token_lower == "l" || token_lower == "left") {
+            side_token = "L";
+            continue;
+        }
+        if (token_lower == "r" || token_lower == "right") {
+            side_token = "R";
+            continue;
+        }
+        if (j == sequence_token_index && /^\d+$/.test(token)) {
+            continue;
+        }
+
+        output_tokens.push(token);
+    }
+
+    if (sequence_token_index != -1) {
+        var sequence_token = normalize_layer_name(tokens[sequence_token_index]);
+        output_tokens.push(pad_left_zeros(sequence_token, 3));
+    }
+
+    if (side_token != "") {
+        output_tokens.push(side_token);
+    }
+
+    return normalize_layer_name(output_tokens.join("."));
+}
+
+function build_export_layer_name(layer, is_prepending_layerset_name, is_reorder_layerset_name, is_omit_layer_name_if_only_one) {
+    var export_layer_name = normalize_layer_name(layer.name);
+    export_layer_name = strip_layer_commands(export_layer_name);
+
+    if (is_prepending_layerset_name == true) {
+        export_layer_name = process_prepending_layerset_name(layer, export_layer_name, is_omit_layer_name_if_only_one);
+    }
+    if (is_reorder_layerset_name == true) {
+        export_layer_name = process_reorder_layerset_name(export_layer_name);
+    }
+
+    export_layer_name = normalize_layer_name(export_layer_name);
+    if (export_layer_name == "") {
+        export_layer_name = "layer";
+    }
+    return export_layer_name;
+}
+
+function get_clipping_mask_base_layer(layer) {
+    if (!is_layer_clipping_mask(layer)) {
+        return null;
+    }
+
+    var sibling_layers = layer.parent.layers;
+    var layer_index = -1;
+    for (var i = 0; i < sibling_layers.length; i++) {
+        if (sibling_layers[i] == layer || is_same_layer(sibling_layers[i], layer)) {
+            layer_index = i;
+            break;
+        }
+    }
+    if (layer_index == -1) {
+        return null;
+    }
+
+    // Most documents have clipping base below the current layer.
+    for (var j = layer_index + 1; j < sibling_layers.length; j++) {
+        var down_layer = sibling_layers[j];
+        if (down_layer.typename != "LayerSet" && !is_layer_clipping_mask(down_layer)) {
+            return down_layer;
+        }
+    }
+    // Fallback for reverse ordering.
+    for (var k = layer_index - 1; k >= 0; k--) {
+        var up_layer = sibling_layers[k];
+        if (up_layer.typename != "LayerSet" && !is_layer_clipping_mask(up_layer)) {
+            return up_layer;
+        }
+    }
+
+    return null;
+}
+
+function create_temporary_clipping_base_layer(layer) {
+    try {
+        if (layer == null || layer.typename == "LayerSet") {
+            return null;
+        }
+        var layer_doc = get_layer_document(layer);
+        if (layer_doc == null) {
+            return null;
+        }
+
+        var helper_layer = null;
+        if (layer.parent != null && layer.parent.typename == "LayerSet") {
+            helper_layer = layer.parent.artLayers.add();
+        } else {
+            helper_layer = layer_doc.artLayers.add();
+        }
+        helper_layer.name = "__coa_tmp_clip_base__";
+        helper_layer.move(layer, ElementPlacement.PLACEAFTER);
+        return helper_layer;
+    } catch (e) {
+        return null;
+    }
 }
 
 function export_sprites(
@@ -356,6 +707,8 @@ function export_sprites(
         visible: "visible",
     }
 
+    coords = [];
+
     // check
     if (export_path == "") {
         alert("Please select a folder to export the sprites.");
@@ -374,13 +727,14 @@ function export_sprites(
     var unique_layer_names = {};
     for (var i = 0; i < layers.length; i++) {
         var layer = layers[i];
-        var layer_name = layer.name;
         if ((layer_type == layer_types.selected && layer.selected == false) || (layer_type == layer_types.visible && layer.visible == false))
             continue;
-        if (is_prepending_layerset_name == true)
-            layer_name = process_prepending_layerset_name(layer, layer_name, is_omit_layer_name_if_only_one);
-        if (is_reorder_layerset_name == true)
-            layer_name = process_reorder_layerset_name(layer_name);
+        var layer_name = build_export_layer_name(
+            layer,
+            is_prepending_layerset_name,
+            is_reorder_layerset_name,
+            is_omit_layer_name_if_only_one
+        );
 
         if (unique_layer_names[layer_name] == undefined) {
             unique_layer_names[layer_name] = 1;
@@ -425,149 +779,211 @@ function export_sprites(
     testlayer.remove();
     ///
 
-    // flatten layers
-    if (is_layerset_automerge == true) {
-        for (var i = 0; i < dupli_doc.layers.length; i++) {
-            var layer = dupli_doc.layers[i];
+    var progress_ctx = create_export_progress_dialog(1);
+    update_export_progress_dialog(progress_ctx, 0, "Preparing duplicate document...", true);
+
+    var target_layers = [];
+    var exported_count = 0;
+    var export_error = null;
+
+    try {
+        // flatten layers
+        if (is_layerset_automerge == true) {
+            update_export_progress_dialog(progress_ctx, 0, "Merging layer sets...", true);
+            for (var i = 0; i < dupli_doc.layers.length; i++) {
+                var layer = dupli_doc.layers[i];
+                dupli_doc.activeLayer = layer;
+                if (layer.name.indexOf("--sprites") == -1) {
+                    flatten_layer(dupli_doc, layer.name);
+                } else if (layer.name.indexOf("--sprites") != -1 && layer.typename == "LayerSet") {
+                    for (var j = 0; j < layer.layers.length; j++) {
+                        var sub_layer = layer.layers[j];
+                        dupli_doc.activeLayer = sub_layer;
+                        flatten_layer(dupli_doc, sub_layer.name);
+                    }
+                }
+            }
+        }
+
+        target_layers = get_target_layers(dupli_doc.layers);
+        if (target_layers.length == 0) {
+            throw new Error("No layers were found in duplicated document.");
+        }
+        progress_ctx.total_count = target_layers.length;
+        update_export_progress_dialog(progress_ctx, 0, "Starting export...", true);
+
+        for (var i = 0; i < target_layers.length; i++) {
+            // deselect layers
+            var layer = target_layers[i];
+
             dupli_doc.activeLayer = layer;
-            if (layer.name.indexOf("--sprites") == -1) {
-                flatten_layer(dupli_doc, layer.name);
-            } else if (layer.name.indexOf("--sprites") != -1 && layer.typename == "LayerSet") {
-                for (var j = 0; j < layer.layers.length; j++) {
-                    var sub_layer = layer.layers[j];
-                    dupli_doc.activeLayer = sub_layer;
-                    flatten_layer(dupli_doc, sub_layer.name);
+
+            var raw_layer_name = normalize_layer_name(layer.name);
+            var layer_name = build_export_layer_name(
+                layer,
+                is_prepending_layerset_name,
+                is_reorder_layerset_name,
+                is_omit_layer_name_if_only_one
+            );
+            // get layer margin settings
+            var margin = 0;
+            var parsed_margin = parse_int_option(raw_layer_name, "m");
+            if (parsed_margin != null) {
+                margin = parsed_margin;
+            }
+            var layer_pos = null;
+            var tile_size = [1, 1];
+            var tmp_doc = null;
+
+            try {
+                tmp_doc = app.documents.add(dupli_doc.width, dupli_doc.height, dupli_doc.resolution, layer_name, NewDocumentMode.RGB, DocumentFill.TRANSPARENT);
+
+                var composite_mode = "" + layer.blendMode;
+                composite_mode = composite_mode.replace("BlendMode.", "");
+
+                var clipping_mask_target_name = null;
+                if (is_layer_clipping_mask(layer)) {
+                    var clipping_mask_base_layer = get_clipping_mask_base_layer(layer);
+                    if (clipping_mask_base_layer != null) {
+                        clipping_mask_target_name = build_export_layer_name(
+                            clipping_mask_base_layer,
+                            is_prepending_layerset_name,
+                            is_reorder_layerset_name,
+                            is_omit_layer_name_if_only_one
+                        );
+                    }
+                }
+
+                // duplicate layer into new doc and crop to layerbounds with margin
+                app.activeDocument = dupli_doc;
+                var duplicated_layer = layer.duplicate(tmp_doc, ElementPlacement.INSIDE);
+                app.activeDocument = tmp_doc;
+
+                // Export clipped layers as independent sprites.
+                if (is_layer_clipping_mask(duplicated_layer)) {
+                    var temp_clip_base_layer = null;
+                    if (get_clipping_mask_base_layer(duplicated_layer) == null) {
+                        temp_clip_base_layer = create_temporary_clipping_base_layer(duplicated_layer);
+                    }
+                    if (!set_layer_clipping_mask(duplicated_layer, false)) {
+                        throw new Error("Failed to release clipping mask: " + layer.name);
+                    }
+                    if (temp_clip_base_layer != null) {
+                        try {
+                            temp_clip_base_layer.remove();
+                        } catch (e) {
+                        }
+                    }
+                }
+
+                // Bounds must be recalculated after clipping state changes.
+                var bounds = [duplicated_layer.bounds[0].as("px"), duplicated_layer.bounds[1].as("px"), duplicated_layer.bounds[2].as("px"), duplicated_layer.bounds[3].as("px")];
+                layer_pos = Array(bounds[0] - margin, -i, bounds[1] - margin);
+
+                var crop_bounds = bounds.slice(0);
+
+                if (crop_to_dialog_bounds == true) {
+                    if (crop_bounds[0] < 0) { crop_bounds[0] = 0 };
+                    if (crop_bounds[1] < 0) { crop_bounds[1] = 0 };
+                    if (crop_bounds[2] > doc.width.as("px")) { crop_bounds[2] = doc.width.as("px") };
+                    if (crop_bounds[3] > doc.height.as("px")) { crop_bounds[3] = doc.height.as("px") };
+                }
+
+                crop_bounds[0] -= margin;
+                crop_bounds[1] -= margin;
+                crop_bounds[2] += margin;
+                crop_bounds[3] += margin;
+
+                if (crop_layers == true) {
+                    tmp_doc.crop(crop_bounds);
+                }
+
+                // check if layer is a group with sprite setting
+                if (raw_layer_name.indexOf("--sprites") != -1) {
+                    var sprites = tmp_doc.layers[0].layers;
+                    var sprite_count = sprites.length;
+                    var parsed_columns = parse_int_option(raw_layer_name, "c");
+                    var columns = parsed_columns == null ? Math.ceil((Math.sqrt(sprite_count))) : parsed_columns;
+                    if (columns < 1) {
+                        columns = 1;
+                    }
+                    tile_size = [columns, Math.ceil(sprite_count / columns)];
+                    var k = 0;
+                    for (var j = 0; j < sprites.length; j++) {
+                        if (j > 0 && j % columns == 0) {
+                            k = k + 1;
+                        }
+                        sprites[j].translate(tmp_doc.width * (j % columns), tmp_doc.height * k);
+                    }
+
+                    extend_document_size(tmp_doc.width * columns, tmp_doc.height * (k + 1));
+                }
+
+                // set all layer composite mode to normal
+                if (is_set_composite_mode_to_normal == true) {
+                    for (var j = 0; j < tmp_doc.layers.length; j++) {
+                        var tmp_layer = tmp_doc.layers[j];
+                        tmp_doc.activeLayer = tmp_layer;
+                        tmp_layer.blendMode = BlendMode.NORMAL;
+                    }
+                }
+
+                // do save stuff
+                var file_name = layer_name + ".png";
+                tmp_doc.exportDocument(File(export_path + "/sprites/" + file_name), ExportType.SAVEFORWEB, options);
+
+                // store coords
+                coords.push({
+                    node_name: layer_name,
+                    file_name: file_name,
+                    layer_pos: layer_pos,
+                    tile_size: tile_size,
+                    blend_mode: composite_mode,
+                    clipping_mask_target: clipping_mask_target_name
+                });
+            } finally {
+                if (tmp_doc) {
+                    try {
+                        tmp_doc.close(SaveOptions.DONOTSAVECHANGES);
+                    } catch (e) {
+                    }
                 }
             }
+
+            exported_count += 1;
+            update_export_progress_dialog(
+                progress_ctx,
+                exported_count,
+                "Exported " + exported_count + "/" + target_layers.length + ": " + layer_name,
+                (i == target_layers.length - 1)
+            );
+        }
+    } catch (e) {
+        export_error = e;
+    } finally {
+        close_export_progress_dialog(progress_ctx);
+        try {
+            dupli_doc.close(SaveOptions.DONOTSAVECHANGES);
+        } catch (e) {
         }
     }
 
-
-    var target_layers = get_target_layers(dupli_doc.layers);
-    for (var i = 0; i < target_layers.length; i++) {
-        // deselect layers
-        var layer = target_layers[i];
-
-        dupli_doc.activeLayer = layer;
-        var bounds = [layer.bounds[0].as("px"), layer.bounds[1].as("px"), layer.bounds[2].as("px"), layer.bounds[3].as("px")];
-        var bounds_width = bounds[2] - bounds[0];
-        var bounds_height = bounds[3] - bounds[1];
-
-        var layer_name = String(layer.name).split(' ').join('_');
-        // get layer margin settings
-        var margin = 0;
-        if (layer_name.indexOf("m=") != -1) {
-            var margin_str_index = layer_name.indexOf("m=") + 2;
-            margin = Math.ceil(layer_name.substring(margin_str_index, layer_name.length));
-        }
-        var layer_pos = Array(bounds[0] - margin, -i, bounds[1] - margin);
-        var tmp_doc = app.activeDocument;
-        var tile_size = [1, 1];
-        var tmp_doc = app.documents.add(dupli_doc.width, dupli_doc.height, dupli_doc.resolution, layer_name, NewDocumentMode.RGB, DocumentFill.TRANSPARENT);
-
-        var composite_mode = "" + layer.blendMode;
-        composite_mode = composite_mode.replace("BlendMode.", "");
-
-        // duplicate layer into new doc and crop to layerbounds with margin
-        app.activeDocument = dupli_doc;
-        layer.duplicate(tmp_doc, ElementPlacement.INSIDE);
-        app.activeDocument = tmp_doc;
-        var crop_bounds = bounds;
-
-        if (crop_to_dialog_bounds == true) {
-            if (crop_bounds[0] < 0) { crop_bounds[0] = 0 };
-            if (crop_bounds[1] < 0) { crop_bounds[1] = 0 };
-            if (crop_bounds[2] > doc.width.as("px")) { crop_bounds[2] = doc.width.as("px") };
-            if (crop_bounds[3] > doc.height.as("px")) { crop_bounds[3] = doc.height.as("px") };
-        }
-
-        crop_bounds[0] -= margin;
-        crop_bounds[1] -= margin;
-        crop_bounds[2] += margin;
-        crop_bounds[3] += margin;
-
-        if (crop_layers == true) {
-            tmp_doc.crop(crop_bounds);
-        }
-
-        // check if layer is a group with sprite setting
-        if (layer_name.indexOf("--sprites") != -1) {
-            var keyword_pos = layer_name.indexOf("--sprites");
-            var sprites = tmp_doc.layers[0].layers;
-            var sprite_count = sprites.length;
-            if (column_str_index = layer_name.indexOf("c=") != -1) {
-                var column_str_index = layer_name.indexOf("c=") + 2;
-                var columns = Math.ceil(layer_name.substring(column_str_index, layer_name.length));
-            } else {
-                var columns = Math.ceil((Math.sqrt(sprite_count)));
-            }
-            tile_size = [columns, Math.ceil(sprite_count / columns)];
-            var k = 0;
-            for (var j = 0; j < sprites.length; j++) {
-                if (j > 0 && j % columns == 0) {
-                    k = k + 1;
-                }
-                sprites[j].translate(tmp_doc.width * (j % columns), tmp_doc.height * k);
-            }
-
-
-            extend_document_size(tmp_doc.width * columns, tmp_doc.height * (k + 1));
-        }
-
-        // create layer name -> cut off commands
-        var keyword_pos = 100000;
-        if (layer_name.indexOf("--sprites") != -1) {
-            if (layer_name.indexOf("--sprites") < keyword_pos) {
-                keyword_pos = layer_name.indexOf("--sprites");
-            }
-        }
-        if (layer_name.indexOf("c=") != -1) {
-            if (layer_name.indexOf("c=") < keyword_pos) {
-                keyword_pos = layer_name.indexOf("c=");
-            }
-        }
-        if (layer_name.indexOf("m=") != -1) {
-            if (layer_name.indexOf("m=") < keyword_pos) {
-                keyword_pos = layer_name.indexOf("m=");
-            }
-        }
-        if (layer_name[keyword_pos - 1] == "_") {
-            layer_name = layer_name.substring(0, keyword_pos - 1);
-        } else {
-            layer_name = layer_name.substring(0, keyword_pos);
-        }
-
-        // get layerset name that the layer is belonging to
-        if (is_prepending_layerset_name == true)
-            layer_name = process_prepending_layerset_name(layer, layer_name, is_omit_layer_name_if_only_one);
-
-        if (is_reorder_layerset_name == true)
-            layer_name = process_reorder_layerset_name(layer_name);
-
-        // set all layer composite mode to normal
-        if (is_set_composite_mode_to_normal == true) {
-            for (var j = 0; j < tmp_doc.layers.length; j++) {
-                var layer = tmp_doc.layers[j];
-                tmp_doc.activeLayer = layer;
-                layer.blendMode = BlendMode.NORMAL;
-            }
-        }
-
-        // do save stuff
-        tmp_doc.exportDocument(File(export_path + "/sprites/" + layer_name + ".png"), ExportType.SAVEFORWEB, options);
-
-        // store coords
-        coords.push([layer_name + ".png", layer_pos, tile_size, composite_mode]);
-
-        // close tmp doc again
-        tmp_doc.close(SaveOptions.DONOTSAVECHANGES);
+    if (export_error != null) {
+        app.preferences.rulerUnits = init_units;
+        alert("Export failed:\n" + export_error);
+        return;
     }
-    dupli_doc.close(SaveOptions.DONOTSAVECHANGES);
 
     if (export_json == true) {
         save_coords(center_sprites, export_path, export_name);
     }
     app.preferences.rulerUnits = init_units;
+
+    alert(
+        "Export completed.\n"
+        + "Layers: " + exported_count + " / " + target_layers.length + "\n"
+        + "Output: " + export_path
+    );
 }
 
 function export_button() {
@@ -670,7 +1086,7 @@ var res = "dialog { \
                 orientation: 'column', \
                 alignChildren: 'left', \
                 is_prepending_layerset_name: Checkbox { text: 'Prepend Layerset Name', value: true }, \
-                is_reorder_layerset_name: Checkbox { text: 'Reorder Layerset Name', value: true } \
+                is_reorder_layerset_name: Checkbox { text: 'Blender Bone Style Naming', value: true } \
                 is_omit_layer_name_if_only_one: Checkbox { text: 'Omit Layer Name if alone', value: true }, \
             }, \
             export_options: Panel { \

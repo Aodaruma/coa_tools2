@@ -22,8 +22,8 @@ bl_info = {
     "name": "COA Tools2",
     "description": "This Addon provides a Toolset for a 2D Animation Workflow.",
     "author": "Aodaruma",
-    "version": (2, 0, 1),
-    "blender": (3, 40, 0),
+    "version": (2, 0, 2),
+    "blender": (5, 0, 0),
     "location": "View 3D > Tools > Cutout Animation Tools",
     "warning": "",
     "wiki_url": "https://github.com/aodaruma/coa_tools2/wiki",
@@ -39,6 +39,9 @@ import tempfile
 from bpy.app.handlers import persistent
 
 from . import addon_updater_ops
+from . import dependency_manager
+
+dependency_manager.ensure_vendor_path()
 
 # load and reload submodules
 ##################################
@@ -53,6 +56,7 @@ from .functions import *
 
 from .operators import create_sprite_object
 from .operators import help_display
+from .operators import install_dependencies
 
 from .operators import advanced_settings
 from .operators import animation_handling
@@ -133,6 +137,29 @@ class COATools2Preferences(bpy.types.AddonPreferences):
         layout = self.layout
         layout.prop(self, "sprite_import_export_scale")
 
+        deps_state = dependency_manager.dependency_state()
+        deps_ok = all(deps_state.values())
+
+        box = layout.box()
+        box.label(text="Automesh Dependencies (Optional)")
+        row = box.row(align=True)
+        row.label(
+            text="numpy: " + ("Installed" if deps_state["numpy"] else "Missing"),
+            icon="CHECKMARK" if deps_state["numpy"] else "ERROR",
+        )
+        row = box.row(align=True)
+        row.label(
+            text="opencv (cv2): " + ("Installed" if deps_state["cv2"] else "Missing"),
+            icon="CHECKMARK" if deps_state["cv2"] else "ERROR",
+        )
+        row = box.row(align=True)
+        row.operator(
+            "coa_tools2.install_python_dependencies",
+            icon="IMPORT",
+            text="Install numpy / opencv",
+        )
+        if not deps_ok:
+            box.label(text="After install, restart Blender or re-enable addon.", icon="INFO")
         row = layout.row(align=True)
         row.prop(self, "enable_updater")
         row.prop(self, "auto_check_update", text="Auto-check for Update")
@@ -160,6 +187,7 @@ classes = (
     # operator
     create_sprite_object.COATOOLS2_OT_CreateSpriteObject,
     create_sprite_object.COATOOLS2_OT_DefineSpriteObject,
+    install_dependencies.COATOOLS2_OT_InstallPythonDependencies,
     import_sprites.JsonImportData,
     import_sprites.COATOOLS2_OT_CreateMaterialGroup,
     import_sprites.COATOOLS2_OT_ImportSprite,
@@ -260,7 +288,15 @@ def unregister_keymaps():
 
 
 def register():
-    addon_updater_ops.register(bl_info)
+    # 一部環境で bl_info が見えず NameError になることがあるため安全に取得
+    info = globals().get("bl_info")
+    if info is None:
+        info = {
+            "name": "COA Tools2",
+            "version": (2, 0, 2),
+            "blender": (5, 0, 0),
+        }
+    addon_updater_ops.register(info)
 
     # register classes
     for cls in classes:

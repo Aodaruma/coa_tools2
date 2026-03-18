@@ -46,6 +46,14 @@ from ..functions_draw import *
 import traceback
 
 
+def show_warning_popup(context: bpy.types.Context, message: str, title: str = "COA Tools2"):
+    def draw(self, _context):
+        for line in str(message).split("\n"):
+            self.layout.label(text=line)
+
+    context.window_manager.popup_menu(draw, title=title, icon="ERROR")
+
+
 class COATOOLS2_OT_TooglePoseMode(bpy.types.Operator):
     bl_idname = "coa_tools2.toggle_pose_mode"
     bl_label = "Toggle Mode"
@@ -598,6 +606,15 @@ class COATOOLS2_OT_QuickArmature(bpy.types.Operator):
 
     def execute(self, context):
         # bpy.ops.wm.coa_modal() ### start coa modal mode if not running
+        if context.active_object is None:
+            show_warning_popup(
+                context,
+                "No active object found.\nPlease select a sprite or armature first.",
+                title="Quick Armature",
+            )
+            self.report({"WARNING"}, "No active object found.")
+            return {"CANCELLED"}
+
         self.emulate_3_button = context.preferences.inputs.use_mouse_emulate_3_button
         context.preferences.inputs.use_mouse_emulate_3_button = False
 
