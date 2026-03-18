@@ -59,7 +59,8 @@ class COATOOLS2_OT_EditWeights(bpy.types.Operator):
     def poll(cls, context):
         return True
 
-    def __init__(self):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.sprite_object_name = None
         self.obj_name = None
         self.armature_name = None
@@ -294,11 +295,10 @@ class COATOOLS2_OT_EditWeights(bpy.types.Operator):
         line_width=2,
         point_size=None,
     ):  # draw_types -> LINE_STRIP, LINES, POINTS
-        bgl.glLineWidth(line_width)
+        gpu.state.blend_set("ALPHA")
+        gpu.state.line_width_set(line_width)
         if point_size != None:
-            bgl.glPointSize(point_size)
-        bgl.glEnable(bgl.GL_BLEND)
-        bgl.glEnable(bgl.GL_LINE_SMOOTH)
+            gpu.state.point_size_set(point_size)
 
         shader = gpu.shader.from_builtin(shader_type)
         if len(indices) > 0:
@@ -309,6 +309,11 @@ class COATOOLS2_OT_EditWeights(bpy.types.Operator):
             batch = batch_for_shader(shader, draw_type, {"pos": coords})
         shader.uniform_float("color", color)
         batch.draw(shader)
+
+        gpu.state.line_width_set(1.0)
+        if point_size != None:
+            gpu.state.point_size_set(1.0)
+        gpu.state.blend_set("NONE")
 
     def draw_callback_px(self):
         obj = bpy.context.active_object

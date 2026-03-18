@@ -18,12 +18,12 @@
     "default": {
         "fake-bpy-module-latest": {
             "hashes": [
-                "sha256:100c89136a925e8ba3c8fd34fff6a424504ca1083d8db926385c08f36c00f3fa",
-                "sha256:efae614053deee443ec3c1b64f76a56e67002b37d634729c7d74d018bd7986b4"
+                "sha256:d96f852521352798aecaf2810afcbaf9dbd739247c3d0506dc512fb58eacd0a9",
+                "sha256:e82caaa559cf91f624a8858795047d87ab3566c7d4180c260d85bfa18eef2db5"
             ],
             "index": "pypi",
             "markers": "python_version >= '3.8'",
-            "version": "==20241127"
+            "version": "==20250416"
         }
     },
     "develop": {}

@@ -83,7 +83,10 @@ class COATOOLS2_PT_Info(bpy.types.Panel):
             and addon_updater_ops.updater.json["ignore"] == False
         ):
             return context
-        if context.scene.coa_tools2.deprecated_data_found or context.scene.coa_tools2.old_coatools_found:
+        if (
+            context.scene.coa_tools2.deprecated_data_found
+            or context.scene.coa_tools2.old_coatools_found
+        ):
             return context
         if (
             context.space_data.shading.type != "RENDERED"
@@ -904,7 +907,8 @@ class COATOOLS2_OT_SelectChild(bpy.types.Operator):
     outliner_index_old = 0
     bone_name: StringProperty()
 
-    def __init__(self):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.sprite_object = None
 
     mode: EnumProperty(items=(("object", "object", "object"), ("bone", "bone", "bone")))
@@ -957,7 +961,7 @@ class COATOOLS2_OT_SelectChild(bpy.types.Operator):
     def shift_select_child(self, context, event):
         self.change_object_mode(context)
 
-        self.outliner_index_old = context.scene.coa_tools2["outliner_index"]
+        self.outliner_index_old = context.scene.coa_tools2.outliner_index
         outliner = context.scene.coa_tools2.outliner
 
         start_index = min(self.outliner_index_old, self.outliner_index)
