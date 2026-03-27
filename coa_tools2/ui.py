@@ -733,27 +733,45 @@ class COATOOLS2_PT_Tools(bpy.types.Panel):
                     col = layout.split().column()
                     tool_settings = scene.tool_settings
                     brush_data = tool_settings.weight_paint
+                    unified_settings = getattr(
+                        tool_settings, "unified_paint_settings", None
+                    )
+                    brush = (
+                        brush_data.brush
+                        if brush_data and getattr(brush_data, "brush", None)
+                        else None
+                    )
+                    paint_settings = unified_settings if unified_settings else brush
 
                     col.template_ID_preview(
                         brush_data, "brush", new="brush.add", rows=3, cols=8
                     )
                     col = layout.column(align=True)
-                    row = col.row(align=True)
-                    row.prop(tool_settings.unified_paint_settings, "weight")
-                    row = col.row(align=True)
-                    row.prop(tool_settings.unified_paint_settings, "size")
-                    row.prop(
-                        tool_settings.unified_paint_settings,
-                        "use_unified_size",
-                        text="",
-                    )
-                    row = col.row(align=True)
-                    row.prop(tool_settings.unified_paint_settings, "strength")
-                    row.prop(
-                        tool_settings.unified_paint_settings,
-                        "use_unified_strength",
-                        text="",
-                    )
+                    if paint_settings and hasattr(paint_settings, "weight"):
+                        row = col.row(align=True)
+                        row.prop(paint_settings, "weight")
+                    if paint_settings and hasattr(paint_settings, "size"):
+                        row = col.row(align=True)
+                        row.prop(paint_settings, "size")
+                        if unified_settings and hasattr(
+                            unified_settings, "use_unified_size"
+                        ):
+                            row.prop(
+                                unified_settings,
+                                "use_unified_size",
+                                text="",
+                            )
+                    if paint_settings and hasattr(paint_settings, "strength"):
+                        row = col.row(align=True)
+                        row.prop(paint_settings, "strength")
+                        if unified_settings and hasattr(
+                            unified_settings, "use_unified_strength"
+                        ):
+                            row.prop(
+                                unified_settings,
+                                "use_unified_strength",
+                                text="",
+                            )
                     row = col.row(align=True)
                     row.prop(tool_settings, "use_auto_normalize", text="Auto Normalize")
 
