@@ -141,7 +141,10 @@ def get_shapekeys(self, context):
 
 def select_shapekey(self, context):
     if self.id_data.data.shape_keys != None:
-        self.id_data.active_shape_key_index = int(self.selected_shapekey)
+        try:
+            self.id_data.active_shape_key_index = int(self.selected_shapekey)
+        except (TypeError, ValueError):
+            pass
 
 def enum_sprite_previews(self, context):
     """EnumProperty callback"""
@@ -407,7 +410,10 @@ class ObjectProperties(bpy.types.PropertyGroup):
     def get_selected_shapekey(self):
         return self.id_data.active_shape_key_index
     def set_selected_shapekey(self, value):
-        self.id_data.active_shape_key_index = value
+        try:
+            self.id_data.active_shape_key_index = int(value)
+        except (TypeError, ValueError):
+            pass
 
     anim_collections: bpy.props.CollectionProperty(type=AnimationCollections)
     uv_default_state: bpy.props.CollectionProperty(type=UVData)

@@ -89,7 +89,7 @@ class COATOOLS2_OT_ShapekeyAdd(bpy.types.Operator):
         for i, shape in enumerate(obj.data.shape_keys.key_blocks):
             if shape.name == shape_name:
                 obj.active_shape_key_index = i
-                obj.coa_tools2.selected_shapekey = i
+                obj.coa_tools2.selected_shapekey = str(i)
                 break
 
         return {"FINISHED"}
