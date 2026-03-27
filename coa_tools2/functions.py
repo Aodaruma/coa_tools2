@@ -126,16 +126,20 @@ def draw_sculpt_ui(self, context, layout):
         sculpt = getattr(toolsettings, "sculpt", None)
         brush = sculpt.brush if sculpt and getattr(sculpt, "brush", None) else None
 
-        settings = unified if (unified and getattr(unified, "use_unified_size", False)) else brush
+        settings = (
+            unified if (unified and getattr(unified, "use_unified_size", False)) else brush
+        )
         # 5.0 では unified_paint_settings が無い環境があるため存在チェック
+        col = layout.column(align=True)
         if settings and hasattr(settings, "size"):
             icon = "UNLOCKED" if getattr(settings, "use_locked_size", False) else "LOCKED"
-            col = layout.column(align=True)
             subrow = col.row(align=True)
             subrow.prop(settings, "use_locked_size", text="", toggle=True, icon=icon)
             subrow.prop(settings, "size", slider=True)
-        subrow.prop(settings, "use_unified_size", text="")
-        col.prop(settings, "strength")
+            if unified and hasattr(unified, "use_unified_size"):
+                subrow.prop(unified, "use_unified_size", text="")
+        if settings and hasattr(settings, "strength"):
+            col.prop(settings, "strength")
 
         row = layout.row(align=True)
         row.label(text="Symmetry:")
