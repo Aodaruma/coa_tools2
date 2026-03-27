@@ -95,9 +95,9 @@ class COATOOLS2_OT_EditWeights(bpy.types.Operator):
 
     def exit_edit_weights(self, context):
         tool_settings = context.scene.tool_settings
-        tool_settings.unified_paint_settings.use_unified_strength = (
-            self.use_unified_strength
-        )
+        unified_settings = self.get_unified_settings(tool_settings)
+        if unified_settings is not None:
+            unified_settings.use_unified_strength = self.use_unified_strength
         set_local_view(False)
         obj = bpy.data.objects[self.obj_name]
         obj.hide_viewport = False
@@ -195,6 +195,12 @@ class COATOOLS2_OT_EditWeights(bpy.types.Operator):
         mod.object = armature
         return mod
 
+    def get_unified_settings(self, tool_settings):
+        unified = getattr(tool_settings, "unified_paint_settings", None)
+        if unified and hasattr(unified, "use_unified_strength"):
+            return unified
+        return None
+
     def invoke(self, context, event):
         if context.active_object == None or context.active_object.type != "MESH":
             self.report({"ERROR"}, "Sprite is not selected. Cannot go in Edit Mode.")
@@ -216,10 +222,12 @@ class COATOOLS2_OT_EditWeights(bpy.types.Operator):
 
         scene = context.scene
         tool_settings = scene.tool_settings
-        self.use_unified_strength = (
-            tool_settings.unified_paint_settings.use_unified_strength
-        )
-        tool_settings.unified_paint_settings.use_unified_strength = True
+        unified_settings = self.get_unified_settings(tool_settings)
+        if unified_settings is not None:
+            self.use_unified_strength = unified_settings.use_unified_strength
+            unified_settings.use_unified_strength = True
+        else:
+            self.use_unified_strength = False
 
         context.window_manager.modal_handler_add(self)
 
