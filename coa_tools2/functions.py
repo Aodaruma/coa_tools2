@@ -126,16 +126,20 @@ def draw_sculpt_ui(self, context, layout):
         sculpt = getattr(toolsettings, "sculpt", None)
         brush = sculpt.brush if sculpt and getattr(sculpt, "brush", None) else None
 
-        settings = unified if (unified and getattr(unified, "use_unified_size", False)) else brush
+        settings = (
+            unified if (unified and getattr(unified, "use_unified_size", False)) else brush
+        )
         # 5.0 では unified_paint_settings が無い環境があるため存在チェック
+        col = layout.column(align=True)
         if settings and hasattr(settings, "size"):
             icon = "UNLOCKED" if getattr(settings, "use_locked_size", False) else "LOCKED"
-            col = layout.column(align=True)
             subrow = col.row(align=True)
             subrow.prop(settings, "use_locked_size", text="", toggle=True, icon=icon)
             subrow.prop(settings, "size", slider=True)
-        subrow.prop(settings, "use_unified_size", text="")
-        col.prop(settings, "strength")
+            if unified and hasattr(unified, "use_unified_size"):
+                subrow.prop(unified, "use_unified_size", text="")
+        if settings and hasattr(settings, "strength"):
+            col.prop(settings, "strength")
 
         row = layout.row(align=True)
         row.label(text="Symmetry:")
@@ -780,17 +784,23 @@ def set_bone_group(
             new_group = armature.pose.bone_groups[group]
         pose_bone.bone_group = new_group
     else:
-        armature: bpy.types.Armature = armature.data
-        if group not in [c.name for c in armature.collections]:
-            new_collection = armature.collections.new(name=group)
+        armature_data: bpy.types.Armature = armature.data
+        if group not in [c.name for c in armature_data.collections]:
+            new_collection = armature_data.collections.new(name=group)
         else:
-            new_collection = armature.pose.bone_groups[group]
-        new_collection.assign(pose_bone.bone)
-        pose_bone.bone.color.pallete = theme
-        new_collection.is_visible = visible
+            new_collection = armature_data.collections[group]
         if exclusive:
-            pose_bone.bone.collections.clear()
+            if hasattr(pose_bone.bone.collections, "clear"):
+                pose_bone.bone.collections.clear()
+            else:
+                for existing_collection in list(pose_bone.bone.collections):
+                    if hasattr(existing_collection, "unassign"):
+                        existing_collection.unassign(pose_bone.bone)
         new_collection.assign(pose_bone.bone)
+        bone_color = getattr(pose_bone.bone, "color", None)
+        if bone_color and hasattr(bone_color, "palette"):
+            bone_color.palette = theme
+        new_collection.is_visible = visible
 
 
 last_sprite_object = None
