@@ -47,6 +47,25 @@ def get_texture_image(context, obj) -> Optional[bpy.types.Image]:
     return None
 
 
+def show_dependency_install_help(context):
+    wm = getattr(context, "window_manager", None)
+    if wm is None:
+        return
+
+    def draw(menu, _context):
+        layout = menu.layout
+        layout.label(text="Automesh needs numpy and opencv (cv2).", icon="ERROR")
+        layout.label(text="Open Preferences > Add-ons > COA Tools2.")
+        layout.label(text="Click 'Install numpy / opencv'.")
+        layout.operator(
+            "coa_tools2.install_python_dependencies",
+            icon="IMPORT",
+            text="Install numpy / opencv",
+        )
+
+    wm.popup_menu(draw, title="Automesh Dependencies Missing", icon="ERROR")
+
+
 def get_contour(
     context,
     filepath,
@@ -233,8 +252,9 @@ class COATOOLS2_OT_AutomeshFromTexture(bpy.types.Operator):
         if cv2 is None or np is None:
             self.report(
                 {"ERROR"},
-                "Automesh requires cv2 and numpy in Blender Python environment.",
+                "Automesh needs numpy/opencv. Open Preferences > Add-ons > COA Tools2 and click 'Install numpy / opencv'.",
             )
+            show_dependency_install_help(context)
             return {"CANCELLED"}
 
         wm = context.window_manager
