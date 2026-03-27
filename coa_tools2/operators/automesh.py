@@ -122,6 +122,66 @@ def reconstruct_contour(
     return result
 
 
+def space_closed_loop(points):
+    if points is None or len(points) < 3:
+        return points
+
+    points = [mathutils.Vector(p) for p in points]
+    count = len(points)
+    lengths = []
+    total_length = 0.0
+    for i in range(count):
+        length = (points[(i + 1) % count] - points[i]).length
+        lengths.append(length)
+        total_length += length
+
+    if total_length <= 1e-8:
+        return points
+
+    step = total_length / count
+    segment_index = 0
+    segment_start = points[0]
+    segment_end = points[1]
+    segment_length = lengths[0]
+    travelled = 0.0
+    spaced_points = []
+
+    for sample_index in range(count):
+        target_distance = sample_index * step
+        while travelled + segment_length < target_distance:
+            travelled += segment_length
+            segment_index = (segment_index + 1) % count
+            segment_start = points[segment_index]
+            segment_end = points[(segment_index + 1) % count]
+            segment_length = lengths[segment_index]
+
+        if segment_length <= 1e-8:
+            spaced_points.append(mathutils.Vector(segment_start))
+            continue
+
+        fac = (target_distance - travelled) / segment_length
+        fac = max(0.0, min(1.0, fac))
+        spaced_points.append(segment_start.lerp(segment_end, fac))
+
+    return spaced_points
+
+
+def relax_closed_loop(points, iterations: Optional[int] = 3, factor: Optional[float] = 0.5):
+    if points is None or len(points) < 3:
+        return points
+
+    relaxed = [mathutils.Vector(p) for p in points]
+    for _ in range(max(1, int(iterations))):
+        source = [mathutils.Vector(p) for p in relaxed]
+        for i, point in enumerate(source):
+            prev_point = source[i - 1]
+            next_point = source[(i + 1) % len(source)]
+            target = (prev_point + next_point) * 0.5
+            relaxed[i] = point.lerp(target, max(0.0, min(1.0, factor)))
+
+    return space_closed_loop(relaxed)
+
+
 def points_to_mesh(
     context,
     outer_contour,
@@ -132,6 +192,8 @@ def points_to_mesh(
     """Create a mesh from points"""
     if inner_contour is None:
         inner_contour = []
+    outer_contour = [relax_closed_loop(contour) for contour in outer_contour]
+    inner_contour = [relax_closed_loop(contour) for contour in inner_contour]
 
     me = context.object.data
     if not me.is_editmode:
@@ -156,6 +218,7 @@ def points_to_mesh(
             verts.append(v)
         edges.append(bm.edges.new((pv, verts[0])))
         outer_verts.append(verts)
+        outer_edges.append(edges)
 
     for c in inner_contour:
         if len(c) < 3:
@@ -172,11 +235,7 @@ def points_to_mesh(
             verts.append(v)
         edges.append(bm.edges.new((pv, verts[0])))
         inner_verts.append(verts)
-
-    if bpy.ops.mesh.looptools_relax and bpy.ops.mesh.looptools_space:
-        bmesh.update_edit_mesh(me)
-        bpy.ops.mesh.looptools_relax("INVOKE_DEFAULT")
-        bpy.ops.mesh.looptools_space("INVOKE_DEFAULT")
+        inner_edges.append(edges)
 
     if is_create_faces:
         bm.edges.ensure_lookup_table()
