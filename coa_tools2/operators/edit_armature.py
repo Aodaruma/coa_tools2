@@ -1123,9 +1123,23 @@ class COATOOLS2_OT_CreateStretchIK(bpy.types.Operator):
             + ik_bone_ctrl_names
             + ik_bone_def_names
         )
-        for bone_name in hide_bone_names:
-            obj.data.bones[bone_name].layers[1] = True
-            obj.data.bones[bone_name].layers[0] = False
+        if functions.b_version_smaller_than((4, 0, 0)):
+            for bone_name in hide_bone_names:
+                obj.data.bones[bone_name].layers[1] = True
+                obj.data.bones[bone_name].layers[0] = False
+        else:
+            for bone_name in hide_bone_names:
+                pose_bone = obj.pose.bones.get(bone_name)
+                if pose_bone:
+                    functions.set_bone_group(
+                        self,
+                        obj,
+                        pose_bone,
+                        "hidden_bones",
+                        "DEFAULT",
+                        False,
+                        True,
+                    )
 
         ### store bones and constraints in Stretch IK Pointer Property
         p_bone_def["coa_stretch_ik_data"] = str([c_bone_ctrl.name, "p_bone_def"])
@@ -1193,8 +1207,14 @@ class COATOOLS2_OT_RemoveStretchIK(bpy.types.Operator):
                         bone = obj.data.bones[bone.name]
                         bone.select = True
                         obj.data.bones.active = bone
-                        bone.layers[0] = True
-                        bone.layers[1] = False
+                        if functions.b_version_smaller_than((4, 0, 0)):
+                            bone.layers[0] = True
+                            bone.layers[1] = False
+                        else:
+                            bone.hide = False
+                            for bone_collection in list(bone.collections):
+                                if bone_collection.name == "hidden_bones":
+                                    bone_collection.unassign(bone)
 
                         bpy.ops.object.mode_set(mode="EDIT")
         bpy.ops.object.mode_set(mode="POSE")
