@@ -755,10 +755,17 @@ class COATOOLS2_OT_RemoveIK(bpy.types.Operator):
                 if copy_loc != None and copy_rot != None:
                     bone.constraints.remove(copy_loc)
                     bone.constraints.remove(copy_rot)
-                    obj.data.bones[bone.name].layers[0] = True
-                    obj.data.bones[bone.name].layers[1] = False
-                    obj.data.bones.active = obj.data.bones[bone.name]
-                    obj.data.bones[bone.name].select = True
+                    bone_data = obj.data.bones[bone.name]
+                    if functions.b_version_smaller_than((4, 0, 0)):
+                        bone_data.layers[0] = True
+                        bone_data.layers[1] = False
+                    else:
+                        bone_data.hide = False
+                        for bone_collection in list(bone_data.collections):
+                            if bone_collection.name == "hidden_bones":
+                                bone_collection.unassign(bone_data)
+                    obj.data.bones.active = bone_data
+                    bone_data.select = True
 
             bpy.ops.object.mode_set(mode="EDIT")
             obj.data.edit_bones.remove(obj.data.edit_bones[pose_bone.name])
@@ -777,84 +784,124 @@ class COATOOLS2_OT_SetIK(bpy.types.Operator):
         default=True,
     )
 
+    @classmethod
+    def poll(cls, context):
+        return (
+            context.active_object is not None
+            and context.active_object.type == "ARMATURE"
+            and context.mode == "POSE"
+            and context.active_pose_bone is not None
+        )
+
     def invoke(self, context, event):
         wm = context.window_manager
         return wm.invoke_props_dialog(self)
 
     def execute(self, context):
-        bone = context.active_object.pose.bones[context.active_pose_bone.name]
-        bone2 = context.selected_pose_bones[0]
-        ik_bone = None
-        if self.replace_bone:
-            ik_bone = bone.parent
-        else:
-            ik_bone = bone
-        next_bone = bone
-        ik_length = 0
-        while next_bone != bone2 and next_bone.parent != None:
-            ik_length += 1
-            next_bone = next_bone.parent
+        armature = context.active_object
+        active_bone = armature.pose.bones[context.active_pose_bone.name]
+        selected_pose_bones = list(context.selected_pose_bones or [])
+        if len(selected_pose_bones) < 2:
+            self.report(
+                {"WARNING"},
+                "Select the active end bone and at least one parent bone.",
+            )
+            return {"CANCELLED"}
+
+        ancestor_depth = {}
+        depth = 1
+        next_parent = active_bone.parent
+        while next_parent is not None:
+            ancestor_depth[next_parent.name] = depth
+            next_parent = next_parent.parent
+            depth += 1
+
+        chain_roots = [
+            pose_bone
+            for pose_bone in selected_pose_bones
+            if pose_bone.name != active_bone.name and pose_bone.name in ancestor_depth
+        ]
+        if len(chain_roots) == 0:
+            self.report(
+                {"WARNING"},
+                "Select a parent bone from the active bone chain.",
+            )
+            return {"CANCELLED"}
+
+        chain_root = max(chain_roots, key=lambda pose_bone: ancestor_depth[pose_bone.name])
+        ik_bone = active_bone.parent if self.replace_bone else active_bone
+        if ik_bone is None:
+            self.report(
+                {"WARNING"},
+                "Active bone has no parent. Disable 'Replace IK Bone' for root bones.",
+            )
+            return {"CANCELLED"}
+
+        ik_length = ancestor_depth[chain_root.name]
         if not self.replace_bone:
             ik_length += 1
 
-        for bone3 in context.active_object.data.bones:
-            bone3.select = False
+        active_bone_name = active_bone.name
+        ik_bone_name = ik_bone.name
+
+        for data_bone in armature.data.bones:
+            data_bone.select = False
 
         bpy.ops.object.mode_set(mode="EDIT")
-        ik_target_name = "IK_" + bone.name
-        ik_target = context.active_object.data.edit_bones.new("IK_" + bone.name)
-        if bone.parent != None:
-            ik_target.parent = context.active_object.data.edit_bones[
-                bone.name
-            ].parent_recursive[
-                len(context.active_object.data.edit_bones[bone.name].parent_recursive)
-                - 1
-            ]
-        if self.replace_bone:
-            ik_target.head = bone.head
-            ik_target.tail = bone.tail
-        else:
-            ik_target.head = bone.tail
-            ik_target.tail = ik_target.head + Vector(
-                ((bone.tail - bone.head).length, 0, 0)
+        edit_bone = armature.data.edit_bones[active_bone_name]
+        ik_target = armature.data.edit_bones.new("IK_" + active_bone_name)
+        ik_target_name = ik_target.name
+        if edit_bone.parent is not None:
+            parent_recursive = edit_bone.parent_recursive
+            ik_target.parent = (
+                parent_recursive[-1] if len(parent_recursive) > 0 else edit_bone.parent
             )
-        ik_target.roll = context.active_object.data.edit_bones[bone.name].roll
+        if self.replace_bone:
+            ik_target.head = edit_bone.head
+            ik_target.tail = edit_bone.tail
+        else:
+            ik_target.head = edit_bone.tail
+            ik_target.tail = ik_target.head + Vector(
+                ((edit_bone.tail - edit_bone.head).length, 0, 0)
+            )
+        ik_target.roll = edit_bone.roll
+
         bpy.ops.object.mode_set(mode="POSE")
-        context.active_object.data.bones[ik_target_name].select = True
-        context.active_object.data.bones.active = context.active_object.data.bones[
-            ik_target_name
-        ]
+        active_bone = armature.pose.bones[active_bone_name]
+        ik_bone = armature.pose.bones[ik_bone_name]
+        ik_target_data_bone = armature.data.bones[ik_target_name]
+        ik_target_data_bone.select = True
+        armature.data.bones.active = ik_target_data_bone
 
         ik_bone.lock_ik_x = True
         ik_bone.lock_ik_y = True
-        # ik_bone.ik_stiffness_z = .9
         ik_const = ik_bone.constraints.new("IK")
-        ik_const.target = context.active_object
+        ik_const.target = armature
         ik_const.subtarget = ik_target_name
         ik_const.chain_count = ik_length
 
         functions.set_bone_group(
             self,
-            context.active_object,
-            context.active_object.pose.bones[ik_target_name],
+            armature,
+            armature.pose.bones[ik_target_name],
         )
 
         if self.replace_bone:
-            copy_loc_const = bone.constraints.new("COPY_LOCATION")
-            copy_loc_const.target = context.active_object
+            copy_loc_const = active_bone.constraints.new("COPY_LOCATION")
+            copy_loc_const.target = armature
             copy_loc_const.subtarget = ik_target_name
 
-            copy_rot_const = bone.constraints.new("COPY_ROTATION")
-            copy_rot_const.target = context.active_object
+            copy_rot_const = active_bone.constraints.new("COPY_ROTATION")
+            copy_rot_const.target = armature
             copy_rot_const.subtarget = ik_target_name
             if functions.b_version_smaller_than((4, 0, 0)):
-                context.active_object.data.bones[bone.name].layers[1] = True
-                context.active_object.data.bones[bone.name].layers[0] = False
+                armature.data.bones[active_bone.name].layers[1] = True
+                armature.data.bones[active_bone.name].layers[0] = False
             else:
                 functions.set_bone_group(
                     self,
-                    context.active_object,
-                    bone,
+                    armature,
+                    active_bone,
                     "hidden_bones",
                     "DEFAULT",
                     False,

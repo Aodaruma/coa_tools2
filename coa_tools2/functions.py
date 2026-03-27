@@ -780,17 +780,23 @@ def set_bone_group(
             new_group = armature.pose.bone_groups[group]
         pose_bone.bone_group = new_group
     else:
-        armature: bpy.types.Armature = armature.data
-        if group not in [c.name for c in armature.collections]:
-            new_collection = armature.collections.new(name=group)
+        armature_data: bpy.types.Armature = armature.data
+        if group not in [c.name for c in armature_data.collections]:
+            new_collection = armature_data.collections.new(name=group)
         else:
-            new_collection = armature.pose.bone_groups[group]
-        new_collection.assign(pose_bone.bone)
-        pose_bone.bone.color.pallete = theme
-        new_collection.is_visible = visible
+            new_collection = armature_data.collections[group]
         if exclusive:
-            pose_bone.bone.collections.clear()
+            if hasattr(pose_bone.bone.collections, "clear"):
+                pose_bone.bone.collections.clear()
+            else:
+                for existing_collection in list(pose_bone.bone.collections):
+                    if hasattr(existing_collection, "unassign"):
+                        existing_collection.unassign(pose_bone.bone)
         new_collection.assign(pose_bone.bone)
+        bone_color = getattr(pose_bone.bone, "color", None)
+        if bone_color and hasattr(bone_color, "palette"):
+            bone_color.palette = theme
+        new_collection.is_visible = visible
 
 
 last_sprite_object = None
