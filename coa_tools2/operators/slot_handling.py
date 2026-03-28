@@ -55,9 +55,6 @@ class COATOOLS2_OT_ExtractSlots(bpy.types.Operator):
 
     def execute(self, context):
         obj = context.active_object
-        active_collection = bpy.data.collections[
-            context.scene.coa_tools2.active_collection
-        ]
         if obj.type == "MESH" and len(obj.coa_tools2.slot) > 0:
             for i, slot in enumerate(obj.coa_tools2.slot):
                 name = obj.name + "_" + str(i).zfill(2)
@@ -73,8 +70,7 @@ class COATOOLS2_OT_ExtractSlots(bpy.types.Operator):
                 ob.select_set(True)
                 context.view_layer.objects.active = ob
 
-        active_collection.objects.unlink(obj)
-        bpy.data.objects.remove(obj)
+        bpy.data.objects.remove(obj, do_unlink=True)
         return {"FINISHED"}
 
 
@@ -117,16 +113,18 @@ class COATOOLS2_OT_CreateSlotObject(bpy.types.Operator):
         else:
             return False
 
+    def find_slot_item_by_mesh(self, slot_collection, mesh):
+        for slot_item in slot_collection:
+            if slot_item.mesh == mesh:
+                return slot_item
+        return None
+
     def execute(self, context):
         if not self.objects_are_valid(context):
             self.report(
                 {"INFO"}, "Please select at least to Sprites to combine into a slot."
             )
             return {"CANCELLED"}
-
-        active_collection = bpy.data.collections[
-            context.scene.coa_tools2.active_collection
-        ]
 
         name = str(context.active_object.name)
         init_obj = bpy.data.objects[context.active_object.name]
@@ -164,8 +162,7 @@ class COATOOLS2_OT_CreateSlotObject(bpy.types.Operator):
                     bpy.ops.object.origin_set(type="ORIGIN_CURSOR")
                     context.scene.cursor.location = cursor_location
 
-                    active_collection.objects.unlink(ob_tmp)
-                    bpy.data.objects.remove(ob_tmp)
+                    bpy.data.objects.remove(ob_tmp, do_unlink=True)
 
             cursor_location = Vector(context.scene.cursor.location)
             context.scene.cursor.location = obj.matrix_world.to_translation()
@@ -181,13 +178,14 @@ class COATOOLS2_OT_CreateSlotObject(bpy.types.Operator):
                 if sprite.type == "MESH":
                     item = None
                     if sprite.coa_tools2.type == "MESH":
-                        if sprite.data.name not in obj.coa_tools2.slot:
+                        item = self.find_slot_item_by_mesh(obj.coa_tools2.slot, sprite.data)
+                        is_new_item = item is None
+                        if is_new_item:
                             item = obj.coa_tools2.slot.add()
-                        else:
-                            item = obj.coa_tools2.slot[sprite.data.name]
                         item.mesh = sprite.data
                         # item.name = sprite.data.name
-                        item.index = len(obj.coa_tools2.slot) - 1
+                        if is_new_item:
+                            item.index = len(obj.coa_tools2.slot) - 1
                         if sprite == init_obj:
                             obj.coa_tools2.slot_index = item.index
                             obj.coa_tools2.slot_reset_index = item.index
@@ -205,7 +203,6 @@ class COATOOLS2_OT_CreateSlotObject(bpy.types.Operator):
         obj.coa_tools2.slot[0].active = True
         ### delete original sprite
         for sprite in objs:
-            active_collection.objects.unlink(sprite)
             bpy.data.objects.remove(sprite, do_unlink=True)
         for i, s in enumerate(obj.coa_tools2.slot):
             s.index = i
@@ -258,9 +255,6 @@ class COATOOLS2_OT_RemoveFromSlot(bpy.types.Operator):
 
     def execute(self, context):
         obj = bpy.data.objects[self.ob_name]
-        active_collection = bpy.data.collections[
-            context.scene.coa_tools2.active_collection
-        ]
         slot = obj.coa_tools2.slot[self.idx]
         active_idx = 0
         for i, s in enumerate(obj.coa_tools2.slot):
@@ -276,8 +270,7 @@ class COATOOLS2_OT_RemoveFromSlot(bpy.types.Operator):
         if len(obj.coa_tools2.slot) > 0:
             obj.coa_tools2.slot[active_idx].active = True
         else:
-            active_collection.objects.unlink(obj)
-            bpy.data.objects.remove(obj)
+            bpy.data.objects.remove(obj, do_unlink=True)
 
         #        for s in obj.coa_tools2.slot:
         #            if s.index > self.idx:

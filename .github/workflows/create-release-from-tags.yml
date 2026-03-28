@@ -1,0 +1,127 @@
+name: create-release-from-tags
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  validate_tag:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.validate.outputs.tag }}
+      prerelease: ${{ steps.validate.outputs.prerelease }}
+      release_name: ${{ steps.validate.outputs.release_name }}
+      release_body: ${{ steps.validate.outputs.release_body }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate tag format and source branch
+        id: validate
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          sha="${GITHUB_SHA}"
+
+          if [[ "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            required_branch="master"
+            prerelease="false"
+            release_name="Release ${tag}"
+            release_body="Stable release from master tag ${tag}"
+          elif [[ "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-b[0-9]+$ ]]; then
+            required_branch="develop"
+            prerelease="true"
+            release_name="Prerelease ${tag}"
+            release_body="Prerelease from develop tag ${tag}"
+          else
+            echo "ERROR: Unsupported tag format: ${tag}"
+            echo "Allowed formats: vX.Y.Z (master), vX.Y.Z-bN (develop)"
+            exit 1
+          fi
+
+          git fetch --no-tags origin "${required_branch}"
+          if ! git merge-base --is-ancestor "${sha}" "origin/${required_branch}"; then
+            echo "ERROR: Tag ${tag} must point to a commit contained in ${required_branch}."
+            exit 1
+          fi
+
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=${prerelease}" >> "$GITHUB_OUTPUT"
+          echo "release_name=${release_name}" >> "$GITHUB_OUTPUT"
+          echo "release_body=${release_body}" >> "$GITHUB_OUTPUT"
+
+  syntax_checks:
+    needs: validate_tag
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        script_path:
+          - GIMP/coatools_exporter.py
+          - Photoshop/BlenderExporter.jsx
+          - coa_tools2/__init__.py
+          - Krita/coa_tools2_exporter/__init__.py
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Run syntax checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          file="${{ matrix.script_path }}"
+          case "${file##*.}" in
+            py)
+              python -m py_compile "$file"
+              ;;
+            jsx)
+              node --check "$file"
+              ;;
+            *)
+              echo "Unknown extension: $file"
+              exit 1
+              ;;
+          esac
+
+  build_and_zip:
+    needs: [validate_tag, syntax_checks]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create zip archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          for dir in GIMP Krita coa_tools2 Photoshop Godot; do
+            zip -r "${dir}.zip" "./${dir}"
+          done
+      - name: Upload zip artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-zips
+          path: "*.zip"
+
+  create_release:
+    needs: [validate_tag, build_and_zip]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download zip artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-zips
+      - name: Create release draft
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.validate_tag.outputs.tag }}
+          name: ${{ needs.validate_tag.outputs.release_name }}
+          body: ${{ needs.validate_tag.outputs.release_body }}
+          draft: true
+          prerelease: ${{ needs.validate_tag.outputs.prerelease == 'true' }}
+          files: |
+            *.zip
