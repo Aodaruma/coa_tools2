@@ -10,15 +10,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Validate source branch
+        shell: bash
         run: |
-          if [ "${{ github.head_ref }}" = "develop" ]; then
+          source_branch="${{ github.head_ref }}"
+          if [[ "${source_branch}" =~ ^(develop|hotfix-.+|codex/hotfix-.+)$ ]]; then
             exit 0
           fi
-          if [[ "${{ github.head_ref }}" == hotfix-* ]]; then
-            exit 0
-          fi
-          if [[ "${{ github.head_ref }}" == codex/hotfix-* ]]; then
-            exit 0
-          fi
-          echo "ERROR: Only develop, hotfix-*, or codex/hotfix-* branches can be merged into master."
+          echo "ERROR: master PR source '${source_branch}' is not allowed."
+          echo "Allowed source branches: develop, hotfix-*, codex/hotfix-*"
           exit 1
