@@ -11,7 +11,14 @@ jobs:
     steps:
       - name: Validate source branch
         run: |
-          if [ "${{ github.head_ref }}" != "prerelease" ]; then
-            echo "ERROR: Only prerelease branch can be merged into master."
-            exit 1
+          if [ "${{ github.head_ref }}" = "develop" ]; then
+            exit 0
           fi
+          if [[ "${{ github.head_ref }}" == hotfix-* ]]; then
+            exit 0
+          fi
+          if [[ "${{ github.head_ref }}" == codex/hotfix-* ]]; then
+            exit 0
+          fi
+          echo "ERROR: Only develop, hotfix-*, or codex/hotfix-* branches can be merged into master."
+          exit 1

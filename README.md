@@ -44,8 +44,7 @@ You can download coa_tools2 from these sources:
 
 1. [releases page](https://github.com/Aodaruma/coa_tools2/releases) (stable)
 2. [master branch zip](https://github.com/Aodaruma/coa_tools2/archive/refs/heads/master.zip) (stable)
-3. [prerelease branch zip](https://github.com/Aodaruma/coa_tools2/archive/refs/heads/prerelease.zip) (unstable; may contains bugs)
-4. [develop branch zip](https://github.com/Aodaruma/coa_tools2/archive/refs/heads/develop.zip) (very unstable; new feature included)
+3. [develop branch zip](https://github.com/Aodaruma/coa_tools2/archive/refs/heads/develop.zip) (unstable; new features included)
 
 ### Installation
 
@@ -105,7 +104,15 @@ Export Selected Sprites button.
 
 ## Development
 
-The source code for development is in the main branch. `coa_tools2` folder is a main body of the add-on. For efficient development, you can create a link to that folder in the Blender `addons` folder.
+The source code for active development is in the `develop` branch. `master` is reserved for stable releases. `coa_tools2` folder is a main body of the add-on. For efficient development, you can create a link to that folder in the Blender `addons` folder.
+
+### Branch and Release Flow
+
+- `develop`: integration branch for feature/fix work.
+- `master`: stable branch for release-ready code.
+- Pull requests to `master` must come from `develop` (or `hotfix-*` / `codex/hotfix-*`).
+- Release tags on `master` use `vX.Y.Z` (example: `v2.1.3`) and create a draft release.
+- Prerelease tags on `develop` use `vX.Y.Z-bN` (example: `v2.1.3-b1`) and create a draft prerelease.
 
 ``` bash
 # Linux
