@@ -81,7 +81,9 @@ jobs:
               python -m py_compile "$file"
               ;;
             jsx)
-              node --check "$file"
+              # ExtendScript directives (for example "#target Photoshop") are not
+              # valid JavaScript syntax for Node, so strip preprocessor lines first.
+              sed '/^[[:space:]]*#/d' "$file" | node --check
               ;;
             *)
               echo "Unknown extension: $file"
