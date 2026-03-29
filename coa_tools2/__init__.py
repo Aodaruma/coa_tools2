@@ -137,19 +137,20 @@ class COATools2Preferences(bpy.types.AddonPreferences):
         layout = self.layout
         layout.prop(self, "sprite_import_export_scale")
 
-        deps_state = dependency_manager.dependency_state()
+        deps_state, deps_errors = dependency_manager.dependency_state_with_errors()
         deps_ok = all(deps_state.values())
 
         box = layout.box()
         box.label(text="Automesh Dependencies (Optional)")
         row = box.row(align=True)
         row.label(
-            text="numpy: " + ("Installed" if deps_state["numpy"] else "Missing"),
+            text="numpy: " + ("Installed" if deps_state["numpy"] else "Missing / Incompatible"),
             icon="CHECKMARK" if deps_state["numpy"] else "ERROR",
         )
         row = box.row(align=True)
         row.label(
-            text="opencv (cv2): " + ("Installed" if deps_state["cv2"] else "Missing"),
+            text="opencv (cv2): "
+            + ("Installed" if deps_state["cv2"] else "Missing / Incompatible"),
             icon="CHECKMARK" if deps_state["cv2"] else "ERROR",
         )
         row = box.row(align=True)
@@ -160,6 +161,11 @@ class COATools2Preferences(bpy.types.AddonPreferences):
         )
         if not deps_ok:
             box.label(text="After install, restart Blender or re-enable addon.", icon="INFO")
+            if deps_errors:
+                box.label(
+                    text="If manually copied, ensure numpy/cv2 match Blender Python ABI.",
+                    icon="INFO",
+                )
         row = layout.row(align=True)
         row.prop(self, "enable_updater")
         row.prop(self, "auto_check_update", text="Auto-check for Update")
