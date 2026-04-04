@@ -17,6 +17,7 @@ from bpy.props import (
     IntVectorProperty,
 )
 from .. import functions
+from .. import dependency_manager
 from ..functions_draw import *
 from math import radians, degrees
 import pdb
@@ -24,12 +25,12 @@ from typing import Optional
 
 try:
     import cv2
-except ModuleNotFoundError:
+except Exception:
     cv2 = None
 
 try:
     import numpy as np
-except ModuleNotFoundError:
+except Exception:
     np = None
 
 # ======================================================================================================================
@@ -326,9 +327,14 @@ class COATOOLS2_OT_AutomeshFromTexture(bpy.types.Operator):
 
     def execute(self, context):
         if cv2 is None or np is None:
+            _, dep_errors = dependency_manager.dependency_state_with_errors()
+            if dep_errors:
+                print("COA Tools2 automesh dependency import errors:")
+                for module_name, error in dep_errors.items():
+                    print(f"- {module_name}: {error}")
             self.report(
                 {"ERROR"},
-                "Automesh needs numpy/opencv. Open Preferences > Add-ons > COA Tools2 and click 'Install numpy / opencv'.",
+                "Automesh needs compatible numpy/opencv. Open Preferences > Add-ons > COA Tools2 and click 'Install numpy / opencv'.",
             )
             show_dependency_install_help(context)
             return {"CANCELLED"}
