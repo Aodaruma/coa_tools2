@@ -54,6 +54,36 @@ def show_warning_popup(context: bpy.types.Context, message: str, title: str = "C
     context.window_manager.popup_menu(draw, title=title, icon="ERROR")
 
 
+def set_data_bone_selected(data_bone, is_selected):
+    if hasattr(data_bone, "select_set"):
+        data_bone.select_set(is_selected)
+        return
+    if hasattr(data_bone, "select"):
+        data_bone.select = is_selected
+    if hasattr(data_bone, "select_head"):
+        data_bone.select_head = is_selected
+    if hasattr(data_bone, "select_tail"):
+        data_bone.select_tail = is_selected
+
+
+def disable_edit_bone_inherit(edit_bone):
+    if hasattr(edit_bone, "use_inherit_scale"):
+        edit_bone.use_inherit_scale = False
+    elif hasattr(edit_bone, "inherit_scale"):
+        try:
+            edit_bone.inherit_scale = "NONE"
+        except Exception:
+            pass
+
+    if hasattr(edit_bone, "use_inherit_rotation"):
+        edit_bone.use_inherit_rotation = False
+    elif hasattr(edit_bone, "inherit_rotation"):
+        try:
+            edit_bone.inherit_rotation = False
+        except Exception:
+            pass
+
+
 class COATOOLS2_OT_TooglePoseMode(bpy.types.Operator):
     bl_idname = "coa_tools2.toggle_pose_mode"
     bl_label = "Toggle Mode"
@@ -765,7 +795,7 @@ class COATOOLS2_OT_RemoveIK(bpy.types.Operator):
                             if bone_collection.name == "hidden_bones":
                                 bone_collection.unassign(bone_data)
                     obj.data.bones.active = bone_data
-                    bone_data.select = True
+                    set_data_bone_selected(bone_data, True)
 
             bpy.ops.object.mode_set(mode="EDIT")
             obj.data.edit_bones.remove(obj.data.edit_bones[pose_bone.name])
@@ -845,7 +875,7 @@ class COATOOLS2_OT_SetIK(bpy.types.Operator):
         ik_bone_name = ik_bone.name
 
         for data_bone in armature.data.bones:
-            data_bone.select = False
+            set_data_bone_selected(data_bone, False)
 
         bpy.ops.object.mode_set(mode="EDIT")
         edit_bone = armature.data.edit_bones[active_bone_name]
@@ -870,7 +900,7 @@ class COATOOLS2_OT_SetIK(bpy.types.Operator):
         active_bone = armature.pose.bones[active_bone_name]
         ik_bone = armature.pose.bones[ik_bone_name]
         ik_target_data_bone = armature.data.bones[ik_target_name]
-        ik_target_data_bone.select = True
+        set_data_bone_selected(ik_target_data_bone, True)
         armature.data.bones.active = ik_target_data_bone
 
         ik_bone.lock_ik_x = True
@@ -1002,8 +1032,7 @@ class COATOOLS2_OT_CreateStretchIK(bpy.types.Operator):
             joint_bone_ctrl.select = True
             joint_bone_ctrl.select_head = True
             joint_bone_ctrl.select_tail = True
-            joint_bone_ctrl.use_inherit_scale = False
-            joint_bone_ctrl.use_inherit_rotation = False
+            disable_edit_bone_inherit(joint_bone_ctrl)
             joint_bones_ctrl.append(joint_bone_ctrl)
 
         ####################### create all needed constraints #######################
@@ -1205,7 +1234,7 @@ class COATOOLS2_OT_RemoveStretchIK(bpy.types.Operator):
                         del bone["coa_stretch_ik_data"]
 
                         bone = obj.data.bones[bone.name]
-                        bone.select = True
+                        set_data_bone_selected(bone, True)
                         obj.data.bones.active = bone
                         if functions.b_version_smaller_than((4, 0, 0)):
                             bone.layers[0] = True
