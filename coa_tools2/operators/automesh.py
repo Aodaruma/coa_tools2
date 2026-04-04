@@ -199,6 +199,23 @@ def points_to_mesh(
     if not me.is_editmode:
         bpy.ops.object.mode_set(mode="EDIT")
     bm = bmesh.from_edit_mesh(me)
+    bm.verts.ensure_lookup_table()
+
+    # Re-running automesh should replace previous generated geometry,
+    # not keep stacking contours from prior runs.
+    base_group = context.object.vertex_groups.get("coa_base_sprite")
+    if base_group is not None:
+        base_sprite_indices = set()
+        for vert in context.object.data.vertices:
+            for group in vert.groups:
+                if group.group == base_group.index:
+                    base_sprite_indices.add(vert.index)
+                    break
+
+        verts_to_remove = [vert for vert in bm.verts if vert.index not in base_sprite_indices]
+        if len(verts_to_remove) > 0:
+            bmesh.ops.delete(bm, geom=verts_to_remove, context="VERTS")
+            bm.verts.ensure_lookup_table()
 
     outer_verts, inner_verts = [], []
     outer_edges, inner_edges = [], []
@@ -322,6 +339,7 @@ class COATOOLS2_OT_AutomeshFromTexture(bpy.types.Operator):
         ) + 1
 
         print("Automesh from texture...")
+        contours_refreshed = False
         if (
             self.outer_contours is None
             or self.inner_contours is None
@@ -332,10 +350,13 @@ class COATOOLS2_OT_AutomeshFromTexture(bpy.types.Operator):
             print("get contours...")
             obj = context.active_object
             blimg = get_texture_image(context, obj)
+            if blimg is None:
+                self.report({"WARNING"}, "No texture image found on active object.")
+                return {"CANCELLED"}
             filepath = bpy.path.abspath(blimg.filepath)
             if filepath is not None and os.path.exists(filepath):
                 print("got img:", filepath)
-                self.inner_contours, _ = get_contour(
+                inner_contours, _ = get_contour(
                     context,
                     filepath,
                     self.resolution,
@@ -343,7 +364,7 @@ class COATOOLS2_OT_AutomeshFromTexture(bpy.types.Operator):
                     -self.margin,
                     self.padding,
                 )
-                self.outer_contours, _ = get_contour(
+                outer_contours, _ = get_contour(
                     context,
                     filepath,
                     self.resolution,
@@ -351,10 +372,24 @@ class COATOOLS2_OT_AutomeshFromTexture(bpy.types.Operator):
                     self.margin,
                     self.padding,
                 )
+                if outer_contours is None or len(outer_contours) == 0:
+                    self.report(
+                        {"WARNING"},
+                        "No contour detected for current Automesh parameters. Keeping previous mesh.",
+                    )
+                    return {"FINISHED"}
 
-        self.old_resolution = self.resolution
-        self.old_margin = self.margin
-        self.old_threshold = self.threshold
+                self.inner_contours = inner_contours
+                self.outer_contours = outer_contours
+                contours_refreshed = True
+            else:
+                self.report({"WARNING"}, "Texture image path is invalid.")
+                return {"CANCELLED"}
+
+        if contours_refreshed:
+            self.old_resolution = self.resolution
+            self.old_margin = self.margin
+            self.old_threshold = self.threshold
 
         if self.outer_contours is not None and len(self.outer_contours) > 0:
             print("reconstruct contours...")
