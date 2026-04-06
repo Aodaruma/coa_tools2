@@ -1,4 +1,4 @@
-import importlib.util
+import importlib
 import os
 import subprocess
 import sys
@@ -21,16 +21,33 @@ def ensure_vendor_path():
 
 
 def dependency_state():
-    ensure_vendor_path()
-    state = {}
-    for module_name in REQUIRED_MODULES:
-        state[module_name] = importlib.util.find_spec(module_name) is not None
+    state, _ = dependency_state_with_errors()
     return state
 
 
 def dependencies_installed():
     state = dependency_state()
     return all(state.values())
+
+
+def _try_import(module_name):
+    try:
+        importlib.import_module(module_name)
+        return True, ""
+    except Exception as exc:
+        return False, f"{type(exc).__name__}: {exc}"
+
+
+def dependency_state_with_errors():
+    ensure_vendor_path()
+    state = {}
+    errors = {}
+    for module_name in REQUIRED_MODULES:
+        is_ok, error = _try_import(module_name)
+        state[module_name] = is_ok
+        if not is_ok:
+            errors[module_name] = error
+    return state, errors
 
 
 def _notify(progress_callback, progress, message):
@@ -48,6 +65,33 @@ def install_dependencies(python_executable=None, progress_callback=None):
     env = os.environ.copy()
     env["PIP_DISABLE_PIP_VERSION_CHECK"] = "1"
 
+    logs = []
+
+    _notify(progress_callback, 0.0, "Checking existing dependencies...")
+    state_before, errors_before = dependency_state_with_errors()
+    if all(state_before.values()):
+        logs.append(
+            {
+                "command": ["dependency-check"],
+                "returncode": 0,
+                "stdout": "numpy/cv2 already importable.",
+                "stderr": "",
+            }
+        )
+        _notify(progress_callback, 100.0, "Dependencies already installed.")
+        return True, logs
+
+    logs.append(
+        {
+            "command": ["dependency-check"],
+            "returncode": 1,
+            "stdout": "",
+            "stderr": "\n".join(
+                f"{module}: {error}" for module, error in errors_before.items()
+            ),
+        }
+    )
+
     commands = [
         (
             10.0,
@@ -63,6 +107,8 @@ def install_dependencies(python_executable=None, progress_callback=None):
                 "pip",
                 "install",
                 "--upgrade",
+                "--force-reinstall",
+                "--no-cache-dir",
                 "--target",
                 vendor_path,
                 *REQUIRED_PACKAGES,
@@ -70,9 +116,7 @@ def install_dependencies(python_executable=None, progress_callback=None):
         ),
     ]
 
-    _notify(progress_callback, 0.0, "Starting dependency installation...")
-
-    logs = []
+    _notify(progress_callback, 5.0, "Starting dependency installation...")
     for progress, message, cmd in commands:
         _notify(progress_callback, progress, message)
         process = subprocess.run(
@@ -90,14 +134,45 @@ def install_dependencies(python_executable=None, progress_callback=None):
             }
         )
         if process.returncode != 0:
+            state_after_failure, errors_after_failure = dependency_state_with_errors()
+            if all(state_after_failure.values()):
+                _notify(
+                    progress_callback,
+                    100.0,
+                    "Install command failed, but dependencies are available.",
+                )
+                return True, logs
+
+            logs.append(
+                {
+                    "command": ["dependency-check"],
+                    "returncode": 1,
+                    "stdout": "",
+                    "stderr": "\n".join(
+                        f"{module}: {error}"
+                        for module, error in errors_after_failure.items()
+                    ),
+                }
+            )
             _notify(progress_callback, progress, "Installation failed.")
             return False, logs
 
     _notify(progress_callback, 85.0, "Verifying installed modules...")
     ensure_vendor_path()
-    success = dependencies_installed()
+    state_after_install, errors_after_install = dependency_state_with_errors()
+    success = all(state_after_install.values())
     if success:
         _notify(progress_callback, 100.0, "Installation completed.")
     else:
+        logs.append(
+            {
+                "command": ["dependency-check"],
+                "returncode": 1,
+                "stdout": "",
+                "stderr": "\n".join(
+                    f"{module}: {error}" for module, error in errors_after_install.items()
+                ),
+            }
+        )
         _notify(progress_callback, 100.0, "Installation finished, but modules were not detected.")
     return success, logs

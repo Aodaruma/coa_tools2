@@ -50,6 +50,18 @@ import random
 BONE_LAYERS = []
 
 
+def set_data_bone_selected(data_bone, is_selected):
+    if hasattr(data_bone, "select_set"):
+        data_bone.select_set(is_selected)
+        return
+    if hasattr(data_bone, "select"):
+        data_bone.select = is_selected
+    if hasattr(data_bone, "select_head"):
+        data_bone.select_head = is_selected
+    if hasattr(data_bone, "select_tail"):
+        data_bone.select_tail = is_selected
+
+
 class COATOOLS2_OT_EditWeights(bpy.types.Operator):
     bl_idname = "coa_tools2.edit_weights"
     bl_label = "Select Child"
@@ -83,7 +95,7 @@ class COATOOLS2_OT_EditWeights(bpy.types.Operator):
     def select_bone(self):
         armature = bpy.data.objects[self.armature_name]
         for bone in armature.data.bones:
-            bone.select = False
+            set_data_bone_selected(bone, False)
         armature.data.bones.active = None
 
         for i, vertex_group in enumerate(bpy.data.objects[self.obj_name].vertex_groups):

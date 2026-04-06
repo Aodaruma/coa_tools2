@@ -56,7 +56,10 @@ class COATOOLS2_OT_InstallPythonDependencies(bpy.types.Operator):
                     print(failed_log["stdout"])
                 if failed_log["stderr"]:
                     print(failed_log["stderr"])
-            self.report({"ERROR"}, "Dependency installation failed. See system console.")
+            self.report(
+                {"ERROR"},
+                "Dependency installation failed. Existing numpy/cv2 may be incompatible. See system console.",
+            )
             return {"CANCELLED"}
 
         COATOOLS2_OT_InstallPythonDependencies._is_running = True
@@ -132,5 +135,8 @@ class COATOOLS2_OT_InstallPythonDependencies(bpy.types.Operator):
             if failed_log["stderr"]:
                 print(failed_log["stderr"])
 
-        self.report({"ERROR"}, "Dependency installation failed. See system console.")
+        self.report(
+            {"ERROR"},
+            "Dependency installation failed. Existing numpy/cv2 may be incompatible. See system console.",
+        )
         return {"CANCELLED"}
