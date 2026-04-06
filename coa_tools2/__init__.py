@@ -144,7 +144,8 @@ class COATools2Preferences(bpy.types.AddonPreferences):
         box.label(text="Automesh Dependencies (Optional)")
         row = box.row(align=True)
         row.label(
-            text="numpy: " + ("Installed" if deps_state["numpy"] else "Missing / Incompatible"),
+            text="numpy: "
+            + ("Installed" if deps_state["numpy"] else "Missing / Incompatible"),
             icon="CHECKMARK" if deps_state["numpy"] else "ERROR",
         )
         row = box.row(align=True)
@@ -160,7 +161,9 @@ class COATools2Preferences(bpy.types.AddonPreferences):
             text="Install numpy / opencv",
         )
         if not deps_ok:
-            box.label(text="After install, restart Blender or re-enable addon.", icon="INFO")
+            box.label(
+                text="After install, restart Blender or re-enable addon.", icon="INFO"
+            )
             if deps_errors:
                 box.label(
                     text="If manually copied, ensure numpy/cv2 match Blender Python ABI.",
