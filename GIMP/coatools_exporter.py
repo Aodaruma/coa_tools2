@@ -207,7 +207,7 @@ class CoaExport():
         try:
             if not os.path.isdir(self.sprite_path):
                 os.makedirs(self.sprite_path)
-        except Exception, err:
+        except Exception as err:
             show_error_msg(err)
 
     def save_png(self, img, path):
