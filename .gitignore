@@ -166,3 +166,5 @@ Blender/coa_tools2/venv
 Blender/coa_tools2/.idea/
 Krita/coa_tools2_exporter/.idea/
 coa_tools2/_py_deps/
+
+bl_ext.vscode_development.*/
