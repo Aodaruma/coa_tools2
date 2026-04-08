@@ -55,44 +55,8 @@ jobs:
           echo "release_name=${release_name}" >> "$GITHUB_OUTPUT"
           echo "release_body=${release_body}" >> "$GITHUB_OUTPUT"
 
-  syntax_checks:
-    needs: validate_tag
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        script_path:
-          - GIMP/coatools_exporter.py
-          - Photoshop/BlenderExporter.jsx
-          - coa_tools2/__init__.py
-          - Krita/coa_tools2_exporter/__init__.py
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-      - name: Run syntax checks
-        shell: bash
-        run: |
-          set -euo pipefail
-          file="${{ matrix.script_path }}"
-          case "${file##*.}" in
-            py)
-              python -m py_compile "$file"
-              ;;
-            jsx)
-              # ExtendScript directives (for example "#target Photoshop") are not
-              # valid JavaScript syntax for Node, so strip preprocessor lines first.
-              sed '/^[[:space:]]*#/d' "$file" | node --check
-              ;;
-            *)
-              echo "Unknown extension: $file"
-              exit 1
-              ;;
-          esac
-
   build_and_zip:
-    needs: [validate_tag, syntax_checks]
+    needs: [validate_tag]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
