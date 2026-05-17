@@ -56,3 +56,12 @@ jobs:
               exit 1
               ;;
           esac
+
+  blender_addon_version_check:
+    needs: validate_source
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Blender add-on metadata versions
+        shell: bash
+        run: python scripts/sync_blender_addon_version.py --check-consistent
