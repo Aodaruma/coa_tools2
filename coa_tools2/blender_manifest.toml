@@ -1,6 +1,6 @@
 schema_version = "1.0.0"
 id = "coa_tools2"
-version = "2.0.2"
+version = "2.2.1"
 name = "COA Tools 2"
 tagline = "2D cutout animation tools for Blender"
 maintainer = "Aodaruma"

@@ -60,6 +60,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Sync Blender add-on version from tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/sync_blender_addon_version.py --tag "${{ needs.validate_tag.outputs.tag }}"
+          python scripts/sync_blender_addon_version.py --tag "${{ needs.validate_tag.outputs.tag }}" --check
       - name: Create zip archives
         shell: bash
         run: |
