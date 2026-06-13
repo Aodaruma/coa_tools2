@@ -169,3 +169,5 @@ coa_tools2/_py_deps/
 
 bl_ext.vscode_development.*/
 validation_work/
+docs/_codex/
+samples/tester
