@@ -54,6 +54,8 @@ Behavior:
 
 - Before starting issue-related fixes, check GitHub Project `coa_tools2 tasks` and align the issue with its current project item.
 - When working from another worktree or with subagents, treat the project as the shared source of truth for triage and work state.
+- When creating GitHub issues or comments from CLI, use `--body-file` or a here-string body file instead of inline escaped `\n`.
+- Preserve multi-line formatting in issue bodies exactly as written, especially for repro steps and traceback sections.
 - Update the project status as work progresses using these meanings:
   - `Backlog`: not started yet
   - `Ready`: actionable and ready to implement
