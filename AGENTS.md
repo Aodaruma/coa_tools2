@@ -49,3 +49,16 @@ Behavior:
 - Delete remote branches only when they are clearly merged into `master` or `develop`.
 - Do not delete branches that still contain unique commits.
 - Keep active work branches until the owner confirms cleanup.
+
+## Issue and Project Triage
+
+- Before starting issue-related fixes, check GitHub Project `coa_tools2 tasks` and align the issue with its current project item.
+- When working from another worktree or with subagents, treat the project as the shared source of truth for triage and work state.
+- Update the project status as work progresses using these meanings:
+  - `Backlog`: not started yet
+  - `Ready`: actionable and ready to implement
+  - `Pending`: blocked on repro, decision, or verification setup
+  - `In progress`: implementation is actively underway
+  - `In review`: partially fixed or likely fixed in code, but still needs manual verification before closing the issue
+  - `Done`: verified complete or otherwise finished
+- If source changes suggest an issue may already be fixed, do not close it immediately; move it to `In review` first and confirm by real environment testing.
