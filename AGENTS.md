@@ -56,12 +56,14 @@ Behavior:
 
 - 先に GitHub issues と Project `coa_tools2 tasks` を確認し、重要度・衝突リスク・検証容易性で作業順を決める。
 - issue ごとに 1 worktree / 1 branch を割り当てる。
-- branch は原則 `master` 起点で `codex/issue-<番号>-<短い説明>` を作る。
-- 古い issue branch がある場合も、そのまま作業せず、現在の `master` 起点 branch から必要な差分だけ参照する。
+- branch は通常 `develop` 起点で `codex/issue-<番号>-<短い説明>` を作る。`master` 向けは release / hotfix だけにする。
+- 古い issue branch がある場合も、そのまま作業せず、現在の `develop` 起点 branch から必要な差分だけ参照する。
 - subagent を使う場合は、担当 worktree、対象 issue、編集してよい範囲、検証条件、コミット方針を明示する。
 - subagent には「他 agent も同時に作業しているため、別 worktree や他者の変更を戻さない」と必ず伝える。
 - 現在の subagent tool で `gpt-4.5` を指定できない場合は model override を省略し、`reasoning_effort` を `high` または `xhigh` にする。
 - DCC 実機検証（Blender / Krita / GIMP）は main agent が直列で行う。GUI やユーザー設定を同時に触る検証は subagent に並列実行させない。
+- PR はユーザーが明示した場合を除き draft にせず、通常の ready for review として作成する。
+- PR title / body は英語で書く。内部メモやユーザー向け報告は日本語でよい。
 - GitHub PR body は `--body-file` を使い、PowerShell で `\n` がリテラル化しないようにする。
 - 完全に修正できた issue は `Fixes #...`、部分修正や関連確認は `Refs #...` を使う。
 - PR 作成後は、対応 issue と PR の Project Status を `In review` にする。
