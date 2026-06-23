@@ -558,13 +558,90 @@ def create_action(context, item=None, obj=None):
         action = bpy.data.actions[action_name]
 
     action.use_fake_user = True
+    assign_action(obj, action)
+    context.view_layer.update()
+
+
+def get_action_name(item, obj):
+    return item.name + "_" + obj.name
+
+
+def get_animation_objects(context, sprite_object):
+    children = get_children(context, sprite_object, ob_list=[])
+    animation_objects = []
+    if sprite_object.type == "ARMATURE":
+        animation_objects.append(sprite_object)
+    for child in children:
+        animation_objects.append(child)
+    return animation_objects
+
+
+def assign_action(obj, action):
     if obj.animation_data == None:
         obj.animation_data_create()
-    if b_version_smaller_than((4, 4, 0)):
-        obj.animation_data.action = action
-    else:
+    obj.animation_data.action = action
+    if (
+        action != None
+        and not b_version_smaller_than((4, 4, 0))
+        and obj.animation_data.action_slot == None
+        and len(action.slots) > 0
+    ):
         obj.animation_data.action_slot = action.slots[0]
-    context.view_layer.update()
+
+
+def clear_assigned_action(obj):
+    if obj.animation_data != None:
+        obj.animation_data.action = None
+
+
+def is_coa_action_for_object(sprite_object, obj, action):
+    if sprite_object == None or action == None:
+        return False
+
+    for item in sprite_object.coa_tools2.anim_collections:
+        if item.action_collection and action.name == get_action_name(item, obj):
+            return True
+    return False
+
+
+def action_has_fcurves(action):
+    if action == None:
+        return False
+
+    if hasattr(action, "fcurves"):
+        return len(action.fcurves) > 0
+
+    if not hasattr(action, "layers"):
+        return False
+
+    for layer in action.layers:
+        for strip in layer.strips:
+            for slot in action.slots:
+                channelbag = strip.channelbag(slot)
+                if channelbag != None and len(channelbag.fcurves) > 0:
+                    return True
+    return False
+
+
+def register_unassigned_action_collection_keyframes(context, sprite_object, item):
+    if sprite_object == None or item == None or not item.action_collection:
+        return
+
+    for obj in get_animation_objects(context, sprite_object):
+        if obj.animation_data == None or obj.animation_data.action == None:
+            continue
+
+        action = obj.animation_data.action
+        action_name = get_action_name(item, obj)
+        if action.name == action_name or is_coa_action_for_object(sprite_object, obj, action):
+            continue
+        if not action_has_fcurves(action):
+            continue
+        if action_name in bpy.data.actions and bpy.data.actions[action_name] != action:
+            continue
+
+        action.name = action_name
+        action.use_fake_user = True
 
 
 def clear_pose(obj):
@@ -598,18 +675,22 @@ def set_action(context, item=None):
         )
         item = sprite_object.coa_tools2.anim_collections[index]
 
-    children = get_children(context, sprite_object, ob_list=[])
-
-    animation_objects = []
-    if sprite_object.type == "ARMATURE":
-        animation_objects.append(sprite_object)
-    for child in children:
-        animation_objects.append(child)
+    register_unassigned_action_collection_keyframes(context, sprite_object, item)
+    animation_objects = get_animation_objects(context, sprite_object)
 
     for child in animation_objects:
         clear_pose(child)
-        if child.animation_data != None:
-            child.animation_data.action = None
+        action_name = get_action_name(item, child)
+        action = None
+        if action_name in bpy.data.actions:
+            action = bpy.data.actions[action_name]
+
+        if (
+            child.animation_data != None
+            and is_coa_action_for_object(sprite_object, child, child.animation_data.action)
+            and child.animation_data.action != action
+        ):
+            clear_assigned_action(child)
 
         if child.type == "ARMATURE" and item.name == "Restpose":
             for bone in child.pose.bones:
@@ -624,18 +705,9 @@ def set_action(context, item=None):
             not (child.type == "MESH" and item.name == "Restpose")
             and context.scene.coa_tools2.nla_mode == "ACTION"
         ):
-            action_name = item.name + "_" + child.name
-            action = None
-            if action_name in bpy.data.actions:
-                action = bpy.data.actions[action_name]
             if action != None:
                 action.use_fake_user = True
-                if child.animation_data == None:
-                    child.animation_data_create()
-                if b_version_smaller_than((4, 4, 0)):
-                    child.animation_data.action = action
-                else:
-                    child.animation_data.action_slot = action.slots[0]
+                assign_action(child, action)
     context.scene.frame_set(context.scene.frame_current)
     context.view_layer.update()
 
@@ -899,56 +971,96 @@ def set_z_value(context, obj, z):
 
 def set_modulate_color(obj, context, color):
     if obj.type == "MESH":
+        if obj.active_material is None:
+            return
         coa_material_node = None
         node_tree = obj.active_material.node_tree
         if node_tree != None:
             for node in node_tree.nodes:
                 if (
                     node.type == "GROUP"
+                    and node.node_tree is not None
                     and node.node_tree.name == CONSTANTS.COA_NODE_GROUP_NAME
                 ):
                     coa_material_node = node
                     break
         if coa_material_node != None:
-            coa_material_node.inputs["Modulate Color"].default_value[:3] = color
+            color_input = coa_material_node.inputs.get("Modulate Color")
+            if (
+                color_input is not None
+                and tuple(color_input.default_value[:3]) != tuple(color)
+            ):
+                color_input.default_value[:3] = color
 
 
 def set_alpha(obj, context, alpha):
     if obj.type == "MESH":
+        if obj.active_material is None:
+            return
         coa_material_node = None
         node_tree = obj.active_material.node_tree
         if node_tree != None:
             for node in node_tree.nodes:
                 if (
                     node.type == "GROUP"
+                    and node.node_tree is not None
                     and node.node_tree.name == CONSTANTS.COA_NODE_GROUP_NAME
                 ):
                     coa_material_node = node
                     break
         if coa_material_node != None:
-            coa_material_node.inputs["Alpha"].default_value = alpha
+            alpha_input = coa_material_node.inputs.get("Alpha")
+            if alpha_input is not None and alpha_input.default_value != alpha:
+                alpha_input.default_value = alpha
 
 
-def change_slot_mesh_data(context, obj, obj_eval=None):
-    if len(obj.coa_tools2.slot) > 0:
-        slot_len = len(obj.coa_tools2.slot) - 1
-        new_index = min(
-            obj.coa_tools2.slot_index, max(0, len(obj.coa_tools2.slot) - 1)
-        )
-        if obj.coa_tools2.slot_index != new_index:
-            object.__setattr__(obj.coa_tools2, "_lock_slot_index_update", True)
-            try:
-                obj.coa_tools2.slot_index = new_index
-            finally:
-                object.__setattr__(obj.coa_tools2, "_lock_slot_index_update", False)
-        if obj_eval == None:
-            obj_eval = obj
-        idx = max(min(obj_eval.coa_tools2.slot_index, len(obj.coa_tools2.slot) - 1), 0)
+def get_clamped_slot_index(obj, obj_eval=None):
+    if obj is None or not hasattr(obj, "coa_tools2"):
+        return None
+    if len(obj.coa_tools2.slot) == 0:
+        return None
 
-        slot = obj.coa_tools2.slot[idx]
-        obj = slot.id_data
+    source_obj = obj_eval if obj_eval is not None else obj
+    try:
+        index = int(source_obj.coa_tools2.slot_index)
+    except (AttributeError, TypeError, ValueError):
+        index = 0
+    return max(0, min(index, len(obj.coa_tools2.slot) - 1))
+
+
+def change_slot_mesh_data(
+    context,
+    obj,
+    obj_eval=None,
+    *,
+    clamp_property=True,
+    sync_active=True,
+    alpha=None,
+    modulate_color=None,
+):
+    idx = get_clamped_slot_index(obj, obj_eval)
+    if idx is None:
+        return False
+
+    if clamp_property and obj_eval is None and obj.coa_tools2.slot_index != idx:
+        object.__setattr__(obj.coa_tools2, "_lock_slot_index_update", True)
+        try:
+            obj.coa_tools2.slot_index = idx
+        finally:
+            object.__setattr__(obj.coa_tools2, "_lock_slot_index_update", False)
+
+    slot = obj.coa_tools2.slot[idx]
+    if slot.mesh is None:
+        return False
+
+    obj = slot.id_data
+    if obj.data != slot.mesh:
         obj.data = slot.mesh
-        set_alpha(obj, context, obj.coa_tools2.alpha)
+    set_alpha(obj, context, obj.coa_tools2.alpha if alpha is None else alpha)
+    if modulate_color is not None:
+        set_modulate_color(obj, context, modulate_color)
+
+    if sync_active:
         for slot2 in obj.coa_tools2.slot:
             if slot != slot2 and slot2.active:
                 object.__setattr__(slot2, "_lock_active_update", True)
@@ -962,13 +1074,16 @@ def change_slot_mesh_data(context, obj, obj_eval=None):
                     slot2.active = True
                 finally:
                     object.__setattr__(slot2, "_lock_active_update", False)
-        if "coa_base_sprite" in obj.modifiers:
-            if slot.mesh.coa_tools2.hide_base_sprite:
-                obj.modifiers["coa_base_sprite"].show_render = True
-                obj.modifiers["coa_base_sprite"].show_viewport = True
-            else:
-                obj.modifiers["coa_base_sprite"].show_render = False
-                obj.modifiers["coa_base_sprite"].show_viewport = False
+
+    if "coa_base_sprite" in obj.modifiers:
+        hide_base_sprite = bool(slot.mesh.coa_tools2.hide_base_sprite)
+        modifier = obj.modifiers["coa_base_sprite"]
+        if modifier.show_render != hide_base_sprite:
+            modifier.show_render = hide_base_sprite
+        if modifier.show_viewport != hide_base_sprite:
+            modifier.show_viewport = hide_base_sprite
+
+    return True
 
 
 def display_children(self, context, obj):

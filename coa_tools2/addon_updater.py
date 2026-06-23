@@ -774,6 +774,98 @@ class Singleton_updater(object):
 
         self.reload_addon()
 
+    def _is_addon_source_path(self, path):
+        return path != None and os.path.isfile(os.path.join(path, "__init__.py"))
+
+    def _source_subfolder_candidates(self):
+        candidates = []
+        for value in [self._subfolder_path, self._addon]:
+            if value in [None, ""]:
+                continue
+            value = os.path.normpath(value)
+            if os.path.isabs(value):
+                continue
+            if value in [os.curdir, os.pardir] or os.pardir in value.split(os.sep):
+                continue
+            if value not in candidates:
+                candidates.append(value)
+        return candidates
+
+    def _resolve_unique_source_match(self, matches):
+        unique_matches = []
+        for path in matches:
+            path = os.path.abspath(path)
+            if path not in unique_matches:
+                unique_matches.append(path)
+
+        if len(unique_matches) == 1:
+            return unique_matches[0]
+        if len(unique_matches) > 1:
+            return False
+        return None
+
+    def _resolve_addon_source_path(self, source_root):
+        if self._is_addon_source_path(source_root):
+            return source_root
+
+        source_root = os.path.abspath(source_root)
+        search_roots = [source_root]
+        for name in sorted(os.listdir(source_root)):
+            path = os.path.join(source_root, name)
+            if os.path.isdir(path):
+                search_roots.append(path)
+
+        candidates = self._source_subfolder_candidates()
+        for candidate in candidates:
+            matches = []
+            for root in search_roots:
+                path = os.path.abspath(os.path.join(root, candidate))
+                if os.path.commonpath([source_root, path]) != source_root:
+                    continue
+                if self._is_addon_source_path(path):
+                    matches.append(path)
+
+            match = self._resolve_unique_source_match(matches)
+            if match is False:
+                return None
+            if match is not None:
+                return match
+
+        addon_name = os.path.normcase(self._addon) if self._addon else None
+        addon_matches = []
+        candidate_matches = {candidate: [] for candidate in candidates}
+        for root, dirs, files in os.walk(source_root):
+            dirs.sort()
+            if "__init__.py" not in files:
+                continue
+
+            relpath = os.path.normpath(os.path.relpath(root, source_root))
+            relpath_cmp = os.path.normcase(relpath)
+            for candidate in candidates:
+                candidate_cmp = os.path.normcase(candidate)
+                if relpath_cmp == candidate_cmp or relpath_cmp.endswith(
+                    os.sep + candidate_cmp
+                ):
+                    candidate_matches[candidate].append(root)
+
+            if addon_name and os.path.normcase(os.path.basename(root)) == addon_name:
+                addon_matches.append(root)
+
+        for candidate in candidates:
+            match = self._resolve_unique_source_match(candidate_matches[candidate])
+            if match is False:
+                return None
+            if match is not None:
+                return match
+
+        match = self._resolve_unique_source_match(addon_matches)
+        if match is False:
+            return None
+        if match is not None:
+            return match
+
+        return None
+
     def unpack_staged_zip(self, clean=False):
 
         if os.path.isfile(self._source_zip) == False:
@@ -803,22 +895,20 @@ class Singleton_updater(object):
         if self._verbose:
             print("Extracted source")
 
-        # either directly in root of zip, or one folder level deep
-        unpath = os.path.join(self._updater_path, "source")
-        if os.path.isfile(os.path.join(unpath, "__init__.py")) == False:
-            dirlist = os.listdir(unpath)
-            if len(dirlist) > 0:
-                unpath = os.path.join(unpath, dirlist[0], self._subfolder_path)
+        source_root = os.path.join(self._updater_path, "source")
+        unpath = self._resolve_addon_source_path(source_root)
+        if unpath == None:
+            if self._verbose:
+                print("not a valid addon found")
+                print("Paths:")
+                print(os.listdir(source_root))
+                print("Expected addon paths:")
+                print(self._source_subfolder_candidates())
 
-            # smarter check for additional sub folders for a single folder
-            # containing __init__.py
-            if os.path.isfile(os.path.join(unpath, "__init__.py")) == False:
-                if self._verbose:
-                    print("not a valid addon found")
-                    print("Paths:")
-                    print(dirlist)
+            raise ValueError("__init__ file not found in new source")
 
-                raise ValueError("__init__ file not found in new source")
+        if self._verbose:
+            print("Resolved addon source path: " + unpath)
 
         # now commence merging in the two locations:
         # note this MAY not be accurate, as updater files could be placed elsewhere

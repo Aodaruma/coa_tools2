@@ -239,13 +239,16 @@ class COATOOLS2_PT_ObjectProperties(bpy.types.Panel):
 
             col.prop(obj, "name", text="", icon=icon)
             if obj.type == "MESH" and obj.coa_tools2.type == "SLOT":
-                index = min(len(obj.coa_tools2.slot) - 1, obj.coa_tools2.slot_index)
-                col.prop(
-                    obj.coa_tools2.slot[index].mesh,
-                    "name",
-                    text="",
-                    icon="OUTLINER_DATA_MESH",
-                )
+                index = functions.get_clamped_slot_index(obj)
+                if index is not None:
+                    slot_mesh = obj.coa_tools2.slot[index].mesh
+                    if slot_mesh is not None:
+                        col.prop(
+                            slot_mesh,
+                            "name",
+                            text="",
+                            icon="OUTLINER_DATA_MESH",
+                        )
             if obj.type == "ARMATURE":
                 row = layout.row(align=True)
                 if context.active_bone != None:
@@ -579,6 +582,22 @@ class COATOOLS2_PT_Tools(bpy.types.Panel):
                     icon="OUTLINER_DATA_CAMERA",
                 )
                 op.create = True
+
+            if (
+                obj != None
+                and obj.mode == "OBJECT"
+                and obj.type == "MESH"
+                and no_edit_mode_active
+            ):
+                row = layout.row(align=True)
+                row.label(text="Mesh Data Operator:")
+                col = layout.column(align=True)
+                col.operator_context = "INVOKE_DEFAULT"
+                col.operator(
+                    "coa_tools2.copy_mesh_data",
+                    text="Copy Mesh Data",
+                    icon="COPYDOWN",
+                )
         if obj != None and obj.type == "CAMERA":
             row = layout.row(align=True)
             op = row.operator(
@@ -635,6 +654,14 @@ class COATOOLS2_PT_Tools(bpy.types.Panel):
                         "coa_tools2.import_sprites",
                         text="Re / Import Sprites",
                         icon="FILEBROWSER",
+                    )
+
+                    row = layout.row(align=True)
+                    row.operator(
+                        "coa_tools2.export_to_json",
+                        text="Export json",
+                        icon="EXPORT",
+                        emboss=True,
                     )
 
                     row = layout.row(align=True)

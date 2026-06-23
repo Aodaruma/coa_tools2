@@ -48,6 +48,71 @@ except Exception as e:
 updater.addon = "coa_tools2"
 
 
+def _get_addon_preferences(context):
+    preferences = getattr(context, "preferences", None)
+    if preferences is None:
+        return None
+
+    addons = getattr(preferences, "addons", None)
+    if addons is None:
+        return None
+
+    candidates = []
+    for addon_name in (__package__, updater.addon):
+        if addon_name and addon_name not in candidates:
+            candidates.append(addon_name)
+
+    try:
+        for addon_name in addons.keys():
+            if (
+                addon_name.endswith("." + updater.addon)
+                and addon_name not in candidates
+            ):
+                candidates.append(addon_name)
+    except Exception:
+        pass
+
+    for addon_name in candidates:
+        try:
+            addon = addons.get(addon_name, None)
+        except Exception:
+            addon = None
+
+        if addon is None:
+            try:
+                addon = addons[addon_name]
+            except Exception:
+                continue
+
+        try:
+            return addon.preferences
+        except Exception:
+            continue
+
+    return None
+
+
+def _apply_update_preferences(context):
+    settings = _get_addon_preferences(context)
+    if settings is None:
+        if updater.verbose:
+            print(
+                "{} updater: Skipping update check; addon preferences not ready".format(
+                    updater.addon
+                )
+            )
+        return False
+
+    updater.set_check_interval(
+        enable=settings.auto_check_update and settings.enable_updater,
+        months=settings.updater_intrval_months,
+        days=settings.updater_intrval_days,
+        hours=settings.updater_intrval_hours,
+        minutes=settings.updater_intrval_minutes,
+    )
+    return True
+
+
 # -----------------------------------------------------------------------------
 # Updater operators
 # -----------------------------------------------------------------------------
@@ -153,15 +218,8 @@ class addon_updater_check_now(bpy.types.Operator):
             # Ignoring if error, to prevent being stuck on the error screen
             return {"CANCELLED"}
 
-        # apply the UI settings
-        settings = context.preferences.addons[__package__].preferences
-        updater.set_check_interval(
-            enable=settings.auto_check_update and settings.enable_updater,
-            months=settings.updater_intrval_months,
-            days=settings.updater_intrval_days,
-            hours=settings.updater_intrval_hours,
-            minutes=settings.updater_intrval_minutes,
-        )  # optional, if auto_check_update
+        if not _apply_update_preferences(context):
+            return {"CANCELLED"}
 
         # input is an optional callback function
         # this function should take a bool input, if true: update ready
@@ -633,18 +691,8 @@ def check_for_update_background():
         # Used here to just avoid constant applying settings below
         return
 
-    # apply the UI settings
-    addon_prefs = bpy.context.preferences.addons.get(__package__, None)
-    if not addon_prefs:
+    if not _apply_update_preferences(bpy.context):
         return
-    settings = addon_prefs.preferences
-    updater.set_check_interval(
-        enable=settings.auto_check_update and settings.enable_updater,
-        months=settings.updater_intrval_months,
-        days=settings.updater_intrval_days,
-        hours=settings.updater_intrval_hours,
-        minutes=settings.updater_intrval_minutes,
-    )  # optional, if auto_check_update
 
     # input is an optional callback function
     # this function should take a bool input, if true: update ready
@@ -664,14 +712,8 @@ def check_for_update_nonthreaded(self, context):
     # only check if it's ready, ie after the time interval specified
     # should be the async wrapper call here
 
-    settings = context.preferences.addons[__package__].preferences
-    updater.set_check_interval(
-        enable=settings.auto_check_update and settings.enable_updater,
-        months=settings.updater_intrval_months,
-        days=settings.updater_intrval_days,
-        hours=settings.updater_intrval_hours,
-        minutes=settings.updater_intrval_minutes,
-    )  # optional, if auto_check_update
+    if not _apply_update_preferences(context):
+        return
 
     (update_ready, version, link) = updater.check_for_update(now=False)
     if update_ready == True:
@@ -741,7 +783,6 @@ def update_notice_box_ui(self, context):
     if updater.update_ready != True:
         return
 
-    settings = context.preferences.addons[__package__].preferences
     layout = self.layout
     box = layout.box()
     col = box.column(align=True)
@@ -773,8 +814,6 @@ def update_settings_ui(self, context):
         box.label(text="Error initializing updater code:")
         box.label(updater.error_msg)
         return
-
-    settings = context.preferences.addons[__package__].preferences
 
     # auto-update settings
     box.label(text="Updater Settings")

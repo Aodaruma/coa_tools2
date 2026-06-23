@@ -78,6 +78,7 @@ from .operators import version_converter
 from .operators import change_alpha_mode
 from .operators import convert_from_old
 from .operators import copy_mesh_data
+from .operators import export_json
 
 from .operators.exporter import export_dragonbones
 from .operators.exporter import export_creature
@@ -86,6 +87,16 @@ from .operators.exporter import export_creature
 ##################################
 
 import traceback
+
+_slot_index_cache = {}
+_updating_properties = False
+
+
+def _slot_index_cache_key(obj):
+    try:
+        return obj.as_pointer()
+    except ReferenceError:
+        return None
 
 
 class COATools2Preferences(bpy.types.AddonPreferences):
@@ -155,6 +166,7 @@ class COATools2Preferences(bpy.types.AddonPreferences):
             icon="CHECKMARK" if deps_state["cv2"] else "ERROR",
         )
         row = box.row(align=True)
+        row.operator_context = "INVOKE_DEFAULT"
         row.operator(
             "coa_tools2.install_python_dependencies",
             icon="IMPORT",
@@ -267,9 +279,137 @@ classes = (
     export_dragonbones.COATOOLS2_OT_DragonBonesExport,
     export_dragonbones.COATOOLS2_PT_ExportPanel,
     export_creature.COATOOLS2_OT_CreatureExport,
+    export_json.COATOOLS2_OT_ExportToJson,
 )
 
 addon_keymaps = []
+
+_DIRECT_EDIT_REDIRECT_TARGET = "coa_tools2_direct_edit_redirect_target"
+_DIRECT_EDIT_REDIRECT_SUPPRESS = "coa_tools2_direct_edit_redirect_suppress"
+
+
+def _get_parent_sprite_object(obj):
+    while obj is not None:
+        try:
+            if "sprite_object" in obj.coa_tools2:
+                return obj
+        except ReferenceError:
+            return None
+        obj = obj.parent
+    return None
+
+
+def _is_direct_edit_redirect_candidate(context, obj):
+    wm = context.window_manager if context is not None else None
+    if (
+        wm is None
+        or bool(wm.get("coa_tools2_edit_mesh_modal_running", False))
+        or bool(wm.get(_DIRECT_EDIT_REDIRECT_SUPPRESS, False))
+        or wm.get(_DIRECT_EDIT_REDIRECT_TARGET, "") != ""
+    ):
+        return False
+
+    if (
+        obj is None
+        or obj.type != "MESH"
+        or obj.mode != "EDIT"
+        or obj.name == "COA TEXTURE PREVIEW"
+        or "coa_base_sprite" not in obj.vertex_groups
+    ):
+        return False
+
+    sprite_object = _get_parent_sprite_object(obj)
+    if sprite_object is None:
+        return False
+
+    try:
+        return not (
+            sprite_object.coa_tools2.edit_mesh
+            or sprite_object.coa_tools2.edit_armature
+            or sprite_object.coa_tools2.edit_weights
+            or sprite_object.coa_tools2.edit_shapekey
+        )
+    except ReferenceError:
+        return False
+
+
+def _get_view3d_override(context):
+    screen = context.screen if context is not None else None
+    if screen is None:
+        return None
+
+    for area in screen.areas:
+        if area.type != "VIEW_3D":
+            continue
+        region = next(
+            (region for region in area.regions if region.type == "WINDOW"), None
+        )
+        space = next((space for space in area.spaces if space.type == "VIEW_3D"), None)
+        if region is None or space is None:
+            continue
+
+        override = {
+            "area": area,
+            "region": region,
+            "space_data": space,
+        }
+        if context.window is not None:
+            override["window"] = context.window
+        return override
+
+    return None
+
+
+def _enter_coa_edit_mesh_from_direct_edit():
+    context = bpy.context
+    wm = context.window_manager if context is not None else None
+    if wm is None:
+        return None
+
+    target_name = wm.get(_DIRECT_EDIT_REDIRECT_TARGET, "")
+    if _DIRECT_EDIT_REDIRECT_TARGET in wm:
+        del wm[_DIRECT_EDIT_REDIRECT_TARGET]
+
+    if target_name not in bpy.data.objects:
+        return None
+
+    obj = bpy.data.objects[target_name]
+    if context.active_object != obj or not _is_direct_edit_redirect_candidate(
+        context, obj
+    ):
+        return None
+
+    wm[_DIRECT_EDIT_REDIRECT_SUPPRESS] = True
+    try:
+        bpy.ops.object.mode_set(mode="OBJECT")
+        for selected in list(context.selected_objects):
+            selected.select_set(False)
+        obj.select_set(True)
+        context.view_layer.objects.active = obj
+        override = _get_view3d_override(context)
+        if override is not None:
+            with context.temp_override(**override):
+                bpy.ops.coa_tools2.edit_mesh(mode="EDIT_MESH")
+        else:
+            bpy.ops.coa_tools2.edit_mesh(mode="EDIT_MESH")
+    except Exception:
+        traceback.print_exc()
+    finally:
+        if _DIRECT_EDIT_REDIRECT_SUPPRESS in wm:
+            del wm[_DIRECT_EDIT_REDIRECT_SUPPRESS]
+
+    return None
+
+
+@persistent
+def redirect_direct_sprite_mesh_edit_mode(scene, depsgraph):
+    context = bpy.context
+    obj = context.active_object if context is not None else None
+    if not _is_direct_edit_redirect_candidate(context, obj):
+        return
+
+    context.window_manager[_DIRECT_EDIT_REDIRECT_TARGET] = obj.name
+    bpy.app.timers.register(_enter_coa_edit_mesh_from_direct_edit, first_interval=0.0)
 
 
 def register_keymaps():
@@ -328,6 +468,7 @@ def register():
     bpy.app.handlers.depsgraph_update_pre.append(outliner.create_outliner_items)
     bpy.app.handlers.frame_change_post.append(update_properties)
     bpy.app.handlers.depsgraph_update_post.append(update_properties)
+    bpy.app.handlers.depsgraph_update_post.append(redirect_direct_sprite_mesh_edit_mode)
     bpy.app.handlers.load_post.append(check_view_2D_3D)
     bpy.app.handlers.load_post.append(check_for_deprecated_data)
     bpy.app.handlers.load_post.append(check_for_old_coatools)
@@ -352,6 +493,10 @@ def unregister():
     bpy.app.handlers.depsgraph_update_pre.remove(outliner.create_outliner_items)
     bpy.app.handlers.frame_change_post.remove(update_properties)
     bpy.app.handlers.depsgraph_update_post.remove(update_properties)
+    if redirect_direct_sprite_mesh_edit_mode in bpy.app.handlers.depsgraph_update_post:
+        bpy.app.handlers.depsgraph_update_post.remove(
+            redirect_direct_sprite_mesh_edit_mode
+        )
     bpy.app.handlers.load_post.remove(check_view_2D_3D)
     bpy.app.handlers.load_post.remove(check_for_deprecated_data)
     bpy.app.handlers.load_post.remove(check_for_old_coatools)
@@ -398,25 +543,50 @@ def set_shading(dummy):
 
 @persistent
 def update_properties(scene, depsgraph):
+    global _updating_properties
+    if _updating_properties:
+        return
+
+    _updating_properties = True
     context = bpy.context
-    for obj in bpy.data.objects:
-        obj_eval = obj.evaluated_get(depsgraph)
+    try:
+        for obj in bpy.data.objects:
+            obj_eval = obj.evaluated_get(depsgraph)
 
-        if obj_eval.coa_tools2.slot_index != obj_eval.coa_tools2.slot_index_last:
-            change_slot_mesh_data(bpy.context, obj, obj_eval)
-            obj.coa_tools2.slot_index_last = obj_eval.coa_tools2.slot_index
+            if obj.type == "MESH" and obj.coa_tools2.type == "SLOT":
+                slot_index = get_clamped_slot_index(obj, obj_eval)
+                if slot_index is not None:
+                    slot = obj.coa_tools2.slot[slot_index]
+                    cache_key = _slot_index_cache_key(obj)
+                    cache_index = _slot_index_cache.get(cache_key)
+                    if (
+                        slot.mesh is not None
+                        and (cache_index != slot_index or obj.data != slot.mesh)
+                    ):
+                        change_slot_mesh_data(
+                            context,
+                            obj,
+                            obj_eval,
+                            clamp_property=False,
+                            sync_active=False,
+                            alpha=obj_eval.coa_tools2.alpha,
+                            modulate_color=obj_eval.coa_tools2.modulate_color,
+                        )
+                    _slot_index_cache[cache_key] = slot_index
 
-        if obj_eval.coa_tools2.alpha != obj_eval.coa_tools2.alpha_last:
-            set_alpha(obj, context, obj_eval.coa_tools2.alpha)
-            obj.coa_tools2.alpha_last = obj_eval.coa_tools2.alpha
+            if obj_eval.coa_tools2.alpha != obj_eval.coa_tools2.alpha_last:
+                set_alpha(obj, context, obj_eval.coa_tools2.alpha)
+                obj.coa_tools2.alpha_last = obj_eval.coa_tools2.alpha
 
-        if (
-            obj_eval.coa_tools2.modulate_color
-            != obj_eval.coa_tools2.modulate_color_last
-        ):
-            set_modulate_color(obj, context, obj_eval.coa_tools2.modulate_color)
-            obj.coa_tools2.modulate_color_last = obj_eval.coa_tools2.modulate_color
+            if (
+                obj_eval.coa_tools2.modulate_color
+                != obj_eval.coa_tools2.modulate_color_last
+            ):
+                set_modulate_color(obj, context, obj_eval.coa_tools2.modulate_color)
+                obj.coa_tools2.modulate_color_last = obj_eval.coa_tools2.modulate_color
 
-        if obj_eval.coa_tools2.z_value != obj_eval.coa_tools2.z_value_last:
-            set_z_value(context, obj, obj_eval.coa_tools2.z_value)
-            obj.coa_tools2.z_value_last = obj_eval.coa_tools2.z_value
+            if obj_eval.coa_tools2.z_value != obj_eval.coa_tools2.z_value_last:
+                set_z_value(context, obj, obj_eval.coa_tools2.z_value)
+                obj.coa_tools2.z_value_last = obj_eval.coa_tools2.z_value
+    finally:
+        _updating_properties = False

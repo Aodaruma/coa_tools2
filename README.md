@@ -67,7 +67,7 @@ Referenced from [here](https://docs.gimp.org/en/install-script-fu.html)
 
 1. Download exporter from [releases page](https://github.com/Aodaruma/coa_tools2/releases) or [master branch zip](https://github.com/Aodaruma/coa_tools2/archive/refs/heads/master.zip) and unzip it.
 2. Open GIMP and go to `Edit -> Preferences -> Folders -> Plugins` to find the plugin folder.
-3. Copy `GIMP/coatools_exporter.py` to the GIMP plugin folder.
+3. For GIMP 3.0.x, copy the `GIMP/coatools_exporter_gimp3` folder to the GIMP plugin folder. For GIMP 2.x, copy `GIMP/coatools_exporter.py` to the GIMP plugin folder.
 4. Restart GIMP.
 5. Open GIMP and xcf file you want to export.
 6. Run the script from `File -> Export to CoaTools...` to export sprites

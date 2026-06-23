@@ -36,6 +36,15 @@ except Exception:
 # ======================================================================================================================
 
 
+def has_interactive_ui(context):
+    return (
+        not bpy.app.background
+        and getattr(context, "window", None) is not None
+        and getattr(context, "screen", None) is not None
+        and getattr(context, "window_manager", None) is not None
+    )
+
+
 def get_texture_image(context, obj) -> Optional[bpy.types.Image]:
     """Get the texture image from the object material"""
     if obj.type == "MESH":
@@ -50,7 +59,7 @@ def get_texture_image(context, obj) -> Optional[bpy.types.Image]:
 
 def show_dependency_install_help(context):
     wm = getattr(context, "window_manager", None)
-    if wm is None:
+    if wm is None or not has_interactive_ui(context):
         return
 
     def draw(menu, _context):
@@ -58,6 +67,7 @@ def show_dependency_install_help(context):
         layout.label(text="Automesh needs numpy and opencv (cv2).", icon="ERROR")
         layout.label(text="Open Preferences > Add-ons > COA Tools2.")
         layout.label(text="Click 'Install numpy / opencv'.")
+        layout.operator_context = "INVOKE_DEFAULT"
         layout.operator(
             "coa_tools2.install_python_dependencies",
             icon="IMPORT",
@@ -332,11 +342,16 @@ class COATOOLS2_OT_AutomeshFromTexture(bpy.types.Operator):
                 print("COA Tools2 automesh dependency import errors:")
                 for module_name, error in dep_errors.items():
                     print(f"- {module_name}: {error}")
-            self.report(
-                {"ERROR"},
-                "Automesh needs compatible numpy/opencv. Open Preferences > Add-ons > COA Tools2 and click 'Install numpy / opencv'.",
+            message = (
+                "Automesh needs compatible numpy/opencv. Open Preferences > Add-ons > "
+                "COA Tools2 and click 'Install numpy / opencv'."
             )
-            show_dependency_install_help(context)
+            if has_interactive_ui(context):
+                self.report({"ERROR"}, message)
+                show_dependency_install_help(context)
+            else:
+                print(f"COA Tools2: {message}")
+                self.report({"WARNING"}, message)
             return {"CANCELLED"}
 
         wm = context.window_manager
