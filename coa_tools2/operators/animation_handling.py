@@ -375,12 +375,7 @@ class COATOOLS2_OT_AddAnimationCollection(bpy.types.Operator):
                 else:
                     action = bpy.data.actions[action_name]
                 action.use_fake_user = True
-                if child.animation_data == None:
-                    child.animation_data_create()
-                if b_version_smaller_than((4, 4, 0)):
-                    child.animation_data.action = action
-                else:
-                    child.animation_data.action_slot = action.slots[0]
+                assign_action(child, action)
 
     def rename_actions(self, action_name):
         for action in bpy.data.actions:
@@ -458,7 +453,7 @@ class COATOOLS2_OT_RemoveAnimationCollection(bpy.types.Operator):
                     child.animation_data != None
                     and child.animation_data.action == bpy.data.actions[action_name]
                 ):
-                    child.animation_data_clear()
+                    clear_assigned_action(child)
                 bpy.data.actions[action_name].use_fake_user = False
                 bpy.data.actions[action_name].user_clear()
                 bpy.data.actions.remove(bpy.data.actions[action_name])
