@@ -233,7 +233,18 @@ def set_actions(self, context):
     scene = context.scene
     sprite_object = functions.get_sprite_object(context.active_object)
 
+    if sprite_object == None or len(sprite_object.coa_tools2.anim_collections) == 0:
+        return
+
     index = min(len(sprite_object.coa_tools2.anim_collections) - 1, sprite_object.coa_tools2.anim_collections_index)
+    last_index = sprite_object.coa_tools2.anim_collections_index_last
+    if 0 <= last_index < len(sprite_object.coa_tools2.anim_collections):
+        functions.register_unassigned_action_collection_keyframes(
+            context,
+            sprite_object,
+            sprite_object.coa_tools2.anim_collections[last_index],
+        )
+
     if context.scene.coa_tools2.nla_mode == "ACTION":
         scene.frame_start = sprite_object.coa_tools2.anim_collections[index].frame_start
         scene.frame_end = sprite_object.coa_tools2.anim_collections[index].frame_end
@@ -255,15 +266,26 @@ def set_actions(self, context):
         dirpath = path[:path.rfind("/")]
         final_path = dirpath + "/" + action_name
         context.scene.render.filepath = final_path
+    sprite_object.coa_tools2.anim_collections_index_last = index
 
 
 def set_nla_mode(self, context):
     sprite_object = functions.get_sprite_object(context.active_object)
     children = functions.get_children(context,sprite_object,ob_list=[])
+    if sprite_object != None and len(sprite_object.coa_tools2.anim_collections) > 0:
+        index = min(len(sprite_object.coa_tools2.anim_collections) - 1, sprite_object.coa_tools2.anim_collections_index)
+        functions.register_unassigned_action_collection_keyframes(
+            context,
+            sprite_object,
+            sprite_object.coa_tools2.anim_collections[index],
+        )
     if self.nla_mode == "NLA":
         for child in children:
-            if child.animation_data != None:
-                child.animation_data.action = None
+            if (
+                child.animation_data != None
+                and functions.is_coa_action_for_object(sprite_object, child, child.animation_data.action)
+            ):
+                functions.clear_assigned_action(child)
         context.scene.frame_start = context.scene.coa_tools2.frame_start
         context.scene.frame_end = context.scene.coa_tools2.frame_end
 
@@ -464,6 +486,7 @@ class ObjectProperties(bpy.types.PropertyGroup):
     edit_mesh: BoolProperty(default=False, update=change_edit_mode)
 
     anim_collections_index: IntProperty(update=set_actions)
+    anim_collections_index_last: IntProperty(default=-1)
     copy_data_from_mesh: PointerProperty(
         type=bpy.types.Mesh, name="Copy Data From Mesh Object"
     )

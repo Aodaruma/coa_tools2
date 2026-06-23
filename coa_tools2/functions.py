@@ -558,13 +558,90 @@ def create_action(context, item=None, obj=None):
         action = bpy.data.actions[action_name]
 
     action.use_fake_user = True
+    assign_action(obj, action)
+    context.view_layer.update()
+
+
+def get_action_name(item, obj):
+    return item.name + "_" + obj.name
+
+
+def get_animation_objects(context, sprite_object):
+    children = get_children(context, sprite_object, ob_list=[])
+    animation_objects = []
+    if sprite_object.type == "ARMATURE":
+        animation_objects.append(sprite_object)
+    for child in children:
+        animation_objects.append(child)
+    return animation_objects
+
+
+def assign_action(obj, action):
     if obj.animation_data == None:
         obj.animation_data_create()
-    if b_version_smaller_than((4, 4, 0)):
-        obj.animation_data.action = action
-    else:
+    obj.animation_data.action = action
+    if (
+        action != None
+        and not b_version_smaller_than((4, 4, 0))
+        and obj.animation_data.action_slot == None
+        and len(action.slots) > 0
+    ):
         obj.animation_data.action_slot = action.slots[0]
-    context.view_layer.update()
+
+
+def clear_assigned_action(obj):
+    if obj.animation_data != None:
+        obj.animation_data.action = None
+
+
+def is_coa_action_for_object(sprite_object, obj, action):
+    if sprite_object == None or action == None:
+        return False
+
+    for item in sprite_object.coa_tools2.anim_collections:
+        if item.action_collection and action.name == get_action_name(item, obj):
+            return True
+    return False
+
+
+def action_has_fcurves(action):
+    if action == None:
+        return False
+
+    if hasattr(action, "fcurves"):
+        return len(action.fcurves) > 0
+
+    if not hasattr(action, "layers"):
+        return False
+
+    for layer in action.layers:
+        for strip in layer.strips:
+            for slot in action.slots:
+                channelbag = strip.channelbag(slot)
+                if channelbag != None and len(channelbag.fcurves) > 0:
+                    return True
+    return False
+
+
+def register_unassigned_action_collection_keyframes(context, sprite_object, item):
+    if sprite_object == None or item == None or not item.action_collection:
+        return
+
+    for obj in get_animation_objects(context, sprite_object):
+        if obj.animation_data == None or obj.animation_data.action == None:
+            continue
+
+        action = obj.animation_data.action
+        action_name = get_action_name(item, obj)
+        if action.name == action_name or is_coa_action_for_object(sprite_object, obj, action):
+            continue
+        if not action_has_fcurves(action):
+            continue
+        if action_name in bpy.data.actions and bpy.data.actions[action_name] != action:
+            continue
+
+        action.name = action_name
+        action.use_fake_user = True
 
 
 def clear_pose(obj):
@@ -598,18 +675,22 @@ def set_action(context, item=None):
         )
         item = sprite_object.coa_tools2.anim_collections[index]
 
-    children = get_children(context, sprite_object, ob_list=[])
-
-    animation_objects = []
-    if sprite_object.type == "ARMATURE":
-        animation_objects.append(sprite_object)
-    for child in children:
-        animation_objects.append(child)
+    register_unassigned_action_collection_keyframes(context, sprite_object, item)
+    animation_objects = get_animation_objects(context, sprite_object)
 
     for child in animation_objects:
         clear_pose(child)
-        if child.animation_data != None:
-            child.animation_data.action = None
+        action_name = get_action_name(item, child)
+        action = None
+        if action_name in bpy.data.actions:
+            action = bpy.data.actions[action_name]
+
+        if (
+            child.animation_data != None
+            and is_coa_action_for_object(sprite_object, child, child.animation_data.action)
+            and child.animation_data.action != action
+        ):
+            clear_assigned_action(child)
 
         if child.type == "ARMATURE" and item.name == "Restpose":
             for bone in child.pose.bones:
@@ -624,18 +705,9 @@ def set_action(context, item=None):
             not (child.type == "MESH" and item.name == "Restpose")
             and context.scene.coa_tools2.nla_mode == "ACTION"
         ):
-            action_name = item.name + "_" + child.name
-            action = None
-            if action_name in bpy.data.actions:
-                action = bpy.data.actions[action_name]
             if action != None:
                 action.use_fake_user = True
-                if child.animation_data == None:
-                    child.animation_data_create()
-                if b_version_smaller_than((4, 4, 0)):
-                    child.animation_data.action = action
-                else:
-                    child.animation_data.action_slot = action.slots[0]
+                assign_action(child, action)
     context.scene.frame_set(context.scene.frame_current)
     context.view_layer.update()
 
