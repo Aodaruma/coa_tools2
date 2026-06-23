@@ -464,6 +464,9 @@ class ObjectProperties(bpy.types.PropertyGroup):
     edit_mesh: BoolProperty(default=False, update=change_edit_mode)
 
     anim_collections_index: IntProperty(update=set_actions)
+    copy_data_from_mesh: PointerProperty(
+        type=bpy.types.Mesh, name="Copy Data From Mesh Object"
+    )
 
 class SceneProperties(bpy.types.PropertyGroup):
     display_all: BoolProperty(default=True)

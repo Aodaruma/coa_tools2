@@ -579,6 +579,22 @@ class COATOOLS2_PT_Tools(bpy.types.Panel):
                     icon="OUTLINER_DATA_CAMERA",
                 )
                 op.create = True
+
+            if (
+                obj != None
+                and obj.mode == "OBJECT"
+                and obj.type == "MESH"
+                and no_edit_mode_active
+            ):
+                row = layout.row(align=True)
+                row.label(text="Mesh Data Operator:")
+                col = layout.column(align=True)
+                col.operator_context = "INVOKE_DEFAULT"
+                col.operator(
+                    "coa_tools2.copy_mesh_data",
+                    text="Copy Mesh Data",
+                    icon="COPYDOWN",
+                )
         if obj != None and obj.type == "CAMERA":
             row = layout.row(align=True)
             op = row.operator(
