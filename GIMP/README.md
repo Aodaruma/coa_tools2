@@ -3,7 +3,23 @@
 
 ## Installation
 
-Simply copy the coatools_exporter.py into the GIMP plug-ins folder.
+### GIMP 3.0.x
+
+Copy the `coatools_exporter_gimp3` folder into the GIMP plug-ins folder. The
+folder name and Python file name must stay the same:
+
+```
+plug-ins/
+  coatools_exporter_gimp3/
+    coatools_exporter_gimp3.py
+```
+
+On Linux and macOS, make `coatools_exporter_gimp3.py` executable if GIMP does
+not detect it.
+
+### GIMP 2.x
+
+Copy `coatools_exporter.py` into the GIMP plug-ins folder.
 
 - on Linux this is /home/YOU/.gimp2.8/plug-ins/
 - on Windows this is C:\Users\YOU\.gimp2.8\plug-ins
