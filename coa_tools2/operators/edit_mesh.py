@@ -1890,7 +1890,6 @@ class COATOOLS2_OT_DrawContour(bpy.types.Operator):
 
     def cancel(self, context):
         context.window_manager["coa_tools2_edit_mesh_modal_running"] = False
-        return {"CANCELLED"}
 
     def draw_callback_text(self):
         obj = bpy.context.active_object
