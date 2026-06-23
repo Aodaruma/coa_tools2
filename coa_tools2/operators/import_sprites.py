@@ -211,9 +211,11 @@ class COATOOLS2_OT_CreateMaterialGroup(bpy.types.Operator):
         )
         group_tree.links.new(
             modulate_node.outputs["Color"],
-            principled_node.inputs["Emission"]
-            if functions.b_version_smaller_than((4, 0, 0))
-            else principled_node.inputs["Emission Color"],
+            (
+                principled_node.inputs["Emission"]
+                if functions.b_version_smaller_than((4, 0, 0))
+                else principled_node.inputs["Emission Color"]
+            ),
         )
 
         group_tree.links.new(input_node.outputs["Texture Alpha"], alpha_node.inputs[0])
@@ -303,6 +305,76 @@ class COATOOLS2_OT_LoadJsonData(bpy.types.Operator):
         wm = context.window_manager
         return wm.invoke_props_dialog(self)
 
+    def import_svg_asset(
+        self,
+        context,
+        filepath: str,
+        name: str,
+        parent_name: str,
+        scale: float,
+        pos,
+        offset,
+    ):
+        svg_operator = getattr(getattr(bpy.ops, "import_curve", None), "svg", None)
+        if svg_operator is None:
+            self.report(
+                {"WARNING"},
+                "SVGインポートアドオン(io_curve_svg)が有効化されていないため、'{}' を読み込めません。".format(
+                    os.path.basename(filepath)
+                ),
+            )
+            return
+
+        parent_obj = bpy.data.objects.get(parent_name)
+
+        # 既存オブジェクトがある場合は置き換え
+        if name in bpy.data.objects:
+            target_empty = bpy.data.objects[name]
+            if target_empty.type != "EMPTY" or self.mode != "UPDATE":
+                bpy.data.objects.remove(target_empty, do_unlink=True)
+                target_empty = None
+        else:
+            target_empty = None
+
+        if target_empty is None:
+            target_empty = bpy.data.objects.new(name, None)
+            target_empty.empty_display_type = "PLAIN_AXES"
+            functions.link_object(context, target_empty)
+
+        if parent_obj is not None:
+            target_empty.parent = parent_obj
+
+        position_vec = Vector((pos[0], pos[1], -pos[2])) * scale
+        offset_vec = Vector(offset) * scale
+        target_empty.location = position_vec + offset_vec
+
+        # 既存の子曲線を削除（更新時）
+        for child in list(target_empty.children):
+            bpy.data.objects.remove(child, do_unlink=True)
+
+        pre_existing = {obj.name for obj in bpy.data.objects}
+        result = bpy.ops.import_curve.svg(filepath=filepath)
+        if "FINISHED" not in result:
+            self.report(
+                {"WARNING"},
+                "'{}' のSVGインポートに失敗しました。".format(
+                    os.path.basename(filepath)
+                ),
+            )
+            return
+
+        imported_objects = [
+            obj for obj in bpy.data.objects if obj.name not in pre_existing
+        ]
+
+        for obj in imported_objects:
+            obj.parent = target_empty
+            obj.matrix_parent_inverse = target_empty.matrix_world.inverted()
+            obj.scale = obj.scale * scale
+            obj.select_set(False)
+
+        target_empty.select_set(False)
+
     def execute(self, context):
         scene = context.scene
         sprite_data = eval(self.json_data)
@@ -331,6 +403,18 @@ class COATOOLS2_OT_LoadJsonData(bpy.types.Operator):
                     scale = functions.get_addon_prefs(
                         context
                     ).sprite_import_export_scale
+
+                    if filepath.lower().endswith(".svg"):
+                        self.import_svg_asset(
+                            context=context,
+                            filepath=filepath,
+                            name=sprite["name"],
+                            parent_name=parent,
+                            scale=scale,
+                            pos=pos,
+                            offset=offset,
+                        )
+                        continue
 
                     if self.mode == "ADD":
                         bpy.ops.coa_tools2.import_sprite(

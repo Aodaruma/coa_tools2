@@ -35,8 +35,162 @@ bl_info = {
 import bpy
 import os
 import shutil
+import subprocess
+import sys
 import tempfile
+import importlib
+import site
+import sysconfig
 from bpy.app.handlers import persistent
+
+
+def _resolve_python_binary():
+    candidates = []
+    binary_path_python = getattr(bpy.app, "binary_path_python", None)
+    if binary_path_python:
+        candidates.append(binary_path_python)
+
+    if sys.executable:
+        candidates.append(sys.executable)
+
+    blender_binary = getattr(bpy.app, "binary_path", None)
+    if blender_binary:
+        blender_dir = os.path.dirname(blender_binary)
+        search_roots = [
+            os.path.join(blender_dir, "python", "bin"),
+            os.path.join(os.path.dirname(blender_dir), "python", "bin"),
+            os.path.join(blender_dir, "..", "Resources", "python", "bin"),
+        ]
+        for root in search_roots:
+            if not root:
+                continue
+            root_abs = os.path.abspath(root)
+            if os.path.isdir(root_abs):
+                for name in ("python.exe", "python3.exe", "python", "python3"):
+                    candidates.append(os.path.join(root_abs, name))
+
+    exec_prefix = getattr(sys, "exec_prefix", None)
+    if exec_prefix:
+        for name in ("python.exe", "python3.exe", "python", "python3"):
+            candidates.append(os.path.join(os.path.abspath(exec_prefix), "bin", name))
+
+    for path in candidates:
+        if path and os.path.isfile(path):
+            return os.path.abspath(path)
+    return None
+
+
+def _collect_site_paths():
+    paths = set()
+
+    try:
+        site_packages = site.getsitepackages()
+        if isinstance(site_packages, (list, tuple)):
+            paths.update(site_packages)
+        elif isinstance(site_packages, str):
+            paths.add(site_packages)
+    except Exception:
+        pass
+
+    try:
+        user_site = site.getusersitepackages()
+        if isinstance(user_site, (list, tuple)):
+            paths.update(user_site)
+        elif isinstance(user_site, str):
+            paths.add(user_site)
+    except Exception:
+        pass
+
+    try:
+        sys_paths = sysconfig.get_paths()
+        for key in ("purelib", "platlib"):
+            path = sys_paths.get(key)
+            if path:
+                paths.add(path)
+    except Exception:
+        pass
+
+    user_modules = bpy.utils.user_resource("SCRIPTS", path="modules")
+    if user_modules:
+        os.makedirs(user_modules, exist_ok=True)
+        paths.add(user_modules)
+
+    return [os.path.abspath(p) for p in paths if p]
+
+
+def _ensure_sys_path(paths):
+    added = []
+    for path in paths:
+        if os.path.isdir(path) and path not in sys.path:
+            sys.path.append(path)
+            added.append(path)
+    return added
+
+
+def ensure_cv2_available():
+    candidate_paths = _collect_site_paths()
+    _ensure_sys_path(candidate_paths)
+
+    try:
+        import cv2  # noqa: F401
+        return True
+    except Exception:
+        pass
+
+    python_bin = _resolve_python_binary()
+    if not python_bin:
+        print("[COA Tools2] Blender Python executable not found; skipping OpenCV auto-install.")
+        return False
+
+    target_path = bpy.utils.user_resource("SCRIPTS", path="modules")
+    if target_path:
+        os.makedirs(target_path, exist_ok=True)
+    else:
+        target_path = next((p for p in candidate_paths if os.access(os.path.dirname(p), os.W_OK)), None)
+
+    commands = []
+    commands.append([python_bin, "-m", "ensurepip", "--upgrade"])
+
+    install_cmd = [python_bin, "-m", "pip", "install", "--upgrade", "opencv-python"]
+    if target_path:
+        install_cmd.extend(["--target", target_path])
+    commands.append(install_cmd)
+
+    for cmd in commands:
+        critical = cmd is install_cmd
+        try:
+            completed = subprocess.run(
+                cmd, check=True, capture_output=True, text=True
+            )
+            if completed.stdout:
+                print(completed.stdout)
+            if completed.stderr:
+                print(completed.stderr)
+        except FileNotFoundError:
+            print(f"[COA Tools2] Command not found while running: {' '.join(cmd)}")
+            if critical:
+                return False
+        except subprocess.CalledProcessError as exc:
+            print(
+                f"[COA Tools2] Failed to execute: {' '.join(cmd)}\n"
+                f"stdout: {exc.stdout}\nstderr: {exc.stderr}"
+            )
+            if critical:
+                return False
+
+    importlib.invalidate_caches()
+    if target_path:
+        _ensure_sys_path([target_path])
+
+    try:
+        import cv2  # noqa: F401
+        return True
+    except Exception as exc:
+        print(f"[COA Tools2] OpenCV import still failing after install: {exc}")
+        return False
+
+
+ensure_cv2_available()
 
 from . import addon_updater_ops
 
@@ -260,6 +414,7 @@ def unregister_keymaps():
 
 
 def register():
+    ensure_cv2_available()
     addon_updater_ops.register(bl_info)
 
     # register classes
