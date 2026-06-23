@@ -46,6 +46,9 @@ class COATOOLS2_OT_CopyMeshData(bpy.types.Operator):
         layout.prop(self, "is_copy_vertex_groups")
         layout.prop(self, "is_copy_shapekeys")
 
+    def invoke(self, context, event):
+        return context.window_manager.invoke_props_dialog(self)
+
     def execute(self, context):
         active_obj = context.object
         targets = [obj for obj in context.selected_objects if obj.type == "MESH" and obj != active_obj]
