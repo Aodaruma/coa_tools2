@@ -8,7 +8,7 @@ from collections import OrderedDict
 
 class COATools2Docker(DockWidget):
     def __init__(self, *args, **kwargs):
-        super().__init__(self, *args, **kwargs)
+        super().__init__(*args, **kwargs)
         # self.COAToolsExporter = COAToolsExporter()
         self.generateUi()
         ### exporter variables
