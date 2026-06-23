@@ -155,14 +155,25 @@ def enum_sprite_previews(self, context):
     if self.type == "SLOT":
         for i, slot in enumerate(self.slot):
             if slot.mesh != None:
+                if len(slot.mesh.materials) == 0:
+                    continue
                 mat = slot.mesh.materials[0]
+                if mat is None or mat.node_tree is None:
+                    continue
                 for node in mat.node_tree.nodes:
                     if node.label == "COA Material":
-                        tex_node = node.inputs["Texture Color"].links[0].from_node
+                        texture_input = node.inputs.get("Texture Color")
+                        if texture_input is None:
+                            continue
+                        links = texture_input.links
+                        if len(links) == 0:
+                            continue
+                        tex_node = links[0].from_node
                         if tex_node != None:
-                            img = tex_node.image
-                            icon = bpy.types.UILayout.icon(img)
-                            enum_items.append((str(i), slot.mesh.name, "", icon, i))
+                            img = getattr(tex_node, "image", None)
+                            if img != None:
+                                icon = bpy.types.UILayout.icon(img)
+                                enum_items.append((str(i), slot.mesh.name, "", icon, i))
 
     return enum_items
 
