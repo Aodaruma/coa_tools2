@@ -27,6 +27,8 @@ COA Tools 2 is an add-on developed by [ndee89](https://github.com/ndee85) and mo
 
 [The original COA Tools by ndee89](https://github.com/ndee85/coa_tools) provided a rapid workflow for creating 2D cutout characters/animations in Blender. With COA Tools 2, the goal is to support Blender 3.4 and above, introduce automatic mesh generation, and establish a workflow with minimal features, allowing direct editing without going through proprietary modes.
 
+The current Blender add-on release is tested with Blender 5.1.
+
 Currently, the focus for development is on two aspects:
 
 1. Photoshop sprite exporter
@@ -73,6 +75,8 @@ Referenced from [here](https://docs.gimp.org/en/install-script-fu.html)
 6. Run the script from `File -> Export to CoaTools...` to export sprites
 
 #### Blender Addon
+
+The Blender add-on is tested with Blender 5.1.
 
 1. Download exporter from [releases page](https://github.com/Aodaruma/coa_tools2/releases) or [master branch zip](https://github.com/Aodaruma/coa_tools2/archive/refs/heads/master.zip) and unzip it.
     - if you downloaded from master branch, zip `/coa_tools2` folder after unzip master branch zip.
