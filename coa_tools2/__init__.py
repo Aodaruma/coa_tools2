@@ -155,6 +155,7 @@ class COATools2Preferences(bpy.types.AddonPreferences):
             icon="CHECKMARK" if deps_state["cv2"] else "ERROR",
         )
         row = box.row(align=True)
+        row.operator_context = "INVOKE_DEFAULT"
         row.operator(
             "coa_tools2.install_python_dependencies",
             icon="IMPORT",
