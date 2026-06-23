@@ -509,11 +509,55 @@ def check_for_deprecated_data(dummy):
             bpy.context.scene.coa_tools2.deprecated_data_found = True
 
 
+def has_old_coatools_customdata(data):
+    try:
+        return "coa_tools" in data or data.get("coa_tools") is not None
+    except (AttributeError, TypeError):
+        return False
+
+
+def data_path_has_old_coatools(data_path):
+    return bool(data_path) and (
+        "coa_tools." in data_path or '["coa_tools"]' in data_path
+    )
+
+
+def has_old_coatools_animation_data(data):
+    animation_data = getattr(data, "animation_data", None)
+    if animation_data is None:
+        return False
+
+    for driver in animation_data.drivers:
+        if data_path_has_old_coatools(driver.data_path):
+            return True
+        for variable in driver.driver.variables:
+            for target in variable.targets:
+                if data_path_has_old_coatools(target.data_path):
+                    return True
+    return False
+
+
 @persistent
 def check_for_old_coatools(dummy):
-    for obj in bpy.data.objects:
-        if "coa_tools" in obj:
+    data_blocks = []
+    data_blocks.extend(bpy.data.objects)
+    data_blocks.extend(bpy.data.meshes)
+    data_blocks.extend(bpy.data.armatures)
+    data_blocks.extend(bpy.data.scenes)
+
+    for armature_data in bpy.data.armatures:
+        data_blocks.extend(armature_data.bones)
+
+    for data in data_blocks:
+        if has_old_coatools_customdata(data) or has_old_coatools_animation_data(data):
             bpy.context.scene.coa_tools2.old_coatools_found = True
+            return
+
+    for action in bpy.data.actions:
+        for fcurve in action.fcurves:
+            if data_path_has_old_coatools(fcurve.data_path):
+                bpy.context.scene.coa_tools2.old_coatools_found = True
+                return
 
 
 @persistent
