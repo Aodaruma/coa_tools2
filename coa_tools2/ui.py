@@ -239,13 +239,16 @@ class COATOOLS2_PT_ObjectProperties(bpy.types.Panel):
 
             col.prop(obj, "name", text="", icon=icon)
             if obj.type == "MESH" and obj.coa_tools2.type == "SLOT":
-                index = min(len(obj.coa_tools2.slot) - 1, obj.coa_tools2.slot_index)
-                col.prop(
-                    obj.coa_tools2.slot[index].mesh,
-                    "name",
-                    text="",
-                    icon="OUTLINER_DATA_MESH",
-                )
+                index = functions.get_clamped_slot_index(obj)
+                if index is not None:
+                    slot_mesh = obj.coa_tools2.slot[index].mesh
+                    if slot_mesh is not None:
+                        col.prop(
+                            slot_mesh,
+                            "name",
+                            text="",
+                            icon="OUTLINER_DATA_MESH",
+                        )
             if obj.type == "ARMATURE":
                 row = layout.row(align=True)
                 if context.active_bone != None:

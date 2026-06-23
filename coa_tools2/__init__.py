@@ -88,6 +88,16 @@ from .operators.exporter import export_creature
 
 import traceback
 
+_slot_index_cache = {}
+_updating_properties = False
+
+
+def _slot_index_cache_key(obj):
+    try:
+        return obj.as_pointer()
+    except ReferenceError:
+        return None
+
 
 class COATools2Preferences(bpy.types.AddonPreferences):
     bl_idname = __package__
@@ -533,25 +543,50 @@ def set_shading(dummy):
 
 @persistent
 def update_properties(scene, depsgraph):
+    global _updating_properties
+    if _updating_properties:
+        return
+
+    _updating_properties = True
     context = bpy.context
-    for obj in bpy.data.objects:
-        obj_eval = obj.evaluated_get(depsgraph)
+    try:
+        for obj in bpy.data.objects:
+            obj_eval = obj.evaluated_get(depsgraph)
 
-        if obj_eval.coa_tools2.slot_index != obj_eval.coa_tools2.slot_index_last:
-            change_slot_mesh_data(bpy.context, obj, obj_eval)
-            obj.coa_tools2.slot_index_last = obj_eval.coa_tools2.slot_index
+            if obj.type == "MESH" and obj.coa_tools2.type == "SLOT":
+                slot_index = get_clamped_slot_index(obj, obj_eval)
+                if slot_index is not None:
+                    slot = obj.coa_tools2.slot[slot_index]
+                    cache_key = _slot_index_cache_key(obj)
+                    cache_index = _slot_index_cache.get(cache_key)
+                    if (
+                        slot.mesh is not None
+                        and (cache_index != slot_index or obj.data != slot.mesh)
+                    ):
+                        change_slot_mesh_data(
+                            context,
+                            obj,
+                            obj_eval,
+                            clamp_property=False,
+                            sync_active=False,
+                            alpha=obj_eval.coa_tools2.alpha,
+                            modulate_color=obj_eval.coa_tools2.modulate_color,
+                        )
+                    _slot_index_cache[cache_key] = slot_index
 
-        if obj_eval.coa_tools2.alpha != obj_eval.coa_tools2.alpha_last:
-            set_alpha(obj, context, obj_eval.coa_tools2.alpha)
-            obj.coa_tools2.alpha_last = obj_eval.coa_tools2.alpha
+            if obj_eval.coa_tools2.alpha != obj_eval.coa_tools2.alpha_last:
+                set_alpha(obj, context, obj_eval.coa_tools2.alpha)
+                obj.coa_tools2.alpha_last = obj_eval.coa_tools2.alpha
 
-        if (
-            obj_eval.coa_tools2.modulate_color
-            != obj_eval.coa_tools2.modulate_color_last
-        ):
-            set_modulate_color(obj, context, obj_eval.coa_tools2.modulate_color)
-            obj.coa_tools2.modulate_color_last = obj_eval.coa_tools2.modulate_color
+            if (
+                obj_eval.coa_tools2.modulate_color
+                != obj_eval.coa_tools2.modulate_color_last
+            ):
+                set_modulate_color(obj, context, obj_eval.coa_tools2.modulate_color)
+                obj.coa_tools2.modulate_color_last = obj_eval.coa_tools2.modulate_color
 
-        if obj_eval.coa_tools2.z_value != obj_eval.coa_tools2.z_value_last:
-            set_z_value(context, obj, obj_eval.coa_tools2.z_value)
-            obj.coa_tools2.z_value_last = obj_eval.coa_tools2.z_value
+            if obj_eval.coa_tools2.z_value != obj_eval.coa_tools2.z_value_last:
+                set_z_value(context, obj, obj_eval.coa_tools2.z_value)
+                obj.coa_tools2.z_value_last = obj_eval.coa_tools2.z_value
+    finally:
+        _updating_properties = False
