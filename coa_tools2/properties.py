@@ -348,17 +348,13 @@ class SlotData(bpy.types.PropertyGroup):
         object.__setattr__(self, "_lock_active_update", True)
         try:
             if not self.active:
-                self.active = True
+                self["active"] = True
 
             obj.coa_tools2.slot_index = self.index
             functions.hide_base_sprite(obj)
             for slot in obj.coa_tools2.slot:
                 if slot != self and slot.active:
-                    object.__setattr__(slot, "_lock_active_update", True)
-                    try:
-                        slot.active = False
-                    finally:
-                        object.__setattr__(slot, "_lock_active_update", False)
+                    slot["active"] = False
         finally:
             object.__setattr__(self, "_lock_active_update", False)
 

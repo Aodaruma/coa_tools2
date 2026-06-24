@@ -811,11 +811,28 @@ def set_view(scene, mode):
                                     relative=False,
                                 )
                             else:
-                                bpy.ops.view3d.view_axis(
-                                    type="FRONT",
-                                    align_active=False,
-                                    relative=False,
+                                region = next(
+                                    (
+                                        region
+                                        for region in area.regions
+                                        if region.type == "WINDOW"
+                                    ),
+                                    None,
                                 )
+                                if region is None:
+                                    continue
+                                with bpy.context.temp_override(
+                                    screen=screen,
+                                    area=area,
+                                    region=region,
+                                    space_data=active_space_data,
+                                ):
+                                    if bpy.ops.view3d.view_axis.poll():
+                                        bpy.ops.view3d.view_axis(
+                                            type="FRONT",
+                                            align_active=False,
+                                            relative=False,
+                                        )
 
     elif mode == "3D":
         for screen in bpy.data.screens:
@@ -1028,6 +1045,36 @@ def get_clamped_slot_index(obj, obj_eval=None):
     return max(0, min(index, len(obj.coa_tools2.slot) - 1))
 
 
+def set_object_mesh_data_preserve_vertex_groups(obj, mesh):
+    if obj is None or mesh is None or obj.data == mesh:
+        return
+
+    vertex_groups = [
+        (group.name, getattr(group, "lock_weight", False)) for group in obj.vertex_groups
+    ]
+    active_group_name = None
+    try:
+        active_group = obj.vertex_groups.active
+        active_group_name = active_group.name if active_group is not None else None
+    except AttributeError:
+        pass
+
+    obj.data = mesh
+
+    for name, lock_weight in vertex_groups:
+        if name in obj.vertex_groups:
+            group = obj.vertex_groups[name]
+        else:
+            group = obj.vertex_groups.new(name=name)
+        try:
+            group.lock_weight = lock_weight
+        except AttributeError:
+            pass
+
+    if active_group_name in obj.vertex_groups:
+        obj.vertex_groups.active_index = obj.vertex_groups[active_group_name].index
+
+
 def change_slot_mesh_data(
     context,
     obj,
@@ -1055,7 +1102,7 @@ def change_slot_mesh_data(
 
     obj = slot.id_data
     if obj.data != slot.mesh:
-        obj.data = slot.mesh
+        set_object_mesh_data_preserve_vertex_groups(obj, slot.mesh)
     set_alpha(obj, context, obj.coa_tools2.alpha if alpha is None else alpha)
     if modulate_color is not None:
         set_modulate_color(obj, context, modulate_color)
@@ -1063,17 +1110,9 @@ def change_slot_mesh_data(
     if sync_active:
         for slot2 in obj.coa_tools2.slot:
             if slot != slot2 and slot2.active:
-                object.__setattr__(slot2, "_lock_active_update", True)
-                try:
-                    slot2.active = False
-                finally:
-                    object.__setattr__(slot2, "_lock_active_update", False)
+                slot2["active"] = False
             elif slot == slot2 and not slot2.active:
-                object.__setattr__(slot2, "_lock_active_update", True)
-                try:
-                    slot2.active = True
-                finally:
-                    object.__setattr__(slot2, "_lock_active_update", False)
+                slot2["active"] = True
 
     if "coa_base_sprite" in obj.modifiers:
         hide_base_sprite = bool(slot.mesh.coa_tools2.hide_base_sprite)
