@@ -485,6 +485,7 @@ def get_local_dimension(obj):
 class _FallbackAddonPrefs:
     # Safe defaults used when addon preferences are temporarily unavailable.
     sprite_import_export_scale = 0.01
+    redirect_direct_edit_mode = False
     sprite_thumb_size = 64
     dragon_bones_export = False
 
