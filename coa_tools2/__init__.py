@@ -143,10 +143,16 @@ class COATools2Preferences(bpy.types.AddonPreferences):
         description="Import/Export scale factor, 1 px = X units",
         default=0.01,
     )
+    redirect_direct_edit_mode: bpy.props.BoolProperty(
+        name="Redirect Direct Edit Mode",
+        description="Automatically switch COA sprite meshes from Blender Edit Mode to COA Tools2 Edit Mesh",
+        default=False,
+    )
 
     def draw(self, context):
         layout = self.layout
         layout.prop(self, "sprite_import_export_scale")
+        layout.prop(self, "redirect_direct_edit_mode")
 
         deps_state, deps_errors = dependency_manager.dependency_state_with_errors()
         deps_ok = all(deps_state.values())
@@ -313,6 +319,9 @@ def _get_parent_sprite_object(obj):
 
 def _is_direct_edit_redirect_candidate(context, obj):
     wm = context.window_manager if context is not None else None
+    if not getattr(get_addon_prefs(context), "redirect_direct_edit_mode", False):
+        return False
+
     if (
         wm is None
         or bool(wm.get("coa_tools2_edit_mesh_modal_running", False))
