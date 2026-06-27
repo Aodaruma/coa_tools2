@@ -172,6 +172,18 @@ class COATools2Preferences(bpy.types.AddonPreferences):
             icon="IMPORT",
             text="Install numpy / opencv",
         )
+        install_state = install_dependencies.get_install_state()
+        if install_state is not None and (
+            install_state["running"] or install_state["done"]
+        ):
+            status_icon = "CHECKMARK" if install_state["success"] else "INFO"
+            if install_state["done"] and not install_state["success"]:
+                status_icon = "ERROR"
+            box.label(
+                text=f"Install progress: {int(install_state['progress'])}%",
+                icon=status_icon,
+            )
+            box.label(text=install_state["status_message"])
         if not deps_ok:
             box.label(
                 text="After install, restart Blender or re-enable addon.", icon="INFO"

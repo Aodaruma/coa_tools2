@@ -23,17 +23,20 @@ from math import radians, degrees
 import pdb
 from typing import Optional
 
-try:
-    import cv2
-except Exception:
-    cv2 = None
-
-try:
-    import numpy as np
-except Exception:
-    np = None
+cv2 = None
+np = None
 
 # ======================================================================================================================
+
+
+def refresh_dependencies():
+    global cv2
+    global np
+
+    modules, errors = dependency_manager.import_required_modules()
+    cv2 = modules.get("cv2")
+    np = modules.get("numpy")
+    return cv2 is not None and np is not None, errors
 
 
 def has_interactive_ui(context):
@@ -86,7 +89,8 @@ def get_contour(
     padding: Optional[int] = 50,
 ):
     """Get the contour points of image"""
-    if cv2 is None or np is None:
+    deps_ok, _errors = refresh_dependencies()
+    if not deps_ok:
         return [], []
 
     # get image with alpha
@@ -336,8 +340,8 @@ class COATOOLS2_OT_AutomeshFromTexture(bpy.types.Operator):
         )
 
     def execute(self, context):
-        if cv2 is None or np is None:
-            _, dep_errors = dependency_manager.dependency_state_with_errors()
+        deps_ok, dep_errors = refresh_dependencies()
+        if not deps_ok:
             if dep_errors:
                 print("COA Tools2 automesh dependency import errors:")
                 for module_name, error in dep_errors.items():

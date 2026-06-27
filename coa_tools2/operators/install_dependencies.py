@@ -3,6 +3,8 @@ import threading
 
 from .. import dependency_manager
 
+_INSTALL_STATE = None
+
 
 def _has_modal_ui(context):
     return (
@@ -18,9 +20,23 @@ def _new_install_state():
         "done": False,
         "success": False,
         "logs": [],
-        "progress": 0.0,
-        "status_message": "Starting dependency installation...",
+        "progress": 1.0,
+        "status_message": "Preparing dependency installation...",
     }
+
+
+def get_install_state():
+    if _INSTALL_STATE is None:
+        return None
+
+    state = {
+        "done": bool(_INSTALL_STATE["done"]),
+        "success": bool(_INSTALL_STATE["success"]),
+        "progress": float(_INSTALL_STATE["progress"]),
+        "status_message": str(_INSTALL_STATE["status_message"]),
+        "running": COATOOLS2_OT_InstallPythonDependencies._is_running,
+    }
+    return state
 
 
 def _make_progress_callback(state):
@@ -84,6 +100,11 @@ class COATOOLS2_OT_InstallPythonDependencies(bpy.types.Operator):
 
         state["success"] = success
         state["logs"] = logs
+        if success:
+            state["progress"] = 100.0
+            state["status_message"] = "Installation completed."
+        else:
+            state["status_message"] = "Installation failed."
         state["done"] = True
 
     def _finish_install(self, success, logs):
@@ -102,7 +123,9 @@ class COATOOLS2_OT_InstallPythonDependencies(bpy.types.Operator):
         return {"CANCELLED"}
 
     def _run_sync(self):
+        global _INSTALL_STATE
         state = _new_install_state()
+        _INSTALL_STATE = state
         try:
             success, logs = dependency_manager.install_dependencies(
                 progress_callback=_make_progress_callback(state)
@@ -110,12 +133,19 @@ class COATOOLS2_OT_InstallPythonDependencies(bpy.types.Operator):
         except Exception as exc:
             success = False
             logs = _exception_log(exc)
+            state["status_message"] = "Installation failed."
+        state["success"] = success
+        state["logs"] = logs
+        state["progress"] = 100.0 if success else state["progress"]
+        state["done"] = True
         return self._finish_install(success, logs)
 
     def _start_modal(self, context):
+        global _INSTALL_STATE
         COATOOLS2_OT_InstallPythonDependencies._is_running = True
         state = _new_install_state()
         self._install_state = state
+        _INSTALL_STATE = state
 
         wm = context.window_manager
         wm.progress_begin(0, 100)
@@ -127,6 +157,10 @@ class COATOOLS2_OT_InstallPythonDependencies(bpy.types.Operator):
         )
         self._thread.start()
 
+        self.report(
+            {"INFO"},
+            "Installing numpy/opencv. Progress is shown in Preferences.",
+        )
         return {"RUNNING_MODAL"}
 
     def invoke(self, context, event):
@@ -135,8 +169,7 @@ class COATOOLS2_OT_InstallPythonDependencies(bpy.types.Operator):
             return {"CANCELLED"}
         if not _has_modal_ui(context):
             return self._run_sync()
-        self._start_modal(context)
-        return context.window_manager.invoke_popup(self, width=460)
+        return self._start_modal(context)
 
     def execute(self, context):
         if COATOOLS2_OT_InstallPythonDependencies._is_running:
