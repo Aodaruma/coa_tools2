@@ -3,7 +3,8 @@
 var doc = app.activeDocument;
 var layers = doc.layers;
 var coords = [];
-var exporter_version = "v2.0.1";
+var exporter_version = "v2.0.2";
+var exporter_settings_key = "coaTools2PhotoshopExporterSettingsV1";
 
 //Save Options for PNGs
 var options = new ExportOptionsSaveForWeb();
@@ -135,6 +136,249 @@ function close_export_progress_dialog(progress_ctx) {
         progress_ctx.window.close();
     } catch (e) {
     }
+}
+
+function get_document_path_key() {
+    try {
+        return app.activeDocument.fullName.fsName;
+    } catch (e) {
+        return app.activeDocument.name;
+    }
+}
+
+function get_default_export_path() {
+    try {
+        return app.activeDocument.path.fsName;
+    } catch (e) {
+        return "";
+    }
+}
+
+function get_default_export_name() {
+    var name = "";
+    try {
+        name = app.activeDocument.name;
+    } catch (e) {
+        name = "export";
+    }
+    name = String(name);
+    name = name.replace(/\.(psd|psb)$/i, "");
+    name = name.split(' ').join('_');
+    if (name == "") {
+        name = "export";
+    }
+    return name;
+}
+
+function normalize_export_name(export_name) {
+    export_name = String(export_name || "");
+    export_name = export_name.split(' ').join('_');
+    export_name = export_name.replace(/\.(psd|psb)$/i, "");
+    return export_name;
+}
+
+function get_document_info_value(key, default_value) {
+    try {
+        var value = app.activeDocument.info[key];
+        if (value !== undefined && value !== null && value !== "") {
+            return value;
+        }
+    } catch (e) {
+    }
+    return default_value;
+}
+
+function coerce_bool(value, default_value) {
+    if (value === true || value === false) {
+        return value;
+    }
+    if (value === "true" || value === "True" || value === "1") {
+        return true;
+    }
+    if (value === "false" || value === "False" || value === "0") {
+        return false;
+    }
+    return default_value;
+}
+
+function descriptor_has_key(desc, key) {
+    try {
+        return desc != null && desc.hasKey(stringIDToTypeID(key));
+    } catch (e) {
+        return false;
+    }
+}
+
+function get_descriptor_string(desc, key, default_value) {
+    try {
+        if (descriptor_has_key(desc, key)) {
+            var value = desc.getString(stringIDToTypeID(key));
+            if (value !== undefined && value !== null && value !== "") {
+                return value;
+            }
+        }
+    } catch (e) {
+    }
+    return default_value;
+}
+
+function get_descriptor_bool(desc, key, default_value) {
+    try {
+        if (descriptor_has_key(desc, key)) {
+            return desc.getBoolean(stringIDToTypeID(key));
+        }
+    } catch (e) {
+    }
+    return default_value;
+}
+
+function get_export_settings_defaults() {
+    return {
+        document_path: get_document_path_key(),
+        export_path: get_default_export_path(),
+        export_name: get_default_export_name(),
+        layer_type: "selected",
+        crop_layers: true,
+        limit_layer: true,
+        is_layerset_automerge: false,
+        is_set_composite_mode_to_normal: true,
+        is_prepending_layerset_name: false,
+        is_reorder_layerset_name: false,
+        is_omit_layer_name_if_only_one: false,
+        export_json: true,
+        center_sprites: true
+    };
+}
+
+function load_export_settings() {
+    var settings = get_export_settings_defaults();
+    var desc = null;
+    try {
+        desc = app.getCustomOptions(exporter_settings_key);
+    } catch (e) {
+        desc = null;
+    }
+
+    if (desc != null) {
+        var stored_document_path = get_descriptor_string(desc, "documentPath", "");
+        var is_same_document = stored_document_path == settings.document_path;
+
+        if (is_same_document) {
+            settings.export_path = get_descriptor_string(desc, "exportPath", settings.export_path);
+            settings.export_name = get_descriptor_string(desc, "exportName", settings.export_name);
+        }
+
+        settings.layer_type = get_descriptor_string(desc, "layerType", settings.layer_type);
+        settings.crop_layers = get_descriptor_bool(desc, "cropLayers", settings.crop_layers);
+        settings.limit_layer = get_descriptor_bool(desc, "limitLayer", settings.limit_layer);
+        settings.is_layerset_automerge = get_descriptor_bool(desc, "isLayersetAutomerge", settings.is_layerset_automerge);
+        settings.is_set_composite_mode_to_normal = get_descriptor_bool(desc, "isSetCompositeModeToNormal", settings.is_set_composite_mode_to_normal);
+        settings.is_prepending_layerset_name = get_descriptor_bool(desc, "isPrependingLayersetName", settings.is_prepending_layerset_name);
+        settings.is_reorder_layerset_name = get_descriptor_bool(desc, "isReorderLayersetName", settings.is_reorder_layerset_name);
+        settings.is_omit_layer_name_if_only_one = get_descriptor_bool(desc, "isOmitLayerNameIfOnlyOne", settings.is_omit_layer_name_if_only_one);
+        settings.export_json = get_descriptor_bool(desc, "exportJson", settings.export_json);
+        settings.center_sprites = get_descriptor_bool(desc, "centerSprites", settings.center_sprites);
+    } else {
+        settings.export_path = get_document_info_value("caption", settings.export_path);
+        settings.export_name = get_document_info_value("captionWriter", settings.export_name);
+        settings.layer_type = get_document_info_value("layerType", settings.layer_type);
+        settings.crop_layers = coerce_bool(get_document_info_value("cropLayers", settings.crop_layers), settings.crop_layers);
+        settings.limit_layer = coerce_bool(get_document_info_value("limitLayer", settings.limit_layer), settings.limit_layer);
+        settings.is_layerset_automerge = coerce_bool(get_document_info_value("isLayersetAutomerge", settings.is_layerset_automerge), settings.is_layerset_automerge);
+        settings.is_set_composite_mode_to_normal = coerce_bool(get_document_info_value("isSetCompositeModeToNormal", settings.is_set_composite_mode_to_normal), settings.is_set_composite_mode_to_normal);
+        settings.is_prepending_layerset_name = coerce_bool(get_document_info_value("isPrependingLayersetName", settings.is_prepending_layerset_name), settings.is_prepending_layerset_name);
+        settings.is_reorder_layerset_name = coerce_bool(get_document_info_value("isReorderLayersetName", settings.is_reorder_layerset_name), settings.is_reorder_layerset_name);
+        settings.is_omit_layer_name_if_only_one = coerce_bool(get_document_info_value("isOmitLayerNameIfOnlyOne", settings.is_omit_layer_name_if_only_one), settings.is_omit_layer_name_if_only_one);
+        settings.export_json = coerce_bool(get_document_info_value("exportJson", settings.export_json), settings.export_json);
+        settings.center_sprites = coerce_bool(get_document_info_value("centerSprites", settings.center_sprites), settings.center_sprites);
+    }
+
+    settings.export_name = normalize_export_name(settings.export_name);
+    return settings;
+}
+
+function save_export_settings(settings) {
+    var desc = new ActionDescriptor();
+    desc.putString(stringIDToTypeID("documentPath"), settings.document_path);
+    desc.putString(stringIDToTypeID("exportPath"), settings.export_path);
+    desc.putString(stringIDToTypeID("exportName"), settings.export_name);
+    desc.putString(stringIDToTypeID("layerType"), settings.layer_type);
+    desc.putBoolean(stringIDToTypeID("cropLayers"), settings.crop_layers);
+    desc.putBoolean(stringIDToTypeID("limitLayer"), settings.limit_layer);
+    desc.putBoolean(stringIDToTypeID("isLayersetAutomerge"), settings.is_layerset_automerge);
+    desc.putBoolean(stringIDToTypeID("isSetCompositeModeToNormal"), settings.is_set_composite_mode_to_normal);
+    desc.putBoolean(stringIDToTypeID("isPrependingLayersetName"), settings.is_prepending_layerset_name);
+    desc.putBoolean(stringIDToTypeID("isReorderLayersetName"), settings.is_reorder_layerset_name);
+    desc.putBoolean(stringIDToTypeID("isOmitLayerNameIfOnlyOne"), settings.is_omit_layer_name_if_only_one);
+    desc.putBoolean(stringIDToTypeID("exportJson"), settings.export_json);
+    desc.putBoolean(stringIDToTypeID("centerSprites"), settings.center_sprites);
+    try {
+        app.putCustomOptions(exporter_settings_key, desc, true);
+    } catch (e) {
+    }
+
+    try {
+        app.activeDocument.info.caption = settings.export_path;
+        app.activeDocument.info.captionWriter = settings.export_name;
+        app.activeDocument.info.layerType = settings.layer_type;
+        app.activeDocument.info.cropLayers = settings.crop_layers;
+        app.activeDocument.info.limitLayer = settings.limit_layer;
+        app.activeDocument.info.isLayersetAutomerge = settings.is_layerset_automerge;
+        app.activeDocument.info.isSetCompositeModeToNormal = settings.is_set_composite_mode_to_normal;
+        app.activeDocument.info.isPrependingLayersetName = settings.is_prepending_layerset_name;
+        app.activeDocument.info.isReorderLayersetName = settings.is_reorder_layerset_name;
+        app.activeDocument.info.isOmitLayerNameIfOnlyOne = settings.is_omit_layer_name_if_only_one;
+        app.activeDocument.info.exportJson = settings.export_json;
+        app.activeDocument.info.centerSprites = settings.center_sprites;
+    } catch (e) {
+    }
+}
+
+function select_dropdown_item(dropdown, value, fallback_value) {
+    var wanted_value = value || fallback_value;
+    for (var i = 0; i < dropdown.items.length; i++) {
+        if (dropdown.items[i].text == wanted_value) {
+            dropdown.selection = dropdown.items[i];
+            return;
+        }
+    }
+    for (var j = 0; j < dropdown.items.length; j++) {
+        if (dropdown.items[j].text == fallback_value) {
+            dropdown.selection = dropdown.items[j];
+            return;
+        }
+    }
+    if (dropdown.items.length > 0) {
+        dropdown.selection = dropdown.items[0];
+    }
+}
+
+function get_blend_mode_name(blend_mode) {
+    var blend_mode_name = "" + blend_mode;
+    blend_mode_name = blend_mode_name.replace("BlendMode.", "");
+    return blend_mode_name;
+}
+
+function is_default_blend_mode_name(blend_mode_name) {
+    return blend_mode_name == "NORMAL" || blend_mode_name == "PASSTHROUGH";
+}
+
+function get_effective_blend_mode(layer) {
+    var effective_blend_mode = get_blend_mode_name(layer.blendMode);
+    var parent_layersets = get_parent_layersets(layer);
+    for (var i = 0; i < parent_layersets.length; i++) {
+        var parent_blend_mode = get_blend_mode_name(parent_layersets[i].blendMode);
+        if (!is_default_blend_mode_name(parent_blend_mode)) {
+            if (is_default_blend_mode_name(effective_blend_mode)) {
+                effective_blend_mode = parent_blend_mode;
+            }
+            break;
+        }
+    }
+    if (effective_blend_mode == "PASSTHROUGH") {
+        effective_blend_mode = "NORMAL";
+    }
+    return effective_blend_mode;
 }
 
 function save_coords(center_sprites, export_path, export_name) {
@@ -838,8 +1082,7 @@ function export_sprites(
             try {
                 tmp_doc = app.documents.add(dupli_doc.width, dupli_doc.height, dupli_doc.resolution, layer_name, NewDocumentMode.RGB, DocumentFill.TRANSPARENT);
 
-                var composite_mode = "" + layer.blendMode;
-                composite_mode = composite_mode.replace("BlendMode.", "");
+                var composite_mode = get_effective_blend_mode(layer);
 
                 var clipping_mask_target_name = null;
                 if (is_layer_clipping_mask(layer)) {
@@ -988,23 +1231,23 @@ function export_sprites(
 
 function export_button() {
 
-    win.export_name.text = String(win.export_name.text).split(' ').join('_');
-    app.activeDocument.info.caption = win.export_path.export_path.text;
-    app.activeDocument.info.captionWriter = win.export_name.export_name.text;
-    // select_options
-    app.activeDocument.info.layerType = win.options.ops01.select_options.layer_type_group.layer_type.selection.text;
-    // convert_options
-    app.activeDocument.info.cropLayers = win.options.ops01.convert_options.crop_layers.value;
-    app.activeDocument.info.limitLayer = win.options.ops01.convert_options.limit_layer.value;
-    app.activeDocument.info.isLayersetAutomerge = win.options.ops01.convert_options.is_layerset_automerge.value;
-    app.activeDocument.info.isSetCompositeModeToNormal = win.options.ops01.convert_options.is_set_composite_mode_to_normal.value;
-    // naming_options
-    app.activeDocument.info.isPrependingLayersetName = win.options.ops02.naming_options.is_prepending_layerset_name.value;
-    app.activeDocument.info.isReorderLayersetName = win.options.ops02.naming_options.is_reorder_layerset_name.value;
-    app.activeDocument.info.isOmitLayerNameIfOnlyOne = win.options.ops02.naming_options.is_omit_layer_name_if_only_one.value;
-    // export_options
-    app.activeDocument.info.exportJson = win.options.ops02.export_options.export_json.value;
-    app.activeDocument.info.centerSprites = win.options.ops02.export_options.center_sprites.value;
+    var export_settings = {
+        document_path: get_document_path_key(),
+        export_path: String(win.export_path.export_path.text),
+        export_name: normalize_export_name(win.export_name.export_name.text),
+        layer_type: win.options.ops01.select_options.layer_type_group.layer_type.selection.text,
+        crop_layers: win.options.ops01.convert_options.crop_layers.value,
+        limit_layer: win.options.ops01.convert_options.limit_layer.value,
+        is_layerset_automerge: win.options.ops01.convert_options.is_layerset_automerge.value,
+        is_set_composite_mode_to_normal: win.options.ops01.convert_options.is_set_composite_mode_to_normal.value,
+        is_prepending_layerset_name: win.options.ops02.naming_options.is_prepending_layerset_name.value,
+        is_reorder_layerset_name: win.options.ops02.naming_options.is_reorder_layerset_name.value,
+        is_omit_layer_name_if_only_one: win.options.ops02.naming_options.is_omit_layer_name_if_only_one.value,
+        export_json: win.options.ops02.export_options.export_json.value,
+        center_sprites: win.options.ops02.export_options.center_sprites.value
+    };
+    win.export_name.export_name.text = export_settings.export_name;
+    save_export_settings(export_settings);
 
     app.activeDocument.suspendHistory(
         "Export selected Sprites",
@@ -1026,11 +1269,30 @@ function export_button() {
     win.close();
 }
 
+function get_folder_for_dialog() {
+    var current_path = String(win.export_path.export_path.text || "");
+    if (current_path != "") {
+        var current_folder = new Folder(current_path);
+        if (current_folder.exists) {
+            return current_folder;
+        }
+    }
+
+    var default_path = get_default_export_path();
+    if (default_path != "") {
+        var default_folder = new Folder(default_path);
+        if (default_folder.exists) {
+            return default_folder;
+        }
+    }
+
+    return Folder.desktop;
+}
+
 function path_button() {
-    var folder_path = Folder.selectDialog("Select Place to save");
+    var folder_path = get_folder_for_dialog().selectDlg("Select Place to save");
     if (folder_path != null) {
-        win.export_path.export_path.text = folder_path;
-        app.activeDocument.info.caption = folder_path;
+        win.export_path.export_path.text = folder_path.fsName;
     }
 }
 
@@ -1106,17 +1368,18 @@ var res = "dialog { \
     } \
 }";
 
+var initial_export_settings = load_export_settings();
 var win = new Window(res);
 
-win.export_path.export_path.text = app.activeDocument.info.caption || "";
+win.export_path.export_path.text = initial_export_settings.export_path;
 win.export_path.button_path.onClick = path_button;
-win.export_name.export_name.text = app.activeDocument.info.captionWriter || app.activeDocument.name;
+win.export_name.export_name.text = initial_export_settings.export_name;
 
 win.options.ops01.select_options.layer_type_group.layer_type.add("item", "selected");
 win.options.ops01.select_options.layer_type_group.layer_type.add("item", "visible");
-win.options.ops01.select_options.layer_type_group.layer_type.selection = app.activeDocument.info.layerType || "selected";
+select_dropdown_item(win.options.ops01.select_options.layer_type_group.layer_type, initial_export_settings.layer_type, "selected");
 
-win.options.ops01.convert_options.crop_layers.value = app.activeDocument.info.cropLayers || true;
+win.options.ops01.convert_options.crop_layers.value = initial_export_settings.crop_layers;
 win.options.ops01.convert_options.crop_layers.onClick = function () {
     if (this.value === true) {
         this.parent.limit_layer.enabled = true;
@@ -1124,13 +1387,14 @@ win.options.ops01.convert_options.crop_layers.onClick = function () {
         this.parent.limit_layer.enabled = false;
     }
 }
-win.options.ops01.convert_options.limit_layer.value = app.activeDocument.info.limitLayer || true;
-win.options.ops01.convert_options.is_layerset_automerge.value = app.activeDocument.info.isLayersetAutomerge || false;
-win.options.ops01.convert_options.is_set_composite_mode_to_normal.value = app.activeDocument.info.isSetCompositeModeToNormal || true;
+win.options.ops01.convert_options.limit_layer.value = initial_export_settings.limit_layer;
+win.options.ops01.convert_options.limit_layer.enabled = win.options.ops01.convert_options.crop_layers.value;
+win.options.ops01.convert_options.is_layerset_automerge.value = initial_export_settings.is_layerset_automerge;
+win.options.ops01.convert_options.is_set_composite_mode_to_normal.value = initial_export_settings.is_set_composite_mode_to_normal;
 
-win.options.ops02.naming_options.is_prepending_layerset_name.value = app.activeDocument.info.isPrependingLayersetName || false;
-win.options.ops02.naming_options.is_reorder_layerset_name.value = app.activeDocument.info.isReorderLayersetName || false;
-win.options.ops02.naming_options.is_omit_layer_name_if_only_one.value = app.activeDocument.info.isOmitLayerNameIfOnlyOne || false;
+win.options.ops02.naming_options.is_prepending_layerset_name.value = initial_export_settings.is_prepending_layerset_name;
+win.options.ops02.naming_options.is_reorder_layerset_name.value = initial_export_settings.is_reorder_layerset_name;
+win.options.ops02.naming_options.is_omit_layer_name_if_only_one.value = initial_export_settings.is_omit_layer_name_if_only_one;
 win.options.ops02.naming_options.is_prepending_layerset_name.onClick = function () {
     if (this.value === true) {
         this.parent.is_omit_layer_name_if_only_one.enabled = true;
@@ -1141,8 +1405,8 @@ win.options.ops02.naming_options.is_prepending_layerset_name.onClick = function 
 // set is_omit_layer_name_if_only_one.enabled to is_prepending_layerset_name in initial state
 win.options.ops02.naming_options.is_omit_layer_name_if_only_one.enabled = win.options.ops02.naming_options.is_prepending_layerset_name.value;
 
-win.options.ops02.export_options.export_json.value = app.activeDocument.info.exportJson || true;
-win.options.ops02.export_options.center_sprites.value = app.activeDocument.info.centerSprites || true;
+win.options.ops02.export_options.export_json.value = initial_export_settings.export_json;
+win.options.ops02.export_options.center_sprites.value = initial_export_settings.center_sprites;
 win.options.ops02.export_options.export_json.onClick = function () {
     if (this.value === true) {
         this.parent.center_sprites.enabled = true;
@@ -1150,6 +1414,7 @@ win.options.ops02.export_options.export_json.onClick = function () {
         this.parent.center_sprites.enabled = false;
     }
 }
+win.options.ops02.export_options.center_sprites.enabled = win.options.ops02.export_options.export_json.value;
 
 win.buttons.export_button.onClick = export_button;
 win.buttons.cancel_button.onClick = function () { win.close(); }
