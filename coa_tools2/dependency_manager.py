@@ -30,23 +30,32 @@ def dependencies_installed():
     return all(state.values())
 
 
-def _try_import(module_name):
+def import_optional_module(module_name):
+    ensure_vendor_path()
+    importlib.invalidate_caches()
     try:
-        importlib.import_module(module_name)
-        return True, ""
+        return importlib.import_module(module_name), ""
     except Exception as exc:
-        return False, f"{type(exc).__name__}: {exc}"
+        return None, f"{type(exc).__name__}: {exc}"
+
+
+def import_required_modules():
+    modules = {}
+    errors = {}
+    for module_name in REQUIRED_MODULES:
+        module, error = import_optional_module(module_name)
+        if module is None:
+            errors[module_name] = error
+        else:
+            modules[module_name] = module
+    return modules, errors
 
 
 def dependency_state_with_errors():
-    ensure_vendor_path()
+    modules, errors = import_required_modules()
     state = {}
-    errors = {}
     for module_name in REQUIRED_MODULES:
-        is_ok, error = _try_import(module_name)
-        state[module_name] = is_ok
-        if not is_ok:
-            errors[module_name] = error
+        state[module_name] = module_name in modules
     return state, errors
 
 
