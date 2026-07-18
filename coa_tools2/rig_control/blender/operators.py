@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 import traceback
 import uuid
@@ -109,13 +110,34 @@ def _all_target_keys(armature):
             yield binding_target_key(binding)
 
 
+def _control_input_range(control, component):
+    if control.control_type == "SLIDER_1D":
+        return 0.0, control.width
+    if control.control_type == "POINT_2D_RECT":
+        return (0.0, control.height) if component == "Y" else (0.0, control.width)
+    if control.control_type == "POINT_2D_CIRCLE":
+        return -control.radius, control.radius
+    if control.control_type == "DIAL":
+        return control.angle_min, control.angle_max
+    raise ValueError(f"Unsupported control type: {control.control_type}")
+
+
 class COATOOLS2_OT_AddRigControl(bpy.types.Operator):
     bl_idname = "coa_tools2.add_rig_control"
     bl_label = "Add Rig Control"
-    bl_description = "Create a Geometry Nodes 1D slider and Shape Key binding"
+    bl_description = "Create a Geometry Nodes control preset and Shape Key binding"
     bl_options = {"REGISTER", "UNDO"}
 
     label: StringProperty(default="Shape Key Slider")
+    control_type: EnumProperty(
+        items=(
+            ("SLIDER_1D", "1D Slider", "Linear slider"),
+            ("POINT_2D_RECT", "2D Rectangle", "Rectangular 2D control"),
+            ("POINT_2D_CIRCLE", "2D Circle", "Circular 2D control"),
+            ("DIAL", "Dial", "Rotational dial"),
+        ),
+        default="SLIDER_1D",
+    )
     axis: EnumProperty(
         items=(
             ("X", "Horizontal", "Horizontal 1D slider"),
@@ -124,6 +146,17 @@ class COATOOLS2_OT_AddRigControl(bpy.types.Operator):
         default="X",
     )
     width: FloatProperty(default=4.0, min=0.1)
+    height: FloatProperty(default=3.0, min=0.1)
+    radius: FloatProperty(default=2.0, min=0.1)
+    angle_min: FloatProperty(default=-math.pi * 0.5, subtype="ANGLE")
+    angle_max: FloatProperty(default=math.pi * 0.5, subtype="ANGLE")
+    source_component: EnumProperty(
+        items=(
+            ("X", "X", "Use local X as the initial binding source"),
+            ("Y", "Y", "Use local Y as the initial binding source"),
+        ),
+        default="X",
+    )
     target_object_name: StringProperty()
     shape_key: EnumProperty(items=_shape_key_items)
 
@@ -145,8 +178,23 @@ class COATOOLS2_OT_AddRigControl(bpy.types.Operator):
     def draw(self, _context):
         layout = self.layout
         layout.prop(self, "label")
-        layout.prop(self, "axis", expand=True)
-        layout.prop(self, "width")
+        layout.prop(self, "control_type")
+        if self.control_type == "SLIDER_1D":
+            layout.prop(self, "axis", expand=True)
+            layout.prop(self, "width")
+        elif self.control_type == "POINT_2D_RECT":
+            row = layout.row(align=True)
+            row.prop(self, "width")
+            row.prop(self, "height")
+            layout.prop(self, "source_component", expand=True)
+        elif self.control_type == "POINT_2D_CIRCLE":
+            layout.prop(self, "radius")
+            layout.prop(self, "source_component", expand=True)
+        else:
+            layout.prop(self, "radius")
+            row = layout.row(align=True)
+            row.prop(self, "angle_min")
+            row.prop(self, "angle_max")
         layout.prop_search(self, "target_object_name", bpy.data, "objects", text="Target")
         layout.prop(self, "shape_key")
 
@@ -173,21 +221,34 @@ class COATOOLS2_OT_AddRigControl(bpy.types.Operator):
         control.control_uuid = control_uuid
         control.semantic_id = _semantic_id(self.label)
         control.label = self.label
-        control.control_type = "SLIDER_1D"
-        control.axis = self.axis
+        control.control_type = self.control_type
+        source_component = (
+            "ROTATION"
+            if self.control_type == "DIAL"
+            else self.axis
+            if self.control_type == "SLIDER_1D"
+            else self.source_component
+        )
+        control.axis = source_component
         control.width = self.width
-        control.input_min = 0.0
-        control.input_max = self.width
+        control.height = self.height
+        control.radius = self.radius
+        control.angle_min = self.angle_min
+        control.angle_max = self.angle_max
+        control.input_min, control.input_max = _control_input_range(
+            control,
+            source_component,
+        )
 
         binding = control.bindings.add()
         binding.binding_uuid = str(uuid.uuid4())
         binding.control_uuid = control_uuid
-        binding.source_component = self.axis
+        binding.source_component = source_component
         binding.target_kind = "SHAPE_KEY_VALUE"
         binding.target_object = target_object
         binding.target_name = shape_key
-        binding.input_min = 0.0
-        binding.input_max = self.width
+        binding.input_min = control.input_min
+        binding.input_max = control.input_max
         binding.output_min = 0.0
         binding.output_max = 1.0
 
@@ -225,7 +286,11 @@ class COATOOLS2_OT_AddRigBinding(bpy.types.Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     source_component: EnumProperty(
-        items=(("X", "X", "Local X"), ("Y", "Y", "Local Y")),
+        items=(
+            ("X", "X", "Local X"),
+            ("Y", "Y", "Local Y"),
+            ("ROTATION", "Rotation", "Local Z rotation"),
+        ),
         default="X",
     )
     target_kind: EnumProperty(
@@ -253,7 +318,13 @@ class COATOOLS2_OT_AddRigBinding(bpy.types.Operator):
 
     def invoke(self, context, _event):
         _armature_object, control = _active_control(context)
-        self.source_component = "Y" if control.axis == "Y" else "X"
+        self.source_component = (
+            "ROTATION"
+            if control.control_type == "DIAL"
+            else "Y"
+            if control.axis == "Y"
+            else "X"
+        )
         target = _default_target(context)
         self.target_object_name = target.name if target else ""
         if target:
@@ -300,8 +371,10 @@ class COATOOLS2_OT_AddRigBinding(bpy.types.Operator):
         binding.target_object = target
         binding.target_bone = key[2]
         binding.target_name = self.target_name
-        binding.input_min = control.input_min
-        binding.input_max = control.input_max
+        binding.input_min, binding.input_max = _control_input_range(
+            control,
+            self.source_component,
+        )
         binding.output_min = self.output_min
         binding.output_max = self.output_max
         binding.clamp = self.clamp

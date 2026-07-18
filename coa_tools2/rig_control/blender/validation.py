@@ -7,7 +7,12 @@ from dataclasses import dataclass
 import bpy
 
 from ..validation import IssueSeverity
-from .artifacts import find_bone_by_role, limit_location_name
+from .artifacts import (
+    find_bone_by_role,
+    limit_distance_name,
+    limit_location_name,
+    limit_rotation_name,
+)
 from .drivers import binding_target_key, driver_uses_control, find_driver
 from .widgets import NODE_GROUP_NAME
 
@@ -123,15 +128,24 @@ def validate_rig(armature) -> list[BlenderValidationIssue]:
                         control.control_uuid,
                     )
                 )
-            elif pose_bone.constraints.get(limit_location_name(control.control_uuid)) is None:
-                issues.append(
-                    BlenderValidationIssue(
-                        IssueSeverity.ERROR,
-                        "artifact.missing_limit",
-                        f"Limit constraint is missing for {control.label}.",
-                        control.control_uuid,
+            else:
+                expected_constraints = [limit_location_name(control.control_uuid)]
+                if control.control_type == "POINT_2D_CIRCLE":
+                    expected_constraints.append(limit_distance_name(control.control_uuid))
+                elif control.control_type == "DIAL":
+                    expected_constraints.append(limit_rotation_name(control.control_uuid))
+                if any(
+                    pose_bone.constraints.get(name) is None
+                    for name in expected_constraints
+                ):
+                    issues.append(
+                        BlenderValidationIssue(
+                            IssueSeverity.ERROR,
+                            "artifact.missing_limit",
+                            f"Limit constraint is missing for {control.label}.",
+                            control.control_uuid,
+                        )
                     )
-                )
 
         for binding in control.bindings:
             target_key = binding_target_key(binding)

@@ -11,7 +11,7 @@ from ..schema import WidgetBackend, WidgetLayout, WidgetSpec
 
 NODE_GROUP_NAME = "COA_RigWidget_GN"
 WIDGET_COLLECTION_NAME = "COA Rig Widgets"
-NODE_GROUP_VERSION = 1
+NODE_GROUP_VERSION = 2
 
 _LAYOUT_VALUES = {
     WidgetLayout.TIP: 0,
@@ -98,10 +98,19 @@ def _rectangle_mesh(
     return curve_to_mesh.outputs["Mesh"]
 
 
-def _translated_geometry(nodes, links, geometry_socket, x_socket, label):
+def _translated_geometry(
+    nodes,
+    links,
+    geometry_socket,
+    x_socket,
+    label,
+    y_socket=None,
+):
     combine = nodes.new("ShaderNodeCombineXYZ")
     combine.label = f"{label} Translation"
     links.new(x_socket, combine.inputs["X"])
+    if y_socket is not None:
+        links.new(y_socket, combine.inputs["Y"])
 
     transform = nodes.new("GeometryNodeTransform")
     transform.label = label
@@ -128,6 +137,7 @@ def ensure_widget_node_group():
     _new_interface_socket(node_group, "Layout", "INPUT", "NodeSocketInt", 0)
     _new_interface_socket(node_group, "Width", "INPUT", "NodeSocketFloat", 4.0)
     _new_interface_socket(node_group, "Height", "INPUT", "NodeSocketFloat", 2.0)
+    _new_interface_socket(node_group, "Radius", "INPUT", "NodeSocketFloat", 2.0)
     _new_interface_socket(node_group, "Tip Radius", "INPUT", "NodeSocketFloat", 0.28)
     _new_interface_socket(node_group, "Node Radius", "INPUT", "NodeSocketFloat", 0.34)
     _new_interface_socket(node_group, "Bar Width", "INPUT", "NodeSocketFloat", 0.28)
@@ -193,6 +203,47 @@ def ensure_widget_node_group():
     links.new(left_endpoint, linear_join.inputs["Geometry"])
     links.new(right_endpoint, linear_join.inputs["Geometry"])
 
+    rectangle_geometry = _rectangle_mesh(
+        nodes,
+        links,
+        group_input.outputs["Width"],
+        group_input.outputs["Height"],
+        group_input.outputs["Stroke Radius"],
+        "Rectangle Frame",
+    )
+    half_height = _math_node(nodes, "MULTIPLY", "Half Height")
+    half_height.inputs[1].default_value = 0.5
+    links.new(group_input.outputs["Height"], half_height.inputs[0])
+    negative_half_height = _math_node(nodes, "MULTIPLY", "Negative Half Height")
+    negative_half_height.inputs[1].default_value = -0.5
+    links.new(group_input.outputs["Height"], negative_half_height.inputs[0])
+    rectangle_join = nodes.new("GeometryNodeJoinGeometry")
+    rectangle_join.label = "Rectangle Widget"
+    links.new(rectangle_geometry, rectangle_join.inputs["Geometry"])
+    for label, x_socket, y_socket in (
+        ("Bottom Left", negative_half_width.outputs[0], negative_half_height.outputs[0]),
+        ("Bottom Right", half_width.outputs[0], negative_half_height.outputs[0]),
+        ("Top Left", negative_half_width.outputs[0], half_height.outputs[0]),
+        ("Top Right", half_width.outputs[0], half_height.outputs[0]),
+    ):
+        corner = _translated_geometry(
+            nodes,
+            links,
+            endpoint_geometry,
+            x_socket,
+            label,
+            y_socket,
+        )
+        links.new(corner, rectangle_join.inputs["Geometry"])
+
+    circle_geometry = _circle_mesh(
+        nodes,
+        links,
+        group_input.outputs["Radius"],
+        group_input.outputs["Stroke Radius"],
+        "Circle Widget",
+    )
+
     is_linear = _math_node(nodes, "COMPARE", "Layout Is Linear")
     is_linear.inputs[1].default_value = float(_LAYOUT_VALUES[WidgetLayout.LINEAR])
     is_linear.inputs[2].default_value = 0.1
@@ -200,11 +251,46 @@ def ensure_widget_node_group():
 
     layout_switch = nodes.new("GeometryNodeSwitch")
     layout_switch.input_type = "GEOMETRY"
-    layout_switch.label = "Select Layout"
+    layout_switch.label = "Select Linear"
     links.new(is_linear.outputs[0], layout_switch.inputs["Switch"])
     links.new(tip_geometry, layout_switch.inputs["False"])
     links.new(linear_join.outputs["Geometry"], layout_switch.inputs["True"])
-    links.new(layout_switch.outputs["Output"], group_output.inputs["Geometry"])
+
+    is_rectangle = _math_node(nodes, "COMPARE", "Layout Is Rectangle")
+    is_rectangle.inputs[1].default_value = float(
+        _LAYOUT_VALUES[WidgetLayout.RECTANGLE]
+    )
+    is_rectangle.inputs[2].default_value = 0.1
+    links.new(group_input.outputs["Layout"], is_rectangle.inputs[0])
+    rectangle_switch = nodes.new("GeometryNodeSwitch")
+    rectangle_switch.input_type = "GEOMETRY"
+    rectangle_switch.label = "Select Rectangle"
+    links.new(is_rectangle.outputs[0], rectangle_switch.inputs["Switch"])
+    links.new(layout_switch.outputs["Output"], rectangle_switch.inputs["False"])
+    links.new(rectangle_join.outputs["Geometry"], rectangle_switch.inputs["True"])
+
+    is_circle = _math_node(nodes, "COMPARE", "Layout Is Circle")
+    is_circle.inputs[1].default_value = float(_LAYOUT_VALUES[WidgetLayout.CIRCLE])
+    is_circle.inputs[2].default_value = 0.1
+    links.new(group_input.outputs["Layout"], is_circle.inputs[0])
+    circle_switch = nodes.new("GeometryNodeSwitch")
+    circle_switch.input_type = "GEOMETRY"
+    circle_switch.label = "Select Circle"
+    links.new(is_circle.outputs[0], circle_switch.inputs["Switch"])
+    links.new(rectangle_switch.outputs["Output"], circle_switch.inputs["False"])
+    links.new(circle_geometry, circle_switch.inputs["True"])
+
+    is_dial = _math_node(nodes, "COMPARE", "Layout Is Dial")
+    is_dial.inputs[1].default_value = float(_LAYOUT_VALUES[WidgetLayout.DIAL])
+    is_dial.inputs[2].default_value = 0.1
+    links.new(group_input.outputs["Layout"], is_dial.inputs[0])
+    dial_switch = nodes.new("GeometryNodeSwitch")
+    dial_switch.input_type = "GEOMETRY"
+    dial_switch.label = "Select Dial"
+    links.new(is_dial.outputs[0], dial_switch.inputs["Switch"])
+    links.new(circle_switch.outputs["Output"], dial_switch.inputs["False"])
+    links.new(circle_geometry, dial_switch.inputs["True"])
+    links.new(dial_switch.outputs["Output"], group_output.inputs["Geometry"])
 
     return node_group
 
@@ -228,6 +314,7 @@ def apply_widget_spec(modifier: bpy.types.NodesModifier, spec: WidgetSpec):
         "Layout": _LAYOUT_VALUES[spec.layout],
         "Width": spec.width,
         "Height": spec.height,
+        "Radius": spec.radius,
         "Tip Radius": spec.tip_radius,
         "Node Radius": spec.node_radius,
         "Bar Width": spec.bar_width,

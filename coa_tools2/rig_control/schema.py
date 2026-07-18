@@ -52,6 +52,7 @@ class WidgetSpec:
     layout: WidgetLayout
     width: float = 4.0
     height: float = 2.0
+    radius: float = 2.0
     tip_radius: float = 0.28
     node_radius: float = 0.34
     bar_width: float = 0.28

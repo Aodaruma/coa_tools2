@@ -77,8 +77,30 @@ class COATOOLS2_PT_RigControls(bpy.types.Panel):
         control = controls[index]
         box = layout.box()
         box.prop(control, "label")
-        box.prop(control, "axis")
-        box.prop(control, "width")
+        box.prop(control, "control_type")
+        if control.control_type == "SLIDER_1D":
+            box.prop(control, "axis")
+            box.prop(control, "width")
+        elif control.control_type == "POINT_2D_RECT":
+            row = box.row(align=True)
+            row.prop(control, "width")
+            row.prop(control, "height")
+        elif control.control_type == "POINT_2D_CIRCLE":
+            box.prop(control, "radius")
+        elif control.control_type == "DIAL":
+            box.prop(control, "radius")
+            row = box.row(align=True)
+            row.prop(control, "angle_min")
+            row.prop(control, "angle_max")
+        widget_box = box.box()
+        widget_box.label(text="Widget Style")
+        row = widget_box.row(align=True)
+        row.prop(control, "tip_radius")
+        row.prop(control, "node_radius")
+        row = widget_box.row(align=True)
+        row.prop(control, "bar_width")
+        row.prop(control, "stroke_radius")
+        widget_box.prop(control, "widget_backend")
         box.label(text=f"Control Bone: {control.control_bone}")
         box.operator("coa_tools2.update_rig_control", icon="FILE_REFRESH")
         if control.needs_rebuild:

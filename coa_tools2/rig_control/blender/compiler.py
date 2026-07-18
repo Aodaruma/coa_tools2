@@ -6,8 +6,8 @@ from mathutils import Vector
 
 from .artifacts import (
     ensure_control_bones,
+    ensure_control_constraints,
     ensure_control_widgets,
-    ensure_limit_location,
     ensure_rig_instance_id,
 )
 from .drivers import ensure_binding_driver
@@ -20,10 +20,16 @@ class RigCompileError(RuntimeError):
 def compile_control(armature, control, origin=None):
     if armature is None or armature.type != "ARMATURE":
         raise RigCompileError("Rig controls require an Armature SpriteObject.")
-    if control.control_type != "SLIDER_1D":
-        raise RigCompileError(
-            f"Phase 1 only supports SLIDER_1D, got {control.control_type}."
-        )
+    supported_types = {
+        "SLIDER_1D",
+        "POINT_2D_RECT",
+        "POINT_2D_CIRCLE",
+        "DIAL",
+    }
+    if control.control_type not in supported_types:
+        raise RigCompileError(f"Unsupported rig control: {control.control_type}.")
+    if control.control_type == "DIAL" and control.angle_min >= control.angle_max:
+        raise RigCompileError("Dial minimum angle must be less than its maximum.")
     ensure_rig_instance_id(armature)
     origin = Vector(control.origin if origin is None else origin)
     control.origin = origin
@@ -32,7 +38,7 @@ def compile_control(armature, control, origin=None):
         control,
         origin,
     )
-    ensure_limit_location(control_pose, control)
+    ensure_control_constraints(armature, display_pose, control_pose, control)
     ensure_control_widgets(display_pose, control_pose, control)
     for binding in control.bindings:
         ensure_binding_driver(armature, control, binding)

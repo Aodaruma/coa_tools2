@@ -40,6 +40,14 @@ def _mapping_expression(binding) -> str:
     return f"({binding.output_min:.9g})+({normalized})*({output_span:.9g})"
 
 
+def _transform_type(source_component: str) -> str:
+    return {
+        "X": "LOC_X",
+        "Y": "LOC_Y",
+        "ROTATION": "ROT_Z",
+    }[source_component]
+
+
 def ensure_shape_key_driver(armature, control, binding):
     target_object = binding.target_object
     if target_object is None or target_object.type != "MESH":
@@ -73,7 +81,7 @@ def ensure_shape_key_driver(armature, control, binding):
     target = variable.targets[0]
     target.id = armature
     target.bone_target = control.control_bone
-    target.transform_type = "LOC_Y" if binding.source_component == "Y" else "LOC_X"
+    target.transform_type = _transform_type(binding.source_component)
     target.transform_space = "LOCAL_SPACE"
     driver.expression = _mapping_expression(binding)
     return fcurve
@@ -114,7 +122,7 @@ def ensure_constraint_driver(armature, control, binding):
     target = variable.targets[0]
     target.id = armature
     target.bone_target = control.control_bone
-    target.transform_type = "LOC_Y" if binding.source_component == "Y" else "LOC_X"
+    target.transform_type = _transform_type(binding.source_component)
     target.transform_space = "LOCAL_SPACE"
     driver.expression = _mapping_expression(binding)
     return fcurve

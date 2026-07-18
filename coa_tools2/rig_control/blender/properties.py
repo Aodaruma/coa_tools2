@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import bpy
 from bpy.props import (
     BoolProperty,
@@ -100,6 +102,17 @@ class COATOOLS2_PG_RigControl(bpy.types.PropertyGroup):
     base_widget_uuid: StringProperty()
     width: FloatProperty(default=4.0, min=0.1, update=_mark_control_dirty)
     height: FloatProperty(default=2.0, min=0.1, update=_mark_control_dirty)
+    radius: FloatProperty(default=2.0, min=0.1, update=_mark_control_dirty)
+    angle_min: FloatProperty(
+        default=-math.pi * 0.5,
+        subtype="ANGLE",
+        update=_mark_control_dirty,
+    )
+    angle_max: FloatProperty(
+        default=math.pi * 0.5,
+        subtype="ANGLE",
+        update=_mark_control_dirty,
+    )
     tip_radius: FloatProperty(default=0.28, min=0.01, update=_mark_control_dirty)
     node_radius: FloatProperty(default=0.34, min=0.01, update=_mark_control_dirty)
     bar_width: FloatProperty(default=0.28, min=0.01, update=_mark_control_dirty)

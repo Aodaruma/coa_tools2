@@ -35,6 +35,7 @@ def validate_widget_spec(spec: WidgetSpec) -> list[ValidationIssue]:
     for field_name, value in (
         ("width", spec.width),
         ("height", spec.height),
+        ("radius", spec.radius),
         ("tip_radius", spec.tip_radius),
         ("node_radius", spec.node_radius),
         ("bar_width", spec.bar_width),
