@@ -513,30 +513,42 @@ def register():
 
 
 def unregister():
-    addon_updater_ops.unregister()
+    # Remove callbacks before unregistering the classes and properties they use.
+    handlers = (
+        (bpy.app.handlers.depsgraph_update_pre, outliner.create_outliner_items),
+        (bpy.app.handlers.frame_change_post, update_properties),
+        (bpy.app.handlers.depsgraph_update_post, update_properties),
+        (
+            bpy.app.handlers.depsgraph_update_post,
+            redirect_direct_sprite_mesh_edit_mode,
+        ),
+        (bpy.app.handlers.load_post, check_view_2D_3D),
+        (bpy.app.handlers.load_post, check_for_deprecated_data),
+        (bpy.app.handlers.load_post, check_for_old_coatools),
+        (bpy.app.handlers.load_post, set_shading),
+    )
+    for handler_list, callback in handlers:
+        while callback in handler_list:
+            handler_list.remove(callback)
 
-    # unregister classes
-    for cls in classes:
-        bpy.utils.unregister_class(cls)
-
-    # unregister tools
-    bpy.utils.unregister_tool(edit_mesh.COATOOLS2_TO_DrawPolygon)
-
-    # unregisters props and keymap
-    props.unregister()
     unregister_keymaps()
 
-    # delete handler
-    bpy.app.handlers.depsgraph_update_pre.remove(outliner.create_outliner_items)
-    bpy.app.handlers.frame_change_post.remove(update_properties)
-    bpy.app.handlers.depsgraph_update_post.remove(update_properties)
-    if redirect_direct_sprite_mesh_edit_mode in bpy.app.handlers.depsgraph_update_post:
-        bpy.app.handlers.depsgraph_update_post.remove(
-            redirect_direct_sprite_mesh_edit_mode
-        )
-    bpy.app.handlers.load_post.remove(check_view_2D_3D)
-    bpy.app.handlers.load_post.remove(check_for_deprecated_data)
-    bpy.app.handlers.load_post.remove(check_for_old_coatools)
+    try:
+        bpy.utils.unregister_tool(edit_mesh.COATOOLS2_TO_DrawPolygon)
+    except RuntimeError:
+        pass
+
+    # RNA pointer properties must be removed before their PropertyGroup classes.
+    props.unregister()
+
+    for cls in reversed(classes):
+        try:
+            bpy.utils.unregister_class(cls)
+        except RuntimeError:
+            # Supports cleanup after a partially registered older add-on version.
+            pass
+
+    addon_updater_ops.unregister()
 
 
 @persistent

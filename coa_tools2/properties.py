@@ -574,15 +574,26 @@ class WindowManagerProperties(bpy.types.PropertyGroup):
     show_help: BoolProperty(default=False, description="Hide Help")
 
 def register():
-    bpy.types.Object.coa_tools2 = PointerProperty(type=ObjectProperties)
-    bpy.types.Scene.coa_tools2 = PointerProperty(type=SceneProperties)
-    bpy.types.Mesh.coa_tools2 = PointerProperty(type=MeshProperties)
-    bpy.types.Bone.coa_tools2 = PointerProperty(type=BoneProperties)
-    bpy.types.WindowManager.coa_tools2 = PointerProperty(type=WindowManagerProperties)
+    property_types = (
+        (bpy.types.Object, ObjectProperties),
+        (bpy.types.Scene, SceneProperties),
+        (bpy.types.Mesh, MeshProperties),
+        (bpy.types.Bone, BoneProperties),
+        (bpy.types.WindowManager, WindowManagerProperties),
+    )
+    for owner_type, property_type in property_types:
+        if hasattr(owner_type, "coa_tools2"):
+            delattr(owner_type, "coa_tools2")
+        setattr(owner_type, "coa_tools2", PointerProperty(type=property_type))
     print("COATools Properties have been registered")
 
 def unregister():
-    del bpy.types.Object.coa_tools2
-    del bpy.types.Scene.coa_tools2
-    del bpy.types.Mesh.coa_tools2
-    del bpy.types.Bone.coa_tools2
+    for owner_type in (
+        bpy.types.Object,
+        bpy.types.Scene,
+        bpy.types.Mesh,
+        bpy.types.Bone,
+        bpy.types.WindowManager,
+    ):
+        if hasattr(owner_type, "coa_tools2"):
+            delattr(owner_type, "coa_tools2")
