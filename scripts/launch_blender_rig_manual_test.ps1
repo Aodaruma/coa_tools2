@@ -1,7 +1,29 @@
+<#
+.SYNOPSIS
+Starts Blender with the COA Tools 2 checkout containing this script.
+
+.DESCRIPTION
+The default mode uses a new temporary Blender profile. Use -UseCurrentProfile
+to load the normal Blender preferences while temporarily overriding only the
+user scripts directory for the launched process. No installed add-on files are
+deleted or overwritten in either mode.
+
+.EXAMPLE
+.\scripts\launch_blender_rig_manual_test.ps1
+
+.EXAMPLE
+.\scripts\launch_blender_rig_manual_test.ps1 -UseCurrentProfile
+
+.EXAMPLE
+.\scripts\launch_blender_rig_manual_test.ps1 -BlenderExecutable "D:\Blender\blender.exe"
+#>
 [CmdletBinding()]
 param(
     [Parameter()]
-    [string]$BlenderExecutable = ""
+    [string]$BlenderExecutable = "",
+
+    [Parameter()]
+    [switch]$UseCurrentProfile
 )
 
 $ErrorActionPreference = "Stop"
@@ -47,11 +69,13 @@ $addonDestination = Join-Path $addonsRoot "coa_tools2"
 New-Item -ItemType Directory -Path $addonsRoot, $configRoot, $datafilesRoot | Out-Null
 Copy-Item -LiteralPath $addonSource -Destination $addonDestination -Recurse
 
-$environmentNames = @(
-    "BLENDER_USER_SCRIPTS",
-    "BLENDER_USER_CONFIG",
-    "BLENDER_USER_DATAFILES"
-)
+$environmentNames = @("BLENDER_USER_SCRIPTS")
+if (-not $UseCurrentProfile) {
+    $environmentNames += @(
+        "BLENDER_USER_CONFIG",
+        "BLENDER_USER_DATAFILES"
+    )
+}
 $previousEnvironment = @{}
 foreach ($name in $environmentNames) {
     $previousEnvironment[$name] = [Environment]::GetEnvironmentVariable(
@@ -60,7 +84,14 @@ foreach ($name in $environmentNames) {
     )
 }
 
-Write-Host "Starting an isolated COA Tools 2 rig test session..." -ForegroundColor Cyan
+$sessionMode = if ($UseCurrentProfile) {
+    "current Blender profile with a temporary add-on override"
+}
+else {
+    "isolated factory profile"
+}
+Write-Host "Starting COA Tools 2 rig test session..." -ForegroundColor Cyan
+Write-Host "Mode:      $sessionMode"
 Write-Host "Blender:   $BlenderExecutable"
 Write-Host "Add-on:    $addonSource"
 Write-Host "Test data: $testRoot"
@@ -69,13 +100,19 @@ Write-Host "Close Blender to return to this console." -ForegroundColor DarkGray
 $blenderExitCode = 0
 try {
     $env:BLENDER_USER_SCRIPTS = $scriptsRoot
-    $env:BLENDER_USER_CONFIG = $configRoot
-    $env:BLENDER_USER_DATAFILES = $datafilesRoot
+    if (-not $UseCurrentProfile) {
+        $env:BLENDER_USER_CONFIG = $configRoot
+        $env:BLENDER_USER_DATAFILES = $datafilesRoot
+    }
 
-    $enableAddon = "import addon_utils; addon_utils.enable('coa_tools2', default_set=True, persistent=True)"
-    & $BlenderExecutable `
-        --factory-startup `
-        --python-expr $enableAddon
+    $enableAddon = "import addon_utils; addon_utils.disable('coa_tools2', default_set=False); module = addon_utils.enable('coa_tools2', default_set=False, persistent=True); print('COA Tools 2 test source:', module.__file__ if module else 'LOAD FAILED')"
+    $blenderArguments = @()
+    if (-not $UseCurrentProfile) {
+        $blenderArguments += "--factory-startup"
+    }
+    $blenderArguments += @("--python-expr", $enableAddon)
+
+    & $BlenderExecutable @blenderArguments
     $blenderExitCode = $LASTEXITCODE
 }
 finally {
