@@ -4,6 +4,7 @@
 
 - [COA Tools 2 dev document (overview)](#coa-tools-2-dev-document-overview)
   - [Table of Contents](#table-of-contents)
+  - [Design Documents](#design-documents)
   - [Directory Structure](#directory-structure)
   - [Blender Addon (`/coa_tools2`)](#blender-addon-coa_tools2)
     - [Core Functionality](#core-functionality)
@@ -19,6 +20,11 @@
     - [Sample Project (`/samples/stip.blend`)](#sample-project-samplesstipblend)
     - [Sample Sprites (`/samples/sprites/`)](#sample-sprites-samplessprites)
     - [Sample JSON (`/samples/stip.json`)](#sample-json-samplesstipjson)
+
+## Design Documents
+
+- [2D Rig Controller Research and Design](rig_control_design.md): Comparison of 2D rigging systems and a staged design proposal for Geometry Nodes widgets, custom-shape controls, drivers, and StateData integration.
+- [Rig Control / Rig Graph Integrated Implementation Plan](rig_control_graph_implementation_plan.md): Reconciles the direct controller design with the declarative Rig Graph proposals, including circle/bar widget composition, arbitrary-size 2D state matrices, implementation gates, and a vertical-slice roadmap.
 
 ## Directory Structure
 
