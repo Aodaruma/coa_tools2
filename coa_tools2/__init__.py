@@ -82,6 +82,9 @@ from .operators import export_json
 
 from .operators.exporter import export_dragonbones
 from .operators.exporter import export_creature
+from .rig_control.blender import operators as rig_control_operators
+from .rig_control.blender import properties as rig_control_properties
+from .rig_control.blender import ui as rig_control_ui
 
 # register
 ##################################
@@ -218,6 +221,8 @@ classes = (
     props.Event,
     props.TimelineEvent,
     props.AnimationCollections,
+    rig_control_properties.COATOOLS2_PG_RigBinding,
+    rig_control_properties.COATOOLS2_PG_RigControl,
     props.ObjectProperties,
     props.SceneProperties,
     props.MeshProperties,
@@ -293,6 +298,10 @@ classes = (
     convert_from_old.COATOOLS2_OT_ConvertOldVersionCoatools,
     change_alpha_mode.COATOOLS2_OT_ChangeAlphaMode,
     change_alpha_mode.COATOOLS2_OT_ChangeTextureInterpolationMode,
+    # rig controls
+    rig_control_operators.COATOOLS2_OT_AddRigControl,
+    rig_control_ui.COATOOLS2_UL_RigControls,
+    rig_control_ui.COATOOLS2_PT_RigControls,
     # exporter
     export_dragonbones.COATOOLS2_OT_DragonBonesExport,
     export_dragonbones.COATOOLS2_PT_ExportPanel,

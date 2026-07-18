@@ -288,6 +288,8 @@ def sync_evaluated_mesh_cache(
         ),
         None,
     )
+    was_hidden = source.hide_get()
+    source.hide_set(False)
     depsgraph = bpy.context.evaluated_depsgraph_get()
     bpy.context.view_layer.update()
     evaluated = source.evaluated_get(depsgraph)
@@ -296,6 +298,7 @@ def sync_evaluated_mesh_cache(
         preserve_all_data_layers=False,
         depsgraph=depsgraph,
     )
+    source.hide_set(was_hidden)
     mesh.name = f"{name or spec.layout.value}_WidgetMesh"
 
     if cache is None:
@@ -320,5 +323,9 @@ def ensure_widget(
 ):
     source = ensure_widget_source(spec, name=name)
     if backend == WidgetBackend.LIVE_MODIFIER:
+        source.hide_set(True)
         return source
-    return sync_evaluated_mesh_cache(source, spec, name=name)
+    cache = sync_evaluated_mesh_cache(source, spec, name=name)
+    source.hide_set(True)
+    cache.hide_set(True)
+    return cache

@@ -3,6 +3,7 @@ from bpy.props import BoolProperty, FloatVectorProperty, IntProperty, FloatPrope
 # from . functions import *
 from . import functions
 from . import outliner
+from .rig_control.blender import properties as rig_control_properties
 
 def hide_bone(self, context):
     self.hide = self.hide
@@ -445,6 +446,9 @@ class ObjectProperties(bpy.types.PropertyGroup):
             pass
 
     anim_collections: bpy.props.CollectionProperty(type=AnimationCollections)
+    rig_instance_id: StringProperty()
+    rig_controls: CollectionProperty(type=rig_control_properties.COATOOLS2_PG_RigControl)
+    rig_controls_index: IntProperty(default=0, min=0)
     uv_default_state: bpy.props.CollectionProperty(type=UVData)
     slot: bpy.props.CollectionProperty(type=SlotData)
     blend_mode: bpy.props.EnumProperty(name="Blend Mode", description="Defines the blend mode of a sprite", items=(
