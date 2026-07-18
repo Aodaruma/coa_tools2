@@ -323,6 +323,7 @@ WidgetはControlの値やBindingから独立したPresentation定義として保
 | `tip_radius` | 操作Tipの円半径 |
 | `node_radius` | 端点・状態点の円半径 |
 | `bar_width` | 矩形バーの太さ |
+| `stroke_radius` | 円・矩形輪郭をMesh化する線半径 |
 | `columns` / `rows` | Matrixの列数・行数 |
 | `orientation` | Horizontal、Vertical、任意角度 |
 | `arc_start` / `arc_end` | Dial/Arc表示範囲 |

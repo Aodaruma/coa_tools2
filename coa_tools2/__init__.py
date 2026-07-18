@@ -23,7 +23,7 @@ bl_info = {
     "description": "This Addon provides a Toolset for a 2D Animation Workflow.",
     "author": "Aodaruma",
     "version": (2, 2, 1),
-    "blender": (5, 0, 0),
+    "blender": (4, 2, 0),
     "location": "View 3D > Tools > Cutout Animation Tools",
     "warning": "",
     "wiki_url": "https://github.com/aodaruma/coa_tools2/wiki",
@@ -464,7 +464,7 @@ def register():
         info = {
             "name": "COA Tools2",
             "version": (2, 2, 1),
-            "blender": (5, 0, 0),
+            "blender": (4, 2, 0),
         }
     addon_updater_ops.register(info)
 

@@ -291,6 +291,7 @@ class WidgetSpec:
     tip_radius: float
     node_radius: float
     bar_width: float
+    stroke_radius: float
     columns: int
     rows: int
     orientation: float
