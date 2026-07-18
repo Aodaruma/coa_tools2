@@ -17,7 +17,7 @@ class RigCompileError(RuntimeError):
     pass
 
 
-def compile_control(armature, control, origin=(0.0, 0.0, 0.0)):
+def compile_control(armature, control, origin=None):
     if armature is None or armature.type != "ARMATURE":
         raise RigCompileError("Rig controls require an Armature SpriteObject.")
     if control.control_type != "SLIDER_1D":
@@ -25,10 +25,12 @@ def compile_control(armature, control, origin=(0.0, 0.0, 0.0)):
             f"Phase 1 only supports SLIDER_1D, got {control.control_type}."
         )
     ensure_rig_instance_id(armature)
+    origin = Vector(control.origin if origin is None else origin)
+    control.origin = origin
     display_pose, control_pose = ensure_control_bones(
         armature,
         control,
-        Vector(origin),
+        origin,
     )
     ensure_limit_location(control_pose, control)
     ensure_control_widgets(display_pose, control_pose, control)

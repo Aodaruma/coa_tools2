@@ -8,6 +8,7 @@ from bpy.props import (
     CollectionProperty,
     EnumProperty,
     FloatProperty,
+    FloatVectorProperty,
     IntProperty,
     PointerProperty,
     StringProperty,
@@ -53,6 +54,20 @@ class COATOOLS2_PG_RigBinding(bpy.types.PropertyGroup):
     output_max: FloatProperty(default=1.0)
     clamp: BoolProperty(default=True)
     enabled: BoolProperty(default=True)
+
+
+class COATOOLS2_PG_RigValidationIssue(bpy.types.PropertyGroup):
+    severity: EnumProperty(
+        items=(
+            ("ERROR", "Error", "Rig error"),
+            ("WARNING", "Warning", "Rig warning"),
+        ),
+        default="ERROR",
+    )
+    code: StringProperty()
+    message: StringProperty()
+    control_uuid: StringProperty()
+    binding_uuid: StringProperty()
 
 
 class COATOOLS2_PG_RigControl(bpy.types.PropertyGroup):
@@ -113,10 +128,12 @@ class COATOOLS2_PG_RigControl(bpy.types.PropertyGroup):
     )
     bindings: CollectionProperty(type=COATOOLS2_PG_RigBinding)
     bindings_index: IntProperty(default=0, min=0)
+    origin: FloatVectorProperty(size=3, subtype="XYZ")
     needs_rebuild: BoolProperty(default=False)
 
 
 CLASSES = (
     COATOOLS2_PG_RigBinding,
+    COATOOLS2_PG_RigValidationIssue,
     COATOOLS2_PG_RigControl,
 )

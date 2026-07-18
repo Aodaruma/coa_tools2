@@ -22,6 +22,7 @@ from rig_control.validation import (  # noqa: E402
     validate_control_spec,
     validate_widget_spec,
 )
+from rig_control.planning import ArtifactAction, plan_artifact  # noqa: E402
 
 
 class RigControlSchemaTests(unittest.TestCase):
@@ -93,6 +94,24 @@ class RigControlSchemaTests(unittest.TestCase):
     def test_duplicate_ids_are_sorted_and_unique(self):
         issues = find_duplicate_ids(["b", "a", "b", "a", "a"], "control")
         self.assertEqual(["a", "b"], [issue.subject_id for issue in issues])
+
+    def test_artifact_plan_distinguishes_create_update_keep_and_conflict(self):
+        self.assertEqual(
+            ArtifactAction.CREATE,
+            plan_artifact("bone", "a", exists=False, owned=False, matches=False).action,
+        )
+        self.assertEqual(
+            ArtifactAction.CONFLICT,
+            plan_artifact("bone", "a", exists=True, owned=False, matches=False).action,
+        )
+        self.assertEqual(
+            ArtifactAction.KEEP,
+            plan_artifact("bone", "a", exists=True, owned=True, matches=True).action,
+        )
+        self.assertEqual(
+            ArtifactAction.UPDATE_OWNED,
+            plan_artifact("bone", "a", exists=True, owned=True, matches=False).action,
+        )
 
 
 if __name__ == "__main__":

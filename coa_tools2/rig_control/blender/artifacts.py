@@ -69,20 +69,16 @@ def ensure_control_bones(
     origin = Vector(origin)
     existing_display = find_bone_by_role(armature, control.control_uuid, "display_bone")
     existing_control = find_bone_by_role(armature, control.control_uuid, "control_bone")
-    if existing_display is not None and existing_control is not None:
-        control.display_bone = existing_display.name
-        control.control_bone = existing_control.name
-        return armature.pose.bones[existing_display.name], armature.pose.bones[
-            existing_control.name
-        ]
+    existing_display_name = existing_display.name if existing_display else ""
+    existing_control_name = existing_control.name if existing_control else ""
 
     _switch_to_edit_mode(armature)
     _ensure_global_bone(armature)
     global_bone = armature.data.edit_bones[GLOBAL_CONTROL_BONE]
 
     slug = slugify(control.semantic_id or control.label)
-    display_name = control.display_bone or f"DISP_{slug}"
-    control_name = control.control_bone or f"CTRL_{slug}"
+    display_name = existing_display_name or control.display_bone or f"DISP_{slug}"
+    control_name = existing_control_name or control.control_bone or f"CTRL_{slug}"
 
     display = armature.data.edit_bones.get(display_name)
     if display is None:
@@ -150,8 +146,12 @@ def ensure_control_bones(
     return display_pose, control_pose
 
 
+def limit_location_name(control_uuid: str) -> str:
+    return f"COA_{control_uuid[:8]}_LimitLocation"
+
+
 def ensure_limit_location(control_pose, control):
-    constraint_name = f"COA_{control.control_uuid[:8]}_LimitLocation"
+    constraint_name = limit_location_name(control.control_uuid)
     constraint = control_pose.constraints.get(constraint_name)
     if constraint is None:
         constraint = control_pose.constraints.new("LIMIT_LOCATION")

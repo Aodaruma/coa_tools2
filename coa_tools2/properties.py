@@ -449,6 +449,10 @@ class ObjectProperties(bpy.types.PropertyGroup):
     rig_instance_id: StringProperty()
     rig_controls: CollectionProperty(type=rig_control_properties.COATOOLS2_PG_RigControl)
     rig_controls_index: IntProperty(default=0, min=0)
+    rig_validation_issues: CollectionProperty(
+        type=rig_control_properties.COATOOLS2_PG_RigValidationIssue
+    )
+    rig_validation_issues_index: IntProperty(default=0, min=0)
     uv_default_state: bpy.props.CollectionProperty(type=UVData)
     slot: bpy.props.CollectionProperty(type=SlotData)
     blend_mode: bpy.props.EnumProperty(name="Blend Mode", description="Defines the blend mode of a sprite", items=(

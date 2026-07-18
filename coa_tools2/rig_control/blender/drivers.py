@@ -9,7 +9,7 @@ class BindingConflictError(RuntimeError):
     pass
 
 
-def _find_driver(id_data, data_path: str):
+def find_driver(id_data, data_path: str):
     animation_data = getattr(id_data, "animation_data", None)
     if animation_data is None:
         return None
@@ -19,7 +19,7 @@ def _find_driver(id_data, data_path: str):
     )
 
 
-def _driver_uses_control(fcurve, armature, control_bone: str) -> bool:
+def driver_uses_control(fcurve, armature, control_bone: str) -> bool:
     for variable in fcurve.driver.variables:
         if variable.type != "TRANSFORMS":
             continue
@@ -50,8 +50,8 @@ def ensure_shape_key_driver(armature, control, binding):
 
     key_block = shape_keys.key_blocks[binding.target_name]
     data_path = key_block.path_from_id("value")
-    existing = _find_driver(shape_keys, data_path)
-    if existing is not None and not _driver_uses_control(
+    existing = find_driver(shape_keys, data_path)
+    if existing is not None and not driver_uses_control(
         existing,
         armature,
         control.control_bone,
@@ -79,9 +79,93 @@ def ensure_shape_key_driver(armature, control, binding):
     return fcurve
 
 
+def ensure_constraint_driver(armature, control, binding):
+    target_object = binding.target_object
+    if target_object is None or target_object.type != "ARMATURE":
+        raise ValueError("Constraint binding target must be an Armature object.")
+    pose_bone = target_object.pose.bones.get(binding.target_bone)
+    if pose_bone is None:
+        raise ValueError(f"Target pose bone not found: {binding.target_bone}")
+    constraint = pose_bone.constraints.get(binding.target_name)
+    if constraint is None:
+        raise ValueError(f"Target constraint not found: {binding.target_name}")
+
+    data_path = constraint.path_from_id("influence")
+    existing = find_driver(target_object, data_path)
+    if existing is not None and not driver_uses_control(
+        existing,
+        armature,
+        control.control_bone,
+    ):
+        raise BindingConflictError(
+            f"Target already has an unmanaged driver: {target_object.name} / "
+            f"{binding.target_bone} / {binding.target_name}"
+        )
+
+    fcurve = constraint.driver_add("influence")
+    binding.generated_data_path = data_path
+    driver = fcurve.driver
+    driver.type = "SCRIPTED"
+    while driver.variables:
+        driver.variables.remove(driver.variables[0])
+    variable = driver.variables.new()
+    variable.name = "control"
+    variable.type = "TRANSFORMS"
+    target = variable.targets[0]
+    target.id = armature
+    target.bone_target = control.control_bone
+    target.transform_type = "LOC_Y" if binding.source_component == "Y" else "LOC_X"
+    target.transform_space = "LOCAL_SPACE"
+    driver.expression = _mapping_expression(binding)
+    return fcurve
+
+
 def ensure_binding_driver(armature, control, binding):
     if not binding.enabled:
         return None
     if binding.target_kind == "SHAPE_KEY_VALUE":
         return ensure_shape_key_driver(armature, control, binding)
+    if binding.target_kind == "CONSTRAINT_INFLUENCE":
+        return ensure_constraint_driver(armature, control, binding)
     raise ValueError(f"Unsupported binding target: {binding.target_kind}")
+
+
+def binding_target_key(binding) -> tuple[str, str, str, str]:
+    object_name = binding.target_object.name if binding.target_object else ""
+    return (
+        binding.target_kind,
+        object_name,
+        binding.target_bone,
+        binding.target_name,
+    )
+
+
+def remove_binding_driver(armature, control, binding) -> bool:
+    target_object = binding.target_object
+    if target_object is None:
+        return False
+    if binding.target_kind == "SHAPE_KEY_VALUE":
+        shape_keys = getattr(target_object.data, "shape_keys", None)
+        if shape_keys is None or binding.target_name not in shape_keys.key_blocks:
+            return False
+        key_block = shape_keys.key_blocks[binding.target_name]
+        fcurve = find_driver(shape_keys, key_block.path_from_id("value"))
+        if fcurve is None or not driver_uses_control(
+            fcurve, armature, control.control_bone
+        ):
+            return False
+        key_block.driver_remove("value")
+        return True
+    if binding.target_kind == "CONSTRAINT_INFLUENCE":
+        pose_bone = target_object.pose.bones.get(binding.target_bone)
+        constraint = pose_bone.constraints.get(binding.target_name) if pose_bone else None
+        if constraint is None:
+            return False
+        fcurve = find_driver(target_object, constraint.path_from_id("influence"))
+        if fcurve is None or not driver_uses_control(
+            fcurve, armature, control.control_bone
+        ):
+            return False
+        constraint.driver_remove("influence")
+        return True
+    return False

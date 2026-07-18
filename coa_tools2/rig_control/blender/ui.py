@@ -22,6 +22,23 @@ class COATOOLS2_UL_RigControls(bpy.types.UIList):
         layout.label(text=item.label, icon="BONE_DATA")
 
 
+class COATOOLS2_UL_RigBindings(bpy.types.UIList):
+    def draw_item(
+        self,
+        _context,
+        layout,
+        _data,
+        item,
+        _icon,
+        _active_data,
+        _active_propname,
+        _index,
+    ):
+        target = item.target_object.name if item.target_object else "Missing"
+        suffix = item.target_name or "Missing"
+        layout.label(text=f"{target} / {suffix}", icon="DRIVER")
+
+
 class COATOOLS2_PT_RigControls(bpy.types.Panel):
     bl_idname = "COATOOLS2_PT_rig_controls"
     bl_label = "Rig Controls"
@@ -37,8 +54,10 @@ class COATOOLS2_PT_RigControls(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         armature = functions.get_sprite_object(context.active_object)
-        row = layout.row()
+        row = layout.row(align=True)
         row.operator("coa_tools2.add_rig_control", icon="ADD")
+        row.operator("coa_tools2.validate_rig", text="", icon="CHECKMARK")
+        row.operator("coa_tools2.repair_rig", text="", icon="FILE_REFRESH")
 
         controls = armature.coa_tools2.rig_controls
         if not controls:
@@ -61,15 +80,37 @@ class COATOOLS2_PT_RigControls(bpy.types.Panel):
         box.prop(control, "axis")
         box.prop(control, "width")
         box.label(text=f"Control Bone: {control.control_bone}")
-        if control.bindings:
-            binding = control.bindings[0]
-            target = binding.target_object.name if binding.target_object else "Missing"
-            box.label(text=f"Target: {target} / {binding.target_name}")
+        box.operator("coa_tools2.update_rig_control", icon="FILE_REFRESH")
         if control.needs_rebuild:
             box.label(text="Definition changed; rebuild required.", icon="ERROR")
+
+        bindings_box = layout.box()
+        bindings_box.label(text="Bindings")
+        row = bindings_box.row()
+        row.template_list(
+            "COATOOLS2_UL_RigBindings",
+            "",
+            control,
+            "bindings",
+            control,
+            "bindings_index",
+            rows=min(5, max(2, len(control.bindings))),
+        )
+        column = row.column(align=True)
+        column.operator("coa_tools2.add_rig_binding", text="", icon="ADD")
+        column.operator("coa_tools2.remove_rig_binding", text="", icon="REMOVE")
+
+        issues = armature.coa_tools2.rig_validation_issues
+        if issues:
+            issue_box = layout.box()
+            issue_box.label(text=f"Validation Issues ({len(issues)})", icon="ERROR")
+            for issue in issues[:6]:
+                icon = "ERROR" if issue.severity == "ERROR" else "INFO"
+                issue_box.label(text=issue.message, icon=icon)
 
 
 CLASSES = (
     COATOOLS2_UL_RigControls,
+    COATOOLS2_UL_RigBindings,
     COATOOLS2_PT_RigControls,
 )
