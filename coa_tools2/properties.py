@@ -342,10 +342,10 @@ class SlotData(bpy.types.PropertyGroup):
     def change_slot_mesh(self, context):
         obj = self.id_data
 
-        if getattr(self, "_lock_active_update", False):
+        if self.get("_lock_active_update", False):
             return
 
-        object.__setattr__(self, "_lock_active_update", True)
+        self["_lock_active_update"] = True
         try:
             if not self.active:
                 self.active = True
@@ -354,13 +354,13 @@ class SlotData(bpy.types.PropertyGroup):
             functions.hide_base_sprite(obj)
             for slot in obj.coa_tools2.slot:
                 if slot != self and slot.active:
-                    object.__setattr__(slot, "_lock_active_update", True)
+                    slot["_lock_active_update"] = True
                     try:
                         slot.active = False
                     finally:
-                        object.__setattr__(slot, "_lock_active_update", False)
+                        slot["_lock_active_update"] = False
         finally:
-            object.__setattr__(self, "_lock_active_update", False)
+            self["_lock_active_update"] = False
 
     mesh: bpy.props.PointerProperty(type=bpy.types.Mesh)
     offset: FloatVectorProperty()

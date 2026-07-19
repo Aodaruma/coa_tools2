@@ -848,3 +848,77 @@ class COATOOLS2_OT_RemoveTimelineEvent(bpy.types.Operator):
 
         anim.timeline_events.remove(index)
         return {"FINISHED"}
+
+
+class COATOOLS2_OT_RenameSpriteObject(bpy.types.Operator):
+    bl_idname = "coa_tools2.rename_sprite_object"
+    bl_label = "Rename Sprite Object"
+    bl_description = "Rename the Sprite Object and update all associated animation action names to match"
+    bl_options = {"REGISTER"}
+
+    new_name: StringProperty(
+        name="Name",
+        description="New name for the Sprite Object",
+    )
+
+    @classmethod
+    def poll(cls, context):
+        sprite_object = get_sprite_object(context.active_object)
+        return sprite_object is not None
+
+    def invoke(self, context, event):
+        sprite_object = get_sprite_object(context.active_object)
+        self.new_name = sprite_object.name
+        wm = context.window_manager
+        return wm.invoke_props_dialog(self)
+
+    def draw(self, context):
+        layout = self.layout
+        layout.prop(self, "new_name")
+
+    def execute(self, context):
+        sprite_object = get_sprite_object(context.active_object)
+        if sprite_object is None:
+            self.report({"WARNING"}, "No Sprite Object found")
+            return {"CANCELLED"}
+
+        old_name = sprite_object.name
+        new_name = self.new_name.strip()
+
+        if new_name == "":
+            self.report({"WARNING"}, "Name cannot be empty")
+            return {"CANCELLED"}
+
+        if old_name == new_name:
+            return {"CANCELLED"}
+
+        # Collect objects that could have actions referencing their names.
+        # Action naming convention: {anim_collection.name}_{object_name}
+        children = get_children(context, sprite_object, ob_list=[])
+        anim_objects = []
+        if sprite_object.type == "ARMATURE":
+            anim_objects.append(sprite_object)
+        for child in children:
+            anim_objects.append(child)
+
+        # Rename actions for each animation collection
+        for item in sprite_object.coa_tools2.anim_collections:
+            for obj in anim_objects:
+                if obj.name == old_name:
+                    old_action_name = item.name + "_" + old_name
+                    new_action_name = item.name + "_" + new_name
+                    if old_action_name in bpy.data.actions and new_action_name not in bpy.data.actions:
+                        bpy.data.actions[old_action_name].name = new_action_name
+
+        # Rename objects that match the old name (sprite_object, and any children)
+        sprite_object.name = new_name
+        renamed_name = sprite_object.name  # Blender may have adjusted the name
+        for child in children:
+            if child.name == old_name:
+                child.name = renamed_name
+
+        self.report(
+            {"INFO"},
+            "Sprite Object renamed to '" + sprite_object.name + "' with animations updated",
+        )
+        return {"FINISHED"}

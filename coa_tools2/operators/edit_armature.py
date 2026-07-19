@@ -586,21 +586,23 @@ class COATOOLS2_OT_QuickArmature(bpy.types.Operator):
 
         bpy.context.window.cursor_set("CROSSHAIR")
 
-        if context.active_object.type == "ARMATURE":
+        armature_obj = self.armature
+        if armature_obj and armature_obj.type == "ARMATURE":
+            context.view_layer.objects.active = armature_obj
             bpy.ops.object.mode_set(mode="POSE")
 
             if functions.b_version_smaller_than((4, 0, 0)):
-                for pose_bone in context.active_object.pose.bones:
+                for pose_bone in armature_obj.pose.bones:
                     if (
-                        "default_bones" in context.active_object.pose.bone_groups
+                        "default_bones" in armature_obj.pose.bone_groups
                         and pose_bone.bone_group == None
                     ):
-                        pose_bone.bone_group = context.active_object.pose.bone_groups[
+                        pose_bone.bone_group = armature_obj.pose.bone_groups[
                             "default_bones"
                         ]
             else:
-                for bone in context.active_object.data.bones:
-                    armature: bpy.types.Armature = context.active_object.data
+                for bone in armature_obj.data.bones:
+                    armature: bpy.types.Armature = armature_obj.data
                     if (
                         "default_bones" in [c.name for c in armature.collections]
                         and bone.collections == None
