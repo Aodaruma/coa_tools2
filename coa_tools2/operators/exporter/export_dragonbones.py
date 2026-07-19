@@ -363,6 +363,11 @@ def get_bone_with_most_influence(self, sprite):
             if total_weight > max_weight:
                 max_weight = float(total_weight)
                 bone = self.armature.data.bones[v_group.name]
+
+    ### fallback: check if sprite is directly parented to a bone (parent_bone)
+    if bone is None and sprite.parent_bone in self.armature.data.bones:
+        bone = self.armature.data.bones[sprite.parent_bone]
+
     return bone
 
 
@@ -373,8 +378,21 @@ def get_slot_data(self, sprites):
         if sprite.type == "MESH":
             slot = OrderedDict()
             slot["name"] = sprite.name
-            if len(sprite.data.vertices) != 4:
-                slot["parent"] = self.sprite_object.name  # sprite.parent.name
+            ### Count effective vertices excluding coa_base_sprite.
+            ### Image sprites (4-vertex after base removal) need bone parent for correct animation.
+            n_verts = len(sprite.data.vertices)
+            if "coa_base_sprite" in sprite.vertex_groups:
+                base_vg_idx = sprite.vertex_groups["coa_base_sprite"].index
+                base_count = 0
+                for vert in sprite.data.vertices:
+                    for g in vert.groups:
+                        if g.group == base_vg_idx:
+                            base_count += 1
+                            break
+                n_verts -= base_count
+
+            if n_verts != 4:
+                slot["parent"] = self.sprite_object.name
             else:
                 bone_parent = get_bone_with_most_influence(self, sprite)
                 if bone_parent != None:
@@ -484,10 +502,11 @@ def delete_non_deform_bones(self, armature, sprites):
         has_children = len(bone.children) > 0
 
         if (
-            (not is_deform_bone and is_driver)
-            or (not is_deform_bone and is_const_target)
-            or (not is_deform_bone and not has_children)
-            or (not is_deform_bone and not bone.use_deform)
+            not is_deform_bone
+            and not is_driver
+            and not is_const_target
+            and not has_children
+            and not bone.use_deform
         ):
             armature.data.edit_bones.remove(armature.data.edit_bones[bone.name])
 
@@ -593,6 +612,14 @@ def get_skin_slot(self, sprite, armature, scale, slot_data=None):
         sprite_data = slot_data.copy()
     sprite = sprite.copy()
     sprite.data = sprite_data
+
+    ### Prevent depsgraph_update_post handler (update_properties) from resetting
+    ### mesh data on SLOT-type duplicates (it would set obj.data = slot[slot_index].mesh,
+    ### discarding the per-slot mesh we assigned above).
+    original_coa_type = sprite.coa_tools2.type
+    if original_coa_type == "SLOT":
+        sprite.coa_tools2.type = "MESH"
+
     context.collection.objects.link(sprite)
     context.view_layer.objects.active = sprite
 
@@ -642,11 +669,17 @@ def get_skin_slot(self, sprite, armature, scale, slot_data=None):
             display_data["width"] = int(img.size[0])
             display_data["height"] = int(img.size[1])
         elif self.scene.coa_tools2.export_image_mode == "ATLAS":
-            display_data["width"] = atlas_data[sprite_data_name]["width"]
-            display_data["height"] = atlas_data[sprite_data_name]["height"]
+            if sprite_data_name not in atlas_data:
+                print(f"COA DEBUG: '{sprite_data_name}' not in atlas_data. Keys: {list(atlas_data.keys())}")
+                # Fallback to image size if atlas data is missing
+                display_data["width"] = int(img.size[0]) if img is not None else 0
+                display_data["height"] = int(img.size[1]) if img is not None else 0
+            else:
+                display_data["width"] = atlas_data[sprite_data_name]["width"]
+                display_data["height"] = atlas_data[sprite_data_name]["height"]
 
         verts = get_mixed_vertex_data(sprite)
-        vert_coords_default[sprite_name] = verts
+        vert_coords_default[sprite_data_name] = verts
         display_data["vertices"] = convert_vertex_data_to_pixel_space(verts)
 
         bm = bmesh.from_edit_mesh(sprite.data)
@@ -710,7 +743,7 @@ def get_skin_slot(self, sprite, armature, scale, slot_data=None):
             if angle != 0:
                 display_data["transform"]["skX"] = -round(angle, 2)
                 display_data["transform"]["skY"] = -round(angle, 2)
-            if atlas_data[sprite_data_name]["output_scale"] != 1.0:
+            if sprite_data_name in atlas_data and atlas_data[sprite_data_name]["output_scale"] != 1.0:
                 display_data["transform"]["scX"] = round(
                     1.0 / atlas_data[sprite_data_name]["output_scale"], 2
                 )
@@ -741,10 +774,13 @@ def get_skin_data(self, sprites, armature, scale):
 
         if sprite.type == "MESH":
             if sprite.coa_tools2.type == "MESH":
+                print(f"COA DEBUG: skin MESH sprite='{sprite.name}' data.name='{sprite.data.name}'")
                 data2 = get_skin_slot(self, sprite, armature, scale)
                 slot_data["display"].append(data2)
             elif sprite.coa_tools2.type == "SLOT":
                 for slot in sprite.coa_tools2.slot:
+                    mesh_name = slot.mesh.name if slot.mesh else "None"
+                    print(f"COA DEBUG: skin SLOT sprite='{sprite.name}' slot.mesh.name='{mesh_name}'")
                     data2 = get_skin_slot(
                         self, sprite, armature, scale, slot_data=slot.mesh
                     )
@@ -874,15 +910,27 @@ def get_bone_data(self, armature, sprite_object, scale):
             data["transform"]["scX"] = round(sca[0], 2)
             data["transform"]["scY"] = round(sca[1], 2)
 
-        if int(bone.use_inherit_rotation) != 1 or bone_uses_constraints[pbone.name]:
+        # Bone.inherit_rotation/inherit_scale API changed in Blender 4.3:
+        # use_inherit_rotation (bool) → inherit_rotation (enum)
+        # use_inherit_scale (bool)    → inherit_scale (enum)
+        try:
+            inherit_rotation = int(bone.use_inherit_rotation)
+        except AttributeError:
+            inherit_rotation = 0 if bone.inherit_rotation in (0, 'FULL') else 1
+        try:
+            inherit_scale = int(bone.use_inherit_scale)
+        except AttributeError:
+            inherit_scale = 0 if bone.inherit_scale in (0, 'FULL') else 1
+
+        if inherit_rotation != 1 or bone_uses_constraints[pbone.name]:
             data["inheritRotation"] = (
-                int(bone.use_inherit_rotation)
+                inherit_rotation
                 if not bone_uses_constraints[pbone.name]
                 else 0
             )
-        if int(bone.use_inherit_scale) != 1 or bone_uses_constraints[pbone.name]:
+        if inherit_scale != 1 or bone_uses_constraints[pbone.name]:
             data["inheritScale"] = (
-                int(bone.use_inherit_scale)
+                inherit_scale
                 if not bone_uses_constraints[pbone.name]
                 else 0
             )
@@ -963,7 +1011,7 @@ def bone_key_on_frame(
                 for strip in layer.strips:
                     for slot in action.slots:
                         for fcurve in strip.channelbag(slot).fcurves:
-                            if slot.name in fcurve.data_path and (
+                            if (getattr(slot, 'name', str(slot)) in fcurve.data_path) and (
                                 type in fcurve.data_path or type == ".any"
                             ):
                                 for keyframe in fcurve.keyframe_points:
@@ -1146,7 +1194,6 @@ def get_animation_data(self, sprite_object, armature, armature_orig):
             SHAPEKEY_ANIMATION = {}
             for i in range(anim.frame_end + 1):
                 frame = anim.frame_end - i
-                slot_data = None
                 for slot in self.sprites:
                     if slot.type == "MESH":
                         slot_data = []
@@ -1155,20 +1202,20 @@ def get_animation_data(self, sprite_object, armature, armature_orig):
                         elif slot.coa_tools2.type == "SLOT":
                             for slot2 in slot.coa_tools2.slot:
                                 slot_data.append(tmp_slots_data[slot2.mesh.name])
-                if slot_data != None:
-                    for item in slot_data:
-                        data = item["data"]
-                        data_name = item["name"]
 
-                        key_blocks = []
-                        if data.shape_keys != None:
-                            for key in data.shape_keys.key_blocks:
-                                key_blocks.append(key.name)
-                        if property_key_on_frame(
-                            data, key_blocks, frame, type="SHAPEKEY"
-                        ):
-                            SHAPEKEY_ANIMATION[slot.name] = True
-                            break
+                        for item in slot_data:
+                            data = item["data"]
+                            data_name = item["name"]
+
+                            key_blocks = []
+                            if data.shape_keys != None:
+                                for key in data.shape_keys.key_blocks:
+                                    key_blocks.append(key.name)
+                            if property_key_on_frame(
+                                data, key_blocks, frame, type="SHAPEKEY"
+                            ):
+                                SHAPEKEY_ANIMATION[slot.name] = True
+                                break
 
             ### append all bones to list
             bone_keyframe_duration = {}
@@ -1544,7 +1591,7 @@ def get_animation_data(self, sprite_object, armature, armature_orig):
                                     data, key_blocks, frame, type="SHAPEKEY"
                                 ) or (
                                     frame in [0, anim.frame_end]
-                                    and data_name in SHAPEKEY_ANIMATION
+                                    and slot.name in SHAPEKEY_ANIMATION
                                 ):  # or bake_anim:
                                     ffd_data = {}
                                     ffd_data["duration"] = ffd_keyframe_duration[
@@ -1565,7 +1612,7 @@ def get_animation_data(self, sprite_object, armature, armature_orig):
                                     for i, co in enumerate(verts):
                                         verts_relative.append(
                                             Vector(co)
-                                            - Vector(vert_coords_default[slot.name][i])
+                                            - Vector(vert_coords_default[data_name][i])
                                         )
 
                                     ffd_data["vertices"] = (
@@ -1700,6 +1747,9 @@ class COATOOLS2_OT_DragonBonesExport(bpy.types.Operator):
 
         self.get_init_state(context)
         self.scene = context.scene
+
+        ### Switch to NO ACTION to ensure clean initial state for export data
+        self.sprite_object.coa_tools2.anim_collections_index = 0
 
         ### set animation mode to action
         coa_nla_mode = str(self.scene.coa_tools2.nla_mode)
@@ -1909,13 +1959,29 @@ def generate_texture_atlas(
                     slots.append({"sprite": sprite, "slot": slot.mesh})
 
     ### loop over all slots and create an object with slot assigned
+    ### Vertex groups are NOT created here — deferred to after the loop to avoid
+    ### the depsgraph_update_post handler (update_properties) from interfering.
+    ### That handler checks for SLOT-type objects and calls change_slot_mesh_data,
+    ### which can reset the object's mesh data and undo vertex group operations.
+    pending_vg = []
     for slot in slots:
+        slot_name = slot["slot"].name if slot["slot"] else "None"
+        print(f"COA DEBUG: atlas slot sprite='{slot['sprite'].name}' slot.name='{slot_name}'")
         dupli_sprite = slot["sprite"].copy()
         dupli_sprite.data = slot["slot"].copy()
         context.collection.objects.link(dupli_sprite)
         dupli_sprite.hide_set(False)
         dupli_sprite.select_set(True)
         context.view_layer.objects.active = dupli_sprite
+        ### ensure single-user data to prevent "modifier cannot be applied to multi-user data"
+        if dupli_sprite.data.users > 1:
+            dupli_sprite.data = dupli_sprite.data.copy()
+
+        ### Temporarily set coa_tools2.type to "MESH" to prevent the depsgraph_update_post
+        ### handler from interfering with SLOT-type duplicates during modifier baking.
+        original_coa_type = dupli_sprite.coa_tools2.type
+        if original_coa_type == "SLOT":
+            dupli_sprite.coa_tools2.type = "MESH"
 
         ### delete shapekeys
         if dupli_sprite.data.shape_keys != None:
@@ -1924,46 +1990,56 @@ def generate_texture_atlas(
                 shapekeys = dupli_sprite.data.shape_keys.key_blocks
                 dupli_sprite.shape_key_remove(shapekeys[len(shapekeys) - 1])
         ### apply/delete modifieres
+        ### Blender 2.80+: bake modifiers via depsgraph evaluation to avoid
+        ### "modifier cannot be applied to multi-user data" error in Blender 5.x.
+        ### The operator's multi-user check can fail even when data.users == 1 due to
+        ### context override issues in newer Blender versions.
+        mask_modifier = None
         for modifier in dupli_sprite.modifiers:
             if modifier.name == "coa_base_sprite" and modifier.type == "MASK":
                 if len(dupli_sprite.data.vertices) > 4:
                     modifier.invert_vertex_group = True
-                    with bpy.context.temp_override(
-                        object=dupli_sprite, active_object=dupli_sprite
-                    ):
-                        if b_version_smaller_than((2, 90, 0)):
-                            bpy.ops.object.modifier_apply(
-                                apply_as="DATA", modifier=modifier.name
-                            )
-                        else:
-                            bpy.ops.object.modifier_apply(modifier=modifier.name)
+                    mask_modifier = modifier
+                    break  # Found the MASK modifier with >4 vertices
+
+        if mask_modifier is not None:
+            if b_version_smaller_than((2, 80, 0)):
+                # Blender < 2.80: use operator-based approach
+                with bpy.context.temp_override(
+                    object=dupli_sprite, active_object=dupli_sprite
+                ):
+                    bpy.ops.object.modifier_apply(
+                        apply_as="DATA", modifier=mask_modifier.name
+                    )
+            else:
+                # Blender 2.80+: use depsgraph evaluation to bake modifiers,
+                # avoiding operator context dependency issues.
+                # Copy evaluated mesh data to preserve all layers (UVs, etc.)
+                depsgraph = context.evaluated_depsgraph_get()
+                obj_eval = dupli_sprite.evaluated_get(depsgraph)
+                dupli_sprite.data = obj_eval.data.copy()
         for modifier in dupli_sprite.modifiers:
             dupli_sprite.modifiers.remove(modifier)
 
-        ### delete vertex_groups
-        for group in dupli_sprite.vertex_groups:
+        ### Keep type as "MESH" to protect against handler interference later.
+        ### The vertex groups will be set after the loop, so we don't need to restore SLOT here.
+        pending_vg.append((dupli_sprite, slot["slot"].name))
+
+    ### NOW create vertex groups — after ALL depsgraph evaluations have completed,
+    ### so the depsgraph_update_post handler won't interfere.
+    for dupli_sprite, vg_name in pending_vg:
+        ### delete old vertex_groups (use list() to avoid skipping items)
+        groups_to_delete = list(dupli_sprite.vertex_groups)
+        for group in groups_to_delete:
             dupli_sprite.vertex_groups.remove(group)
 
         ### assign mesh as vertex group
-        dupli_sprite.vertex_groups.new(name=slot["slot"].name)
-        bpy.ops.object.mode_set(mode="EDIT")
-        bpy.ops.mesh.reveal()
-        bpy.ops.mesh.select_all(action="SELECT")
-        for area in context.screen.areas:
-            if area.type == "VIEW_3D":
-                for region in area.regions:
-                    if region.type == "WINDOW":
-                        with bpy.context.temp_override(
-                            area=area,
-                            edict_object=dupli_sprite,
-                            active_object=dupli_sprite,
-                            object=dupli_sprite,
-                            region=region,
-                        ):
-                            bpy.ops.object.vertex_group_assign()
-                        break
-
+        vg = dupli_sprite.vertex_groups.new(name=vg_name)
+        print(f"COA DEBUG: created vg '{vg_name}' for dupli '{dupli_sprite.name}'")
+        # Use direct API to assign all vertices (avoids bpy.ops.object.vertex_group_assign
+        # poll issues in Blender 5.0 where the active vertex group may appear locked)
         bpy.ops.object.mode_set(mode="OBJECT")
+        vg.add([v.index for v in dupli_sprite.data.vertices], 1.0, 'REPLACE')
 
     img_atlas, tex_atlas_obj, atlas = TextureAtlasGenerator.generate_uv_layout(
         name="COA_UV_ATLAS",
@@ -2039,6 +2115,13 @@ def generate_texture_atlas(
             "output_scale": atlas.output_scale,
         }
 
+    print(f"COA DEBUG: atlas_data keys after loop: {list(atlas_data.keys())}")
+    ### Debug: check vertex groups on merged object after join
+    print(f"COA DEBUG: post-join merged object:")
+    for obj in context.selected_objects:
+        if obj.type == "MESH":
+            vg_names = [vg.name for vg in obj.vertex_groups]
+            print(f"  '{obj.name}' vgs={vg_names} data.name='{obj.data.name}'")
     bpy.ops.object.mode_set(mode="OBJECT")
     ### collect sprite atlas data
     texture_atlas = {}

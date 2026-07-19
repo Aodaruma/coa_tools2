@@ -237,7 +237,14 @@ class COATOOLS2_PT_ObjectProperties(bpy.types.Panel):
             elif obj.type == "LAMP":
                 icon = "LAMP"
 
-            col.prop(obj, "name", text="", icon=icon)
+            name_row = col.row(align=True)
+            name_row.prop(obj, "name", text="", icon=icon)
+            if obj == sprite_object:
+                name_row.operator(
+                    "coa_tools2.rename_sprite_object",
+                    text="",
+                    icon="GREASEPENCIL",
+                )
             if obj.type == "MESH" and obj.coa_tools2.type == "SLOT":
                 index = functions.get_clamped_slot_index(obj)
                 if index is not None:

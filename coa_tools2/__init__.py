@@ -261,6 +261,7 @@ classes = (
     animation_handling.COATOOLS2_OT_RemoveEvent,
     animation_handling.COATOOLS2_OT_AddTimelineEvent,
     animation_handling.COATOOLS2_OT_RemoveTimelineEvent,
+    animation_handling.COATOOLS2_OT_RenameSpriteObject,
     create_ortho_cam.COATOOLS2_OT_CreateOrtpographicCamera,
     create_ortho_cam.COATOOLS2_OT_AlignCamera,
     create_spritesheet_preview.COATOOLS2_OT_SelectFrameThumb,

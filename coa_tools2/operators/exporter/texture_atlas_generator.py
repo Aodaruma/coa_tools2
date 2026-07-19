@@ -199,6 +199,12 @@ class TextureAtlasGenerator:
                                         atlas_data.width *= 2
                             elif atlas_data.height > atlas_data.width and atlas_data.width < atlas_data.max_width:
                                 atlas_data.width *= 2
+                            elif atlas_data.width > atlas_data.height and atlas_data.height < atlas_data.max_height:
+                                atlas_data.height *= 2
+                            elif atlas_data.width < atlas_data.max_width and atlas_data.height >= atlas_data.max_height:
+                                atlas_data.width *= 2
+                            elif atlas_data.height < atlas_data.max_height and atlas_data.width >= atlas_data.max_width:
+                                atlas_data.height *= 2
 
                             if atlas_data.width >= atlas_data.max_width and atlas_data.height >= atlas_data.max_height:
                                 decrease_scale = True

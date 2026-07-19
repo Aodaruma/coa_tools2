@@ -283,7 +283,7 @@ class COATOOLS2_OT_ExportToJson(bpy.types.Operator, bpy_extras.io_utils.ExportHe
         else:
             local_mat = self.get_bone_transformation(bone)
         bone_scale = local_mat.decompose()[2]
-        bone_scale_2d = [bone_scale[1], bone_scale[1]]
+        bone_scale_2d = [bone_scale[0], bone_scale[1]]
         return bone_scale_2d
 
     def get_relative_bone_pos(self, bone, type):
@@ -332,7 +332,7 @@ class COATOOLS2_OT_ExportToJson(bpy.types.Operator, bpy_extras.io_utils.ExportHe
         bone_euler_rot = local_mat.decompose()[1].to_euler()
 
         degrees = round(math.degrees(bone_euler_rot.y), 2)
-        return -math.radians(degrees)
+        return math.radians(degrees)
 
     def get_relative_mesh_pos(self, parent, obj):
         if isinstance(parent, bpy.types.Bone):
@@ -406,15 +406,73 @@ class COATOOLS2_OT_ExportToJson(bpy.types.Operator, bpy_extras.io_utils.ExportHe
 
     def sprite_to_dict(self, sprite, bone=None):
         dict_sprites = OrderedDict()
+        obj = bpy.data.objects[sprite]
+
+        # Handle Slot objects - export all slot entries as children
+        if obj.coa_tools2.type == "SLOT" and len(obj.coa_tools2.slot) > 0:
+            dict_sprites["name"] = sprite
+            dict_sprites["type"] = "SLOT"
+            dict_sprites["node_path"] = str(self.get_node_path(obj, []))
+            # Slot container uses identity transform; children carry full transforms
+            dict_sprites["position"] = [0.0, 0.0]
+            dict_sprites["rotation"] = 0.0
+            dict_sprites["scale"] = [1.0, 1.0]
+            dict_sprites["opacity"] = 1.0
+            dict_sprites["z"] = 0
+            dict_sprites["children"] = []
+
+            original_mesh = obj.data
+            original_slot_index = obj.coa_tools2.slot_index
+            try:
+                for slot_entry in obj.coa_tools2.slot:
+                    if slot_entry.mesh is None:
+                        continue
+                    # Swap to this slot entry's mesh so helpers read correct data
+                    obj.data = slot_entry.mesh
+                    obj.coa_tools2.slot_index = slot_entry.index
+
+                    child_dict = OrderedDict()
+                    child_dict["name"] = "{}.{:03d}".format(sprite, slot_entry.index)
+                    child_dict["type"] = "SPRITE"
+                    child_dict["slot_index"] = slot_entry.index
+                    child_dict["node_path"] = str(self.get_node_path(obj, []))
+                    child_dict["resource_path"] = self.get_sprite_path(sprite)
+                    child_dict["pivot_offset"] = self.get_sprite_offset(sprite)
+                    child_dict["position"] = self.get_relative_mesh_pos(
+                        bone, obj
+                    )
+                    child_dict["rotation"] = self.get_sprite_rotation(sprite)
+                    child_dict["scale"] = self.get_sprite_scale(sprite)
+                    child_dict["opacity"] = self.get_sprite_opacity(sprite)
+                    child_dict["z"] = self.get_z_value(sprite)
+                    child_dict["tiles_x"] = self.get_sprite_tilesize(sprite)[0]
+                    child_dict["tiles_y"] = self.get_sprite_tilesize(sprite)[1]
+                    child_dict["frame_index"] = slot_entry.index
+                    child_dict["children"] = []
+
+                    dict_sprites["children"].append(child_dict)
+            finally:
+                obj.data = original_mesh
+                obj.coa_tools2.slot_index = original_slot_index
+
+            # Also process actual Blender children of the slot object
+            for child in bpy.data.objects[sprite].children:
+                if child.type == "MESH":
+                    dict_sprites["children"].append(
+                        self.sprite_to_dict(child.name, obj)
+                    )
+
+            return dict_sprites
+
         dict_sprites["name"] = sprite
         dict_sprites["type"] = "SPRITE"
         dict_sprites["node_path"] = str(
-            self.get_node_path(bpy.data.objects[sprite], [])
+            self.get_node_path(obj, [])
         )  # ,suffix=sprite))
         dict_sprites["resource_path"] = self.get_sprite_path(sprite)
         dict_sprites["pivot_offset"] = self.get_sprite_offset(sprite)
         dict_sprites["position"] = self.get_relative_mesh_pos(
-            bone, bpy.data.objects[sprite]
+            bone, obj
         )
         dict_sprites["rotation"] = self.get_sprite_rotation(sprite)
         dict_sprites["scale"] = self.get_sprite_scale(sprite)
@@ -428,7 +486,7 @@ class COATOOLS2_OT_ExportToJson(bpy.types.Operator, bpy_extras.io_utils.ExportHe
         for child in bpy.data.objects[sprite].children:
             if child.type == "MESH":
                 dict_sprites["children"].append(
-                    self.sprite_to_dict(child.name, bpy.data.objects[sprite])
+                    self.sprite_to_dict(child.name, obj)
                 )
 
         return dict_sprites
@@ -438,7 +496,7 @@ class COATOOLS2_OT_ExportToJson(bpy.types.Operator, bpy_extras.io_utils.ExportHe
         dict_bone["name"] = bone.name
         dict_bone["type"] = "BONE"
         dict_bone["node_path"] = str(self.get_node_path(bone, []))  # ,suffix=""))
-        dict_bone["draw_bone"] = self.armature.data.bones[bone.name].coa_draw_bone
+        dict_bone["draw_bone"] = self.armature.data.bones[bone.name].coa_tools2.draw_bone
         dict_bone["bone_connected"] = bone.use_connect
         dict_bone["position"] = self.get_relative_bone_pos(bone, "HEAD")
         dict_bone["position_tip"] = self.get_relative_bone_pos(bone, "TAIL")
@@ -706,6 +764,20 @@ class COATOOLS2_OT_ExportToJson(bpy.types.Operator, bpy_extras.io_utils.ExportHe
                             "animation_data": child.animation_data,
                         },
                     ]
+                if child.coa_tools2.type == "SLOT" and (
+                    self.has_animation_data(
+                        child.animation_data, "coa_tools2.slot_index"
+                    )
+                    or restpose
+                ):
+                    channels[self.get_node_path(child, []) + ":slot"] = [
+                        OrderedDict(),
+                        {
+                            "node_name": child.name,
+                            "time_idx_hist": "0.0",
+                            "animation_data": child.animation_data,
+                        },
+                    ]
                 if (
                     self.has_animation_data(
                         child.animation_data, "coa_tools2.modulate_color"
@@ -824,6 +896,13 @@ class COATOOLS2_OT_ExportToJson(bpy.types.Operator, bpy_extras.io_utils.ExportHe
                             track,
                             "modulate",
                             self.get_modulate_color(sprite),
+                            channels,
+                            key,
+                        )
+                        self.keyframe_to_dict(
+                            track,
+                            "slot",
+                            int(bpy.data.objects[sprite].coa_tools2.slot_index),
                             channels,
                             key,
                         )
