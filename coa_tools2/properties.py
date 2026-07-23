@@ -585,9 +585,16 @@ def register():
         if hasattr(owner_type, "coa_tools2"):
             delattr(owner_type, "coa_tools2")
         setattr(owner_type, "coa_tools2", PointerProperty(type=property_type))
+    if hasattr(bpy.types.Object, "coa_tools2_rig"):
+        del bpy.types.Object.coa_tools2_rig
+    bpy.types.Object.coa_tools2_rig = PointerProperty(
+        type=rig_control_properties.COATOOLS2_PG_RigObjectProperties
+    )
     print("COATools Properties have been registered")
 
 def unregister():
+    if hasattr(bpy.types.Object, "coa_tools2_rig"):
+        del bpy.types.Object.coa_tools2_rig
     for owner_type in (
         bpy.types.Object,
         bpy.types.Scene,

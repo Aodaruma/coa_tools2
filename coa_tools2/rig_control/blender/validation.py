@@ -14,6 +14,7 @@ from .artifacts import (
     limit_rotation_name,
 )
 from .drivers import binding_target_key, driver_uses_control, find_driver
+from .properties import get_rig_data
 from .widgets import NODE_GROUP_NAME
 
 
@@ -49,7 +50,7 @@ def _binding_driver(binding):
 
 def validate_rig(armature) -> list[BlenderValidationIssue]:
     issues: list[BlenderValidationIssue] = []
-    controls = armature.coa_tools2.rig_controls
+    controls = get_rig_data(armature).rig_controls
     seen_control_ids: set[str] = set()
     seen_targets: dict[tuple[str, str, str, str], str] = {}
 
@@ -202,7 +203,7 @@ def validate_rig(armature) -> list[BlenderValidationIssue]:
 
 
 def store_validation_issues(armature, issues):
-    collection = armature.coa_tools2.rig_validation_issues
+    collection = get_rig_data(armature).rig_validation_issues
     collection.clear()
     for issue in issues:
         item = collection.add()

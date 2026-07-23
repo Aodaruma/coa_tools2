@@ -30,13 +30,13 @@ def main():
         height=3.0,
     )
     assert result == {"FINISHED"}, result
-    control = armature.coa_tools2.rig_controls[0]
+    control = armature.coa_tools2_rig.rig_controls[0]
     assert len(control.bindings) == 0
     assert armature.pose.bones[control.control_bone].custom_shape is not None
     assert armature.pose.bones[control.display_bone].custom_shape is not None
 
     bpy.ops.coa_tools2.validate_rig()
-    assert len(armature.coa_tools2.rig_validation_issues) == 0
+    assert len(armature.coa_tools2_rig.rig_validation_issues) == 0
 
     bpy.ops.object.mode_set(mode="OBJECT")
     bpy.ops.mesh.primitive_plane_add(size=2.0)
@@ -78,7 +78,7 @@ def main():
     assert abs(vertical.value - 1.0) < 1e-5, vertical.value
 
     bpy.ops.coa_tools2.validate_rig()
-    assert len(armature.coa_tools2.rig_validation_issues) == 0
+    assert len(armature.coa_tools2_rig.rig_validation_issues) == 0
 
     addon_utils.disable("coa_tools2", default_set=False)
     print("COA rig deferred-binding test OK.")

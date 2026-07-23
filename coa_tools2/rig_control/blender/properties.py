@@ -145,8 +145,166 @@ class COATOOLS2_PG_RigControl(bpy.types.PropertyGroup):
     needs_rebuild: BoolProperty(default=False)
 
 
+class COATOOLS2_PG_RigObjectProperties(bpy.types.PropertyGroup):
+    """Rig-only object data kept outside the shared COA ObjectProperties."""
+
+    rig_instance_id: StringProperty()
+    rig_controls: CollectionProperty(type=COATOOLS2_PG_RigControl)
+    rig_controls_index: IntProperty(default=0, min=0)
+    rig_validation_issues: CollectionProperty(type=COATOOLS2_PG_RigValidationIssue)
+    rig_validation_issues_index: IntProperty(default=0, min=0)
+    legacy_migration_checked: BoolProperty(default=False, options={"HIDDEN"})
+
+
+_CONTROL_FIELDS = (
+    "schema_version",
+    "control_uuid",
+    "semantic_id",
+    "label",
+    "control_type",
+    "axis",
+    "control_bone",
+    "display_bone",
+    "tip_widget_uuid",
+    "base_widget_uuid",
+    "width",
+    "height",
+    "radius",
+    "angle_min",
+    "angle_max",
+    "tip_radius",
+    "node_radius",
+    "bar_width",
+    "stroke_radius",
+    "input_min",
+    "input_max",
+    "widget_backend",
+    "bindings_index",
+    "origin",
+    "needs_rebuild",
+)
+_BINDING_FIELDS = (
+    "schema_version",
+    "binding_uuid",
+    "control_uuid",
+    "source_component",
+    "target_kind",
+    "target_object",
+    "target_bone",
+    "target_name",
+    "generated_data_path",
+    "input_min",
+    "input_max",
+    "output_min",
+    "output_max",
+    "clamp",
+    "enabled",
+)
+_ISSUE_FIELDS = (
+    "severity",
+    "code",
+    "message",
+    "control_uuid",
+    "binding_uuid",
+)
+_MISSING = object()
+
+
+def _copy_fields(source, target, field_names):
+    for field_name in field_names:
+        value = getattr(source, field_name, _MISSING)
+        if value is _MISSING and hasattr(source, "get"):
+            value = source.get(field_name, _MISSING)
+        if value is _MISSING:
+            continue
+        rna_property = target.bl_rna.properties.get(field_name)
+        if (
+            rna_property is not None
+            and rna_property.type == "ENUM"
+            and isinstance(value, int)
+        ):
+            value = next(
+                (
+                    item.identifier
+                    for item in rna_property.enum_items
+                    if item.value == value
+                ),
+                _MISSING,
+            )
+            if value is _MISSING:
+                continue
+        setattr(target, field_name, value)
+
+
+def _legacy_collection(owner, field_name):
+    collection = getattr(owner, field_name, _MISSING)
+    if collection is _MISSING and hasattr(owner, "get"):
+        collection = owner.get(field_name, _MISSING)
+    return None if collection is _MISSING else collection
+
+
+def _legacy_value(owner, field_name, default=None):
+    value = getattr(owner, field_name, _MISSING)
+    if value is _MISSING and hasattr(owner, "get"):
+        value = owner.get(field_name, _MISSING)
+    return default if value is _MISSING else value
+
+
+def _migrate_legacy_rig_data(obj, rig_data):
+    """Copy definitions stored by commits before the dedicated RNA namespace."""
+
+    if rig_data.legacy_migration_checked:
+        return
+
+    legacy = getattr(obj, "coa_tools2", None)
+    legacy_controls = (
+        _legacy_collection(legacy, "rig_controls") if legacy is not None else None
+    )
+    if legacy is None or legacy_controls is None:
+        rig_data.legacy_migration_checked = True
+        return
+    if not rig_data.rig_instance_id:
+        rig_data.rig_instance_id = _legacy_value(legacy, "rig_instance_id", "")
+
+    if not rig_data.rig_controls:
+        for legacy_control in legacy_controls:
+            control = rig_data.rig_controls.add()
+            _copy_fields(legacy_control, control, _CONTROL_FIELDS)
+            for legacy_binding in _legacy_collection(
+                legacy_control, "bindings"
+            ) or ():
+                binding = control.bindings.add()
+                _copy_fields(legacy_binding, binding, _BINDING_FIELDS)
+        if rig_data.rig_controls:
+            rig_data.rig_controls_index = min(
+                _legacy_value(legacy, "rig_controls_index", 0),
+                len(rig_data.rig_controls) - 1,
+            )
+
+    legacy_issues = _legacy_collection(legacy, "rig_validation_issues")
+    if not rig_data.rig_validation_issues and legacy_issues is not None:
+        for legacy_issue in legacy_issues:
+            issue = rig_data.rig_validation_issues.add()
+            _copy_fields(legacy_issue, issue, _ISSUE_FIELDS)
+    rig_data.legacy_migration_checked = True
+
+
+def get_rig_data(obj):
+    """Return collision-free rig data and lazily migrate the legacy layout."""
+
+    rig_data = getattr(obj, "coa_tools2_rig", None)
+    if rig_data is None:
+        raise RuntimeError(
+            "COA Tools 2 rig properties are not registered. "
+            "Disable duplicate add-on installations and reload the add-on."
+        )
+    _migrate_legacy_rig_data(obj, rig_data)
+    return rig_data
+
+
 CLASSES = (
     COATOOLS2_PG_RigBinding,
     COATOOLS2_PG_RigValidationIssue,
     COATOOLS2_PG_RigControl,
+    COATOOLS2_PG_RigObjectProperties,
 )

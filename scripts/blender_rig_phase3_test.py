@@ -56,7 +56,7 @@ def main():
         shape_key="RectX",
     )
     assert result == {"FINISHED"}
-    rectangle = armature.coa_tools2.rig_controls[-1]
+    rectangle = armature.coa_tools2_rig.rig_controls[-1]
     assert_widget(rectangle, armature)
     result = bpy.ops.coa_tools2.add_rig_binding(
         "EXEC_DEFAULT",
@@ -89,7 +89,7 @@ def main():
         shape_key="CircleX",
     )
     assert result == {"FINISHED"}
-    circle = armature.coa_tools2.rig_controls[-1]
+    circle = armature.coa_tools2_rig.rig_controls[-1]
     assert_widget(circle, armature)
     circle_pose = armature.pose.bones[circle.control_bone]
     distance = circle_pose.constraints.get(
@@ -115,7 +115,7 @@ def main():
         shape_key="Dial",
     )
     assert result == {"FINISHED"}
-    dial = armature.coa_tools2.rig_controls[-1]
+    dial = armature.coa_tools2_rig.rig_controls[-1]
     assert_widget(dial, armature)
     dial_pose = armature.pose.bones[dial.control_bone]
     rotation_limit = dial_pose.constraints.get(
@@ -131,7 +131,7 @@ def main():
     assert abs(keys["Dial"].value - 1.0) < 1e-5, keys["Dial"].value
 
     bpy.ops.coa_tools2.validate_rig()
-    assert len(armature.coa_tools2.rig_validation_issues) == 0
+    assert len(armature.coa_tools2_rig.rig_validation_issues) == 0
 
     from coa_tools2.rig_control.blender.compiler import compile_control
 
@@ -140,7 +140,7 @@ def main():
         len(bpy.data.objects),
         len(target.data.shape_keys.animation_data.drivers),
     )
-    for control in armature.coa_tools2.rig_controls:
+    for control in armature.coa_tools2_rig.rig_controls:
         compile_control(armature, control)
     counts_after = (
         len(armature.data.bones),

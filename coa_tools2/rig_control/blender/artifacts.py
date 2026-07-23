@@ -10,6 +10,7 @@ from mathutils import Vector
 
 from ... import functions
 from ..schema import WidgetBackend, WidgetLayout, WidgetSpec
+from .properties import get_rig_data
 from .widgets import ensure_widget
 
 
@@ -24,10 +25,11 @@ def slugify(value: str) -> str:
 
 
 def ensure_rig_instance_id(armature: bpy.types.Object) -> str:
-    instance_id = armature.coa_tools2.rig_instance_id
+    rig_data = get_rig_data(armature)
+    instance_id = rig_data.rig_instance_id
     if not instance_id:
         instance_id = str(uuid.uuid4())
-        armature.coa_tools2.rig_instance_id = instance_id
+        rig_data.rig_instance_id = instance_id
     return instance_id
 
 

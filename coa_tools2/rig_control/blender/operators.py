@@ -18,6 +18,7 @@ from .drivers import (
     ensure_binding_driver,
     remove_binding_driver,
 )
+from .properties import get_rig_data
 from .validation import store_validation_issues, validate_rig
 
 
@@ -62,13 +63,16 @@ def _armature(context):
 
 def _active_control(context):
     armature = _armature(context)
-    if armature is None or not armature.coa_tools2.rig_controls:
+    if armature is None:
+        return armature, None
+    rig_data = get_rig_data(armature)
+    if not rig_data.rig_controls:
         return armature, None
     index = min(
-        armature.coa_tools2.rig_controls_index,
-        len(armature.coa_tools2.rig_controls) - 1,
+        rig_data.rig_controls_index,
+        len(rig_data.rig_controls) - 1,
     )
-    return armature, armature.coa_tools2.rig_controls[index]
+    return armature, rig_data.rig_controls[index]
 
 
 def _binding_target_items(self, _context):
@@ -105,7 +109,7 @@ def _target_bone_items(self, _context):
 
 
 def _all_target_keys(armature):
-    for control in armature.coa_tools2.rig_controls:
+    for control in get_rig_data(armature).rig_controls:
         for binding in control.bindings:
             yield binding_target_key(binding)
 
@@ -240,6 +244,7 @@ class COATOOLS2_OT_AddRigControl(bpy.types.Operator):
         if armature is None or armature.type != "ARMATURE":
             self.report({"ERROR"}, "No SpriteObject Armature found.")
             return {"CANCELLED"}
+        rig_data = get_rig_data(armature)
 
         target_object = None
         shape_key = ""
@@ -257,7 +262,7 @@ class COATOOLS2_OT_AddRigControl(bpy.types.Operator):
                 return {"CANCELLED"}
 
         control_uuid = str(uuid.uuid4())
-        control = armature.coa_tools2.rig_controls.add()
+        control = rig_data.rig_controls.add()
         control.control_uuid = control_uuid
         control.semantic_id = _semantic_id(self.label)
         control.label = self.label
@@ -299,15 +304,11 @@ class COATOOLS2_OT_AddRigControl(bpy.types.Operator):
             result = compile_control(armature, control, origin=origin)
         except Exception as exc:
             traceback.print_exc()
-            armature.coa_tools2.rig_controls.remove(
-                len(armature.coa_tools2.rig_controls) - 1
-            )
+            rig_data.rig_controls.remove(len(rig_data.rig_controls) - 1)
             self.report({"ERROR"}, f"Rig control compile failed: {exc}")
             return {"CANCELLED"}
 
-        armature.coa_tools2.rig_controls_index = len(
-            armature.coa_tools2.rig_controls
-        ) - 1
+        rig_data.rig_controls_index = len(rig_data.rig_controls) - 1
         if armature.mode != "POSE":
             bpy.context.view_layer.objects.active = armature
             armature.select_set(True)
@@ -506,7 +507,7 @@ class COATOOLS2_OT_RepairRig(bpy.types.Operator):
     def execute(self, context):
         armature = _armature(context)
         failures = 0
-        for control in armature.coa_tools2.rig_controls:
+        for control in get_rig_data(armature).rig_controls:
             try:
                 compile_control(armature, control)
             except Exception:

@@ -40,8 +40,8 @@ def main():
         create_initial_binding=True,
     )
     assert result == {"FINISHED"}
-    assert len(armature.coa_tools2.rig_controls) == 1
-    control = armature.coa_tools2.rig_controls[0]
+    assert len(armature.coa_tools2_rig.rig_controls) == 1
+    control = armature.coa_tools2_rig.rig_controls[0]
     assert control.control_bone in armature.pose.bones
     assert control.display_bone in armature.pose.bones
     assert not armature.data.bones[control.control_bone].use_deform

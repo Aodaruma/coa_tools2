@@ -5,6 +5,7 @@ from __future__ import annotations
 import bpy
 
 from ... import functions
+from .properties import get_rig_data
 
 
 class COATOOLS2_UL_RigControls(bpy.types.UIList):
@@ -54,12 +55,13 @@ class COATOOLS2_PT_RigControls(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         armature = functions.get_sprite_object(context.active_object)
+        rig_data = get_rig_data(armature)
         row = layout.row(align=True)
         row.operator("coa_tools2.add_rig_control", icon="ADD")
         row.operator("coa_tools2.validate_rig", text="", icon="CHECKMARK")
         row.operator("coa_tools2.repair_rig", text="", icon="FILE_REFRESH")
 
-        controls = armature.coa_tools2.rig_controls
+        controls = rig_data.rig_controls
         if not controls:
             layout.label(text="No rig controls yet.", icon="INFO")
             return
@@ -67,13 +69,13 @@ class COATOOLS2_PT_RigControls(bpy.types.Panel):
         layout.template_list(
             "COATOOLS2_UL_RigControls",
             "",
-            armature.coa_tools2,
+            rig_data,
             "rig_controls",
-            armature.coa_tools2,
+            rig_data,
             "rig_controls_index",
             rows=min(5, max(2, len(controls))),
         )
-        index = min(armature.coa_tools2.rig_controls_index, len(controls) - 1)
+        index = min(rig_data.rig_controls_index, len(controls) - 1)
         control = controls[index]
         box = layout.box()
         box.prop(control, "label")
@@ -127,7 +129,7 @@ class COATOOLS2_PT_RigControls(bpy.types.Panel):
         column.operator("coa_tools2.add_rig_binding", text="", icon="ADD")
         column.operator("coa_tools2.remove_rig_binding", text="", icon="REMOVE")
 
-        issues = armature.coa_tools2.rig_validation_issues
+        issues = rig_data.rig_validation_issues
         if issues:
             issue_box = layout.box()
             issue_box.label(text=f"Validation Issues ({len(issues)})", icon="ERROR")

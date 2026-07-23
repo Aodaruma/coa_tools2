@@ -40,7 +40,7 @@ def main():
         shape_key="Smile",
     )
     assert result == {"FINISHED"}, result
-    control = armature.coa_tools2.rig_controls[0]
+    control = armature.coa_tools2_rig.rig_controls[0]
 
     result = bpy.ops.coa_tools2.add_rig_binding(
         "EXEC_DEFAULT",
@@ -95,17 +95,17 @@ def main():
 
     result = bpy.ops.coa_tools2.validate_rig()
     assert result == {"FINISHED"}
-    assert len(armature.coa_tools2.rig_validation_issues) == 0
+    assert len(armature.coa_tools2_rig.rig_validation_issues) == 0
 
     base_widget = armature.pose.bones[control.display_bone].custom_shape
     bpy.data.objects.remove(base_widget, do_unlink=True)
     bpy.ops.coa_tools2.validate_rig()
-    codes = {issue.code for issue in armature.coa_tools2.rig_validation_issues}
+    codes = {issue.code for issue in armature.coa_tools2_rig.rig_validation_issues}
     assert "artifact.missing_base_widget" in codes, codes
 
     result = bpy.ops.coa_tools2.repair_rig()
     assert result == {"FINISHED"}
-    assert len(armature.coa_tools2.rig_validation_issues) == 0
+    assert len(armature.coa_tools2_rig.rig_validation_issues) == 0
     assert armature.pose.bones[control.display_bone].custom_shape is not None
 
     counts_before = (len(armature.data.bones), len(bpy.data.objects))
