@@ -37,6 +37,7 @@ def main():
         label="Smile",
         axis="X",
         width=4.0,
+        create_initial_binding=True,
     )
     assert result == {"FINISHED"}
     assert len(armature.coa_tools2.rig_controls) == 1

@@ -35,6 +35,7 @@ def main():
         label="Face",
         axis="X",
         width=4.0,
+        create_initial_binding=True,
         target_object_name=mesh_object.name,
         shape_key="Smile",
     )

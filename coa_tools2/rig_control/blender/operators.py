@@ -122,13 +122,37 @@ def _control_input_range(control, component):
     raise ValueError(f"Unsupported control type: {control.control_type}")
 
 
+def _allowed_source_components(control):
+    if control.control_type == "SLIDER_1D":
+        return (control.axis,)
+    if control.control_type in {"POINT_2D_RECT", "POINT_2D_CIRCLE"}:
+        return ("X", "Y")
+    if control.control_type == "DIAL":
+        return ("ROTATION",)
+    return ()
+
+
+def _binding_source_items(_self, context):
+    _armature_object, control = _active_control(context)
+    allowed = _allowed_source_components(control) if control is not None else ()
+    labels = {
+        "X": ("X", "Control local X"),
+        "Y": ("Y", "Control local Y"),
+        "ROTATION": ("Rotation", "Control local Z rotation"),
+    }
+    return [
+        (component, labels[component][0], labels[component][1])
+        for component in allowed
+    ] or [("X", "X", "Control local X")]
+
+
 class COATOOLS2_OT_AddRigControl(bpy.types.Operator):
     bl_idname = "coa_tools2.add_rig_control"
     bl_label = "Add Rig Control"
-    bl_description = "Create a Geometry Nodes control preset and Shape Key binding"
+    bl_description = "Create a Geometry Nodes control preset; bindings can be added later"
     bl_options = {"REGISTER", "UNDO"}
 
-    label: StringProperty(default="Shape Key Slider")
+    label: StringProperty(default="Rig Control")
     control_type: EnumProperty(
         items=(
             ("SLIDER_1D", "1D Slider", "Linear slider"),
@@ -157,6 +181,11 @@ class COATOOLS2_OT_AddRigControl(bpy.types.Operator):
         ),
         default="X",
     )
+    create_initial_binding: BoolProperty(
+        name="Create Initial Shape Key Binding",
+        description="Optionally bind one Shape Key while creating the control",
+        default=False,
+    )
     target_object_name: StringProperty()
     shape_key: EnumProperty(items=_shape_key_items)
 
@@ -172,7 +201,6 @@ class COATOOLS2_OT_AddRigControl(bpy.types.Operator):
             items = _shape_key_items(self, context)
             if items and items[0][0]:
                 self.shape_key = items[0][0]
-                self.label = items[0][0]
         return context.window_manager.invoke_props_dialog(self)
 
     def draw(self, _context):
@@ -186,35 +214,47 @@ class COATOOLS2_OT_AddRigControl(bpy.types.Operator):
             row = layout.row(align=True)
             row.prop(self, "width")
             row.prop(self, "height")
-            layout.prop(self, "source_component", expand=True)
         elif self.control_type == "POINT_2D_CIRCLE":
             layout.prop(self, "radius")
-            layout.prop(self, "source_component", expand=True)
         else:
             layout.prop(self, "radius")
             row = layout.row(align=True)
             row.prop(self, "angle_min")
             row.prop(self, "angle_max")
-        layout.prop_search(self, "target_object_name", bpy.data, "objects", text="Target")
-        layout.prop(self, "shape_key")
+        layout.separator()
+        layout.prop(self, "create_initial_binding")
+        if self.create_initial_binding:
+            if self.control_type in {"POINT_2D_RECT", "POINT_2D_CIRCLE"}:
+                layout.prop(self, "source_component", expand=True)
+            layout.prop_search(
+                self,
+                "target_object_name",
+                bpy.data,
+                "objects",
+                text="Target",
+            )
+            layout.prop(self, "shape_key")
 
     def execute(self, context):
-        target_object = bpy.data.objects.get(self.target_object_name) or _default_target(
-            context
-        )
-        self.target_object_name = target_object.name if target_object else ""
-        shape_key = self.shape_key
-        if target_object is not None and not shape_key:
-            items = _shape_key_items(self, context)
-            shape_key = items[0][0] if items else ""
-        if target_object is None or not shape_key:
-            self.report({"ERROR"}, "Select a Mesh with a non-Basis Shape Key.")
-            return {"CANCELLED"}
-
         armature = functions.get_sprite_object(context.active_object)
         if armature is None or armature.type != "ARMATURE":
             self.report({"ERROR"}, "No SpriteObject Armature found.")
             return {"CANCELLED"}
+
+        target_object = None
+        shape_key = ""
+        if self.create_initial_binding:
+            target_object = bpy.data.objects.get(
+                self.target_object_name
+            ) or _default_target(context)
+            self.target_object_name = target_object.name if target_object else ""
+            shape_key = self.shape_key
+            if target_object is not None and not shape_key:
+                items = _shape_key_items(self, context)
+                shape_key = items[0][0] if items else ""
+            if target_object is None or not shape_key:
+                self.report({"ERROR"}, "Select a Mesh with a non-Basis Shape Key.")
+                return {"CANCELLED"}
 
         control_uuid = str(uuid.uuid4())
         control = armature.coa_tools2.rig_controls.add()
@@ -240,17 +280,18 @@ class COATOOLS2_OT_AddRigControl(bpy.types.Operator):
             source_component,
         )
 
-        binding = control.bindings.add()
-        binding.binding_uuid = str(uuid.uuid4())
-        binding.control_uuid = control_uuid
-        binding.source_component = source_component
-        binding.target_kind = "SHAPE_KEY_VALUE"
-        binding.target_object = target_object
-        binding.target_name = shape_key
-        binding.input_min = control.input_min
-        binding.input_max = control.input_max
-        binding.output_min = 0.0
-        binding.output_max = 1.0
+        if self.create_initial_binding:
+            binding = control.bindings.add()
+            binding.binding_uuid = str(uuid.uuid4())
+            binding.control_uuid = control_uuid
+            binding.source_component = source_component
+            binding.target_kind = "SHAPE_KEY_VALUE"
+            binding.target_object = target_object
+            binding.target_name = shape_key
+            binding.input_min = control.input_min
+            binding.input_max = control.input_max
+            binding.output_min = 0.0
+            binding.output_max = 1.0
 
         origin = armature.matrix_world.inverted() @ context.scene.cursor.location
         control.origin = origin
@@ -285,14 +326,7 @@ class COATOOLS2_OT_AddRigBinding(bpy.types.Operator):
     bl_description = "Bind the active control to another Shape Key or constraint"
     bl_options = {"REGISTER", "UNDO"}
 
-    source_component: EnumProperty(
-        items=(
-            ("X", "X", "Local X"),
-            ("Y", "Y", "Local Y"),
-            ("ROTATION", "Rotation", "Local Z rotation"),
-        ),
-        default="X",
-    )
+    source_component: EnumProperty(items=_binding_source_items)
     target_kind: EnumProperty(
         items=(
             ("SHAPE_KEY_VALUE", "Shape Key", "Drive a Shape Key value"),
@@ -351,6 +385,12 @@ class COATOOLS2_OT_AddRigBinding(bpy.types.Operator):
         target = bpy.data.objects.get(self.target_object_name)
         if armature is None or control is None or target is None or not self.target_name:
             self.report({"ERROR"}, "Control and binding target are required.")
+            return {"CANCELLED"}
+        if self.source_component not in _allowed_source_components(control):
+            self.report(
+                {"ERROR"},
+                f"{self.source_component} is not valid for {control.control_type}.",
+            )
             return {"CANCELLED"}
 
         key = (

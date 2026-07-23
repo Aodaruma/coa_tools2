@@ -108,6 +108,11 @@ class COATOOLS2_PT_RigControls(bpy.types.Panel):
 
         bindings_box = layout.box()
         bindings_box.label(text="Bindings")
+        if not control.bindings:
+            bindings_box.label(
+                text="No bindings. Add targets with the + button.",
+                icon="INFO",
+            )
         row = bindings_box.row()
         row.template_list(
             "COATOOLS2_UL_RigBindings",

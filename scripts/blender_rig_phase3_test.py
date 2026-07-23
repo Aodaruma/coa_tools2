@@ -51,6 +51,7 @@ def main():
         width=4.0,
         height=3.0,
         source_component="X",
+        create_initial_binding=True,
         target_object_name=target.name,
         shape_key="RectX",
     )
@@ -83,6 +84,7 @@ def main():
         control_type="POINT_2D_CIRCLE",
         radius=2.0,
         source_component="X",
+        create_initial_binding=True,
         target_object_name=target.name,
         shape_key="CircleX",
     )
@@ -108,6 +110,7 @@ def main():
         radius=2.5,
         angle_min=-math.pi * 0.5,
         angle_max=math.pi * 0.5,
+        create_initial_binding=True,
         target_object_name=target.name,
         shape_key="Dial",
     )
