@@ -11,7 +11,8 @@ from ..schema import WidgetBackend, WidgetLayout, WidgetSpec
 
 NODE_GROUP_NAME = "COA_RigWidget_GN"
 WIDGET_COLLECTION_NAME = "COA Rig Widgets"
-NODE_GROUP_VERSION = 2
+NODE_GROUP_VERSION = 3
+_BOOLEAN_SOLID_DEPTH = 0.1
 
 _LAYOUT_VALUES = {
     WidgetLayout.TIP: 0,
@@ -71,19 +72,99 @@ def _circle_mesh(nodes, links, radius_socket, stroke_socket, label):
     return curve_to_mesh.outputs["Mesh"]
 
 
-def _rectangle_mesh(
+def _solid_box_mesh(
     nodes,
     links,
     width_socket,
     height_socket,
-    stroke_socket,
     label,
 ):
-    path = nodes.new("GeometryNodeCurvePrimitiveQuadrilateral")
-    path.mode = "RECTANGLE"
-    path.label = f"{label} Path"
-    links.new(width_socket, path.inputs["Width"])
-    links.new(height_socket, path.inputs["Height"])
+    size = nodes.new("ShaderNodeCombineXYZ")
+    size.label = f"{label} Size"
+    links.new(width_socket, size.inputs["X"])
+    links.new(height_socket, size.inputs["Y"])
+    size.inputs["Z"].default_value = _BOOLEAN_SOLID_DEPTH
+
+    box = nodes.new("GeometryNodeMeshCube")
+    box.label = label
+    links.new(size.outputs["Vector"], box.inputs["Size"])
+    return box.outputs["Mesh"]
+
+
+def _solid_circle_mesh(nodes, links, radius_socket, label):
+    cylinder = nodes.new("GeometryNodeMeshCylinder")
+    cylinder.label = label
+    cylinder.inputs["Vertices"].default_value = 32
+    cylinder.inputs["Side Segments"].default_value = 1
+    cylinder.inputs["Fill Segments"].default_value = 1
+    links.new(radius_socket, cylinder.inputs["Radius"])
+    cylinder.inputs["Depth"].default_value = _BOOLEAN_SOLID_DEPTH
+    return cylinder.outputs["Mesh"]
+
+
+def _compare_input(node, name, socket_type):
+    return next(
+        socket
+        for socket in node.inputs
+        if socket.name == name and socket.type == socket_type
+    )
+
+
+def _union_outline_mesh(nodes, links, geometries, stroke_socket, label):
+    boolean = nodes.new("GeometryNodeMeshBoolean")
+    boolean.operation = "UNION"
+    boolean.solver = "EXACT"
+    boolean.label = f"{label} Union"
+    mesh_input = next(
+        socket
+        for socket in boolean.inputs
+        if socket.type == "GEOMETRY"
+        and socket.is_multi_input
+        and socket.enabled
+    )
+    for geometry in geometries:
+        links.new(geometry, mesh_input)
+
+    position = nodes.new("GeometryNodeInputPosition")
+    position.label = f"{label} Position"
+    separate_position = nodes.new("ShaderNodeSeparateXYZ")
+    separate_position.label = f"{label} Separate Position"
+    links.new(position.outputs["Position"], separate_position.inputs["Vector"])
+
+    is_top = nodes.new("FunctionNodeCompare")
+    is_top.data_type = "FLOAT"
+    is_top.operation = "GREATER_THAN"
+    is_top.label = f"{label} Top Faces"
+    links.new(
+        separate_position.outputs["Z"],
+        _compare_input(is_top, "A", "VALUE"),
+    )
+    _compare_input(is_top, "B", "VALUE").default_value = (
+        _BOOLEAN_SOLID_DEPTH * 0.25
+    )
+
+    top_surface = nodes.new("GeometryNodeSeparateGeometry")
+    top_surface.domain = "FACE"
+    top_surface.label = f"{label} Top Surface"
+    links.new(boolean.outputs["Mesh"], top_surface.inputs["Geometry"])
+    links.new(is_top.outputs["Result"], top_surface.inputs["Selection"])
+
+    edge_neighbors = nodes.new("GeometryNodeInputMeshEdgeNeighbors")
+    edge_neighbors.label = f"{label} Edge Neighbors"
+    is_boundary = nodes.new("FunctionNodeCompare")
+    is_boundary.data_type = "INT"
+    is_boundary.operation = "EQUAL"
+    is_boundary.label = f"{label} Boundary Edges"
+    links.new(
+        edge_neighbors.outputs["Face Count"],
+        _compare_input(is_boundary, "A", "INT"),
+    )
+    _compare_input(is_boundary, "B", "INT").default_value = 1
+
+    boundary = nodes.new("GeometryNodeMeshToCurve")
+    boundary.label = f"{label} Boundary"
+    links.new(top_surface.outputs["Selection"], boundary.inputs["Mesh"])
+    links.new(is_boundary.outputs["Result"], boundary.inputs["Selection"])
 
     profile = nodes.new("GeometryNodeCurvePrimitiveCircle")
     profile.mode = "RADIUS"
@@ -93,7 +174,7 @@ def _rectangle_mesh(
 
     curve_to_mesh = nodes.new("GeometryNodeCurveToMesh")
     curve_to_mesh.label = label
-    links.new(path.outputs["Curve"], curve_to_mesh.inputs["Curve"])
+    links.new(boundary.outputs["Curve"], curve_to_mesh.inputs["Curve"])
     links.new(profile.outputs["Curve"], curve_to_mesh.inputs["Profile Curve"])
     return curve_to_mesh.outputs["Mesh"]
 
@@ -108,7 +189,8 @@ def _translated_geometry(
 ):
     combine = nodes.new("ShaderNodeCombineXYZ")
     combine.label = f"{label} Translation"
-    links.new(x_socket, combine.inputs["X"])
+    if x_socket is not None:
+        links.new(x_socket, combine.inputs["X"])
     if y_socket is not None:
         links.new(y_socket, combine.inputs["Y"])
 
@@ -160,20 +242,18 @@ def ensure_widget_node_group():
         "Tip",
     )
 
-    bar_geometry = _rectangle_mesh(
+    bar_geometry = _solid_box_mesh(
         nodes,
         links,
         group_input.outputs["Width"],
         group_input.outputs["Bar Width"],
-        group_input.outputs["Stroke Radius"],
         "Linear Bar",
     )
 
-    endpoint_geometry = _circle_mesh(
+    endpoint_geometry = _solid_circle_mesh(
         nodes,
         links,
         group_input.outputs["Node Radius"],
-        group_input.outputs["Stroke Radius"],
         "Endpoint",
     )
     half_width = _math_node(nodes, "MULTIPLY", "Half Width")
@@ -197,19 +277,27 @@ def ensure_widget_node_group():
         half_width.outputs[0],
         "Right Endpoint",
     )
-    linear_join = nodes.new("GeometryNodeJoinGeometry")
-    linear_join.label = "Linear Widget"
-    links.new(bar_geometry, linear_join.inputs["Geometry"])
-    links.new(left_endpoint, linear_join.inputs["Geometry"])
-    links.new(right_endpoint, linear_join.inputs["Geometry"])
+    linear_geometry = _union_outline_mesh(
+        nodes,
+        links,
+        (bar_geometry, left_endpoint, right_endpoint),
+        group_input.outputs["Stroke Radius"],
+        "Linear Widget",
+    )
 
-    rectangle_geometry = _rectangle_mesh(
+    horizontal_bar = _solid_box_mesh(
         nodes,
         links,
         group_input.outputs["Width"],
+        group_input.outputs["Bar Width"],
+        "Rectangle Horizontal Bar",
+    )
+    vertical_bar = _solid_box_mesh(
+        nodes,
+        links,
+        group_input.outputs["Bar Width"],
         group_input.outputs["Height"],
-        group_input.outputs["Stroke Radius"],
-        "Rectangle Frame",
+        "Rectangle Vertical Bar",
     )
     half_height = _math_node(nodes, "MULTIPLY", "Half Height")
     half_height.inputs[1].default_value = 0.5
@@ -217,11 +305,40 @@ def ensure_widget_node_group():
     negative_half_height = _math_node(nodes, "MULTIPLY", "Negative Half Height")
     negative_half_height.inputs[1].default_value = -0.5
     links.new(group_input.outputs["Height"], negative_half_height.inputs[0])
-    rectangle_join = nodes.new("GeometryNodeJoinGeometry")
-    rectangle_join.label = "Rectangle Widget"
-    links.new(rectangle_geometry, rectangle_join.inputs["Geometry"])
+    rectangle_parts = []
+    for label, y_socket in (
+        ("Bottom Bar", negative_half_height.outputs[0]),
+        ("Top Bar", half_height.outputs[0]),
+    ):
+        rectangle_parts.append(
+            _translated_geometry(
+                nodes,
+                links,
+                horizontal_bar,
+                None,
+                label,
+                y_socket,
+            )
+        )
+    for label, x_socket in (
+        ("Left Bar", negative_half_width.outputs[0]),
+        ("Right Bar", half_width.outputs[0]),
+    ):
+        rectangle_parts.append(
+            _translated_geometry(
+                nodes,
+                links,
+                vertical_bar,
+                x_socket,
+                label,
+            )
+        )
     for label, x_socket, y_socket in (
-        ("Bottom Left", negative_half_width.outputs[0], negative_half_height.outputs[0]),
+        (
+            "Bottom Left",
+            negative_half_width.outputs[0],
+            negative_half_height.outputs[0],
+        ),
         ("Bottom Right", half_width.outputs[0], negative_half_height.outputs[0]),
         ("Top Left", negative_half_width.outputs[0], half_height.outputs[0]),
         ("Top Right", half_width.outputs[0], half_height.outputs[0]),
@@ -234,7 +351,14 @@ def ensure_widget_node_group():
             label,
             y_socket,
         )
-        links.new(corner, rectangle_join.inputs["Geometry"])
+        rectangle_parts.append(corner)
+    rectangle_geometry = _union_outline_mesh(
+        nodes,
+        links,
+        rectangle_parts,
+        group_input.outputs["Stroke Radius"],
+        "Rectangle Widget",
+    )
 
     circle_geometry = _circle_mesh(
         nodes,
@@ -254,7 +378,7 @@ def ensure_widget_node_group():
     layout_switch.label = "Select Linear"
     links.new(is_linear.outputs[0], layout_switch.inputs["Switch"])
     links.new(tip_geometry, layout_switch.inputs["False"])
-    links.new(linear_join.outputs["Geometry"], layout_switch.inputs["True"])
+    links.new(linear_geometry, layout_switch.inputs["True"])
 
     is_rectangle = _math_node(nodes, "COMPARE", "Layout Is Rectangle")
     is_rectangle.inputs[1].default_value = float(
@@ -267,7 +391,7 @@ def ensure_widget_node_group():
     rectangle_switch.label = "Select Rectangle"
     links.new(is_rectangle.outputs[0], rectangle_switch.inputs["Switch"])
     links.new(layout_switch.outputs["Output"], rectangle_switch.inputs["False"])
-    links.new(rectangle_join.outputs["Geometry"], rectangle_switch.inputs["True"])
+    links.new(rectangle_geometry, rectangle_switch.inputs["True"])
 
     is_circle = _math_node(nodes, "COMPARE", "Layout Is Circle")
     is_circle.inputs[1].default_value = float(_LAYOUT_VALUES[WidgetLayout.CIRCLE])

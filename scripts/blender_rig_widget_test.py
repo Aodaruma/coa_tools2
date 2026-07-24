@@ -23,6 +23,25 @@ def evaluated_bounds(obj):
         evaluated.to_mesh_clear()
 
 
+def connected_component_count(mesh):
+    adjacency = [set() for _vertex in mesh.vertices]
+    for edge in mesh.edges:
+        left, right = edge.vertices
+        adjacency[left].add(right)
+        adjacency[right].add(left)
+    remaining = set(range(len(mesh.vertices)))
+    components = 0
+    while remaining:
+        components += 1
+        stack = [remaining.pop()]
+        while stack:
+            for neighbor in adjacency[stack.pop()]:
+                if neighbor in remaining:
+                    remaining.remove(neighbor)
+                    stack.append(neighbor)
+    return components
+
+
 def main():
     module = addon_utils.enable("coa_tools2", default_set=False, persistent=False)
     if module is None:
@@ -71,6 +90,29 @@ def main():
     assert cache.type == "MESH"
     assert len(cache.data.vertices) > 0
     assert cache.get("coa_rig_artifact_role") == "widget_cache"
+    assert connected_component_count(cache.data) == 1
+
+    rectangle = WidgetSpec(
+        widget_uuid="phase0-rectangle",
+        layout=WidgetLayout.RECTANGLE,
+        width=4.0,
+        height=3.0,
+    )
+    rectangle_cache = ensure_widget(
+        rectangle,
+        name="Phase0Rectangle",
+        backend=WidgetBackend.EVALUATED_MESH_CACHE,
+    )
+    # The unioned frame has only its outer and inner boundary loops. The old
+    # joined-path implementation produced five disconnected components.
+    assert connected_component_count(rectangle_cache.data) == 2
+    assert (
+        sum(
+            node.bl_idname == "GeometryNodeMeshBoolean"
+            for node in group.nodes
+        )
+        == 2
+    )
 
     tip = WidgetSpec(
         widget_uuid="phase0-tip",

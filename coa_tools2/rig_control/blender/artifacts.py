@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 import uuid
 
@@ -304,10 +305,19 @@ def ensure_control_widgets(display_pose, control_pose, control):
     display_pose.custom_shape = base
     control_pose.use_custom_shape_bone_size = False
     display_pose.use_custom_shape_bone_size = False
-    if hasattr(control_pose, "custom_shape_translation"):
-        control_pose.custom_shape_translation = (
-            (0.0, control.radius, 0.0)
-            if control.control_type == "DIAL"
-            else (0.0, 0.0, 0.0)
-        )
+    for pose_bone in (control_pose, display_pose):
+        if hasattr(pose_bone, "custom_shape_translation"):
+            pose_bone.custom_shape_translation = (0.0, 0.0, 0.0)
+        if hasattr(pose_bone, "custom_shape_rotation_euler"):
+            pose_bone.custom_shape_rotation_euler = (0.0, 0.0, 0.0)
+    if control.control_type == "DIAL" and hasattr(
+        control_pose, "custom_shape_translation"
+    ):
+        control_pose.custom_shape_translation = (0.0, control.radius, 0.0)
+    if (
+        control.control_type == "SLIDER_1D"
+        and control.axis == "Y"
+        and hasattr(display_pose, "custom_shape_rotation_euler")
+    ):
+        display_pose.custom_shape_rotation_euler[2] = math.pi * 0.5
     return tip, base

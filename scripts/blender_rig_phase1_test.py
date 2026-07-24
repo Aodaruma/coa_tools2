@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import math
 import sys
 import tempfile
 from pathlib import Path
@@ -90,6 +91,33 @@ def main():
             for curve in strip.channelbag(slot).fcurves
         }
     assert any(control.control_bone in path for path in paths)
+
+    bpy.context.scene.cursor.location = (6.0, 0.0, 0.0)
+    bpy.context.view_layer.objects.active = armature
+    result = bpy.ops.coa_tools2.add_rig_control(
+        "EXEC_DEFAULT",
+        label="Vertical",
+        axis="Y",
+        width=4.0,
+        create_initial_binding=False,
+    )
+    assert result == {"FINISHED"}
+    vertical = armature.coa_tools2_rig.rig_controls[-1]
+    vertical_display = armature.pose.bones[vertical.display_bone]
+    assert (
+        abs(vertical_display.custom_shape_rotation_euler.z - math.pi * 0.5)
+        < 1e-6
+    )
+    vertical_pose = armature.pose.bones[vertical.control_bone]
+    vertical_limit = vertical_pose.constraints.get(
+        f"COA_{vertical.control_uuid[:8]}_LimitLocation"
+    )
+    assert vertical_limit is not None
+    assert vertical_limit.use_max_y and vertical_limit.max_y == vertical.width
+    vertical_pose.location.y = vertical.width
+    update_scene()
+    assert abs(vertical_pose.location.y - vertical.width) < 1e-6
+    bpy.context.scene.cursor.location = (0.0, 0.0, 0.0)
 
     with tempfile.TemporaryDirectory() as tempdir:
         filepath = Path(tempdir) / "phase1.blend"
