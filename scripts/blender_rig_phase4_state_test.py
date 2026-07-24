@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import sys
+import tempfile
+from pathlib import Path
 
 import addon_utils
 import bpy
@@ -213,7 +215,64 @@ def main():
     )
     assert driver_counts_after == driver_counts_before
 
+    validation_directory = tempfile.TemporaryDirectory(
+        prefix="coa-rig-phase4-reload-"
+    )
+    blend_path = Path(validation_directory.name) / "phase4-state.blend"
+    armature_name = armature.name
+    bpy.ops.wm.save_as_mainfile(filepath=str(blend_path))
+    bpy.ops.wm.open_mainfile(filepath=str(blend_path))
+
+    armature = bpy.data.objects[armature_name]
+    controls = {
+        control.label: control
+        for control in armature.coa_tools2_rig.rig_controls
+    }
+    matrix = controls["Face State Matrix"]
+    linear = controls["Mouth States"]
+    assert len(matrix.state_points) == 4
+    assert len(linear.state_points) == 3
+    assert all(
+        point.target_object is not None and point.target_name
+        for point in (*matrix.state_points, *linear.state_points)
+    )
+    matrix_target = bpy.data.objects["Phase4MatrixTarget"]
+    linear_target = bpy.data.objects["Phase4LinearTarget"]
+    matrix_handle = armature.pose.bones[matrix.control_bone]
+    matrix_handle.location.x = 2.0
+    matrix_handle.location.y = 1.5
+    assert_values(
+        {
+            key.name: key
+            for key in matrix_target.data.shape_keys.key_blocks
+            if key.name != "Basis"
+        },
+        {
+            "Matrix_0_0": 0.25,
+            "Matrix_1_0": 0.25,
+            "Matrix_0_1": 0.25,
+            "Matrix_1_1": 0.25,
+        },
+    )
+    linear_handle = armature.pose.bones[linear.control_bone]
+    linear_handle.location.x = 3.0
+    assert_values(
+        {
+            key.name: key
+            for key in linear_target.data.shape_keys.key_blocks
+            if key.name != "Basis"
+        },
+        {
+            "Linear_0_0": 0.0,
+            "Linear_1_0": 0.5,
+            "Linear_2_0": 0.5,
+        },
+    )
+    bpy.ops.coa_tools2.validate_rig()
+    assert not armature.coa_tools2_rig.rig_validation_issues
+
     addon_utils.disable("coa_tools2", default_set=False)
+    validation_directory.cleanup()
     print("COA rig Phase 4 StateData test OK.")
 
 

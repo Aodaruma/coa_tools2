@@ -1,6 +1,7 @@
 # COA Tools 2: 2Dリグコントローラー調査・設計案
 
 - 調査日: 2026-07-18
+- 実装反映日: 2026-07-25
 - 対象: COA Tools 2 Blender add-on
 - 関連issue: [#47](https://github.com/Aodaruma/coa_tools2/issues/47), [#66](https://github.com/Aodaruma/coa_tools2/issues/66), [#62](https://github.com/Aodaruma/coa_tools2/issues/62)
 - 文書の位置づけ: 実装前の設計判断と技術スパイク項目をまとめる。最終API仕様ではない。
@@ -468,7 +469,7 @@ WidgetSpec
 | Dial | 円 | 中心円弧を内外OffsetしたRail + 端点Node。HandleはRail上だけを移動 |
 | 2D Rectangle Free | 円 | 合成形状の外側境界だけを残し、内側Pathを除去。Handleは内部を自由移動 |
 | 2D Rectangle Grid | 円 | 外側境界 + 任意列×行の内側Rail。HandleはRail上だけを移動 |
-| 2D Matrix | 円 | 各状態点円 + 隣接点間バー |
+| 2D Matrix `FULL` | 円 | 合成された外枠 + 任意列×行の状態点円。内部Railなしで自由移動 |
 | Triangle / Polygon | 円 | 頂点円 + 回転した辺バー |
 
 円半径、バー幅、全体寸法、向き、行列数、状態点表示をUIから変更し、同じ形態のNode Groupで見た目を調整できるようにする。GridはPoint列とInstanceで反復生成し、CircleはCyclic Closureを用いる。WidgetのTopology変更はRig Animationとは独立しており、Control BoneのF-Curveを変更しない。
@@ -547,12 +548,21 @@ Slot Indexは[#62](https://github.com/Aodaruma/coa_tools2/issues/62)のRender Cr
 
 ### Phase 3: StateData
 
-- 1D sparse key-pose
-- 任意`columns × rows`の2D State Matrix
+実装済み:
+
+- 1D Shape Key State
+- 任意`columns × rows`の2D Shape Key State Matrix
 - Shape Key Matrixの区分線形基底Weight Driver
 - 2×2、3×2、2×4 Preset
+- State Pointの後割当、Empty、Snap、Resize Preview
+- Target競合検出とValidation/Repair
+- 外枠と状態点を共有生成するMatrix専用Geometry Nodes
+
+未実装:
+
+- 複数Targetを束ねる汎用Pose State
 - Action Constraint Adapter
-- Target競合検出と明示的Blend Group
+- 明示的Blend Group
 
 ### Phase 4: 高度なWidget
 

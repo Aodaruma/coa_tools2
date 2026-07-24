@@ -1,6 +1,6 @@
 # COA Tools 2: Rig Control / Rig Graph 統合設計・実装方針
 
-更新日: 2026-07-18
+更新日: 2026-07-25
 
 ## 1. この文書の目的
 
@@ -13,6 +13,21 @@
 既存案はViewportで操作する2Dコントローラーを中心にしている。共有案A/Bは、それらを再利用可能な宣言データから生成・再生成するRig Graph Compilerを中心にしている。両者は競合案ではなく、前者がユーザーに見える操作層、後者がその構築と保守を担う上位層である。
 
 本書の結論は、汎用Rig Graphを先に完成させるのではなく、1D Sliderの縦切り実装でBlender固有の制約を検証し、その実装から汎用化できる境界を抽出する、というものである。
+
+### 1.1 実装状況
+
+Phase 0〜3に加え、Phase 4AとしてShape Keyを対象にした連続StateDataを実装済みである。
+
+- リグの外郭だけを先に作り、後から各State PointへShape Keyを割り当てられる。
+- 1Dは2点以上、2D Matrixは任意の`columns × rows`を保存する。
+- `2×2`、`3×2`、`2×4`のUI PresetとCustom Resizeを持つ。
+- 各State Shape Keyへ区分線形基底またはBilinear Weight Driverを生成する。
+- State PointのAssign、明示的なEmpty、Snap、Validate、Repairに対応する。
+- 行列拡張時は既存座標の割当を維持し、縮小で失われる割当を一覧Previewして確認を要求する。
+- Matrix専用の共有`COA_RigWidget_Matrix_GN`から、外枠と任意数の状態点を生成する。
+- Save/Reload後もState Point割当とDriver評価を維持する。
+
+`FULL` Mixではセル内部を連続補間するため、Matrix Baseに内部Railを描かず、Control Boneを矩形内部で自由移動させる。通常の`Rectangle Grid`は内部Railを描き、Rail上だけを動く別Presetとして維持する。内部Railと部分的な遷移を組み合わせる`MASKED` Mix、Triangle State、複数Bone/Propertyを束ねる汎用Pose StateはPhase 4B以降とする。
 
 ## 2. 結論
 
@@ -308,7 +323,7 @@ Geometry Nodesの基本Primitiveは円`CIRCLE`と、任意Pathから内外Offset
 | 1D Slider | Tip、両端 | Rail |
 | Dial | Tip、Ringまたは状態点 | 必要な目盛 |
 | 2D Slider | Tip、四隅 | 四辺 |
-| State Matrix | Tip、各状態点 | 隣接点間のGrid |
+| State Matrix `FULL` | Tip、各状態点 | 外枠のみ。内部は連続補間領域 |
 | Triangle / Polygon | Tip、各頂点 | 回転させた各辺 |
 
 Control BoneにはTip Widget、Display BoneにはBase Widgetを割り当てる。Source ObjectはSlider、Radial、Rectangle等の同一形態内でNode Groupを共有するが、Modifier InputとArtifact Roleは個別に持つ。全形式を一つの巨大Groupで切り替えない。
@@ -458,7 +473,7 @@ WidgetはGeometry Nodesによるパラメトリック生成を必須とする。
 - 2D Grid: 円Tip、任意列×行のGrid Bar。表示Rail上だけを移動
 - Circle: 円Tip、外側円周のみ。内側Pathを削除して円内を自由移動
 - Dial: 円Tip、設定角度範囲の内外Offset Arc Railと端点Node。表示Rail上だけを移動
-- Matrix: 円Tip、任意列×行のState Point、隣接点間のGrid Bar
+- Matrix FULL: 円Tip、外枠、任意列×行のState Point。内部は自由移動
 - Triangle/Polygon: 円Tip、頂点円、回転Bar
 
 主要UI Parameterは、幅、高さ、向き、Tip半径、状態点半径、Bar幅、Dial範囲、Snap数、列数、行数、Grid表示である。Tip半径の既定値は状態点半径の2倍とする。Preset選択後も調整でき、Control Animationを変更せずにWidgetだけを再Compileできるようにする。
@@ -593,14 +608,35 @@ No-pop Space Switchは専用Operatorとし、切替前後のWorld Transform一�
 
 ### Phase 4: Pose State / StateData
 
-- Issue #66のStateData Schemaを定義する。
-- 疎なKey Poseと補間を実装する。
-- 1D State、任意列×行の2D State Matrix、Triangle Stateの順に増やす。
-- 2×2、3×2、2×4のPresetとBilinear Weight Driverを実装する。
-- Matrix Pointの割当、Snap、行列追加・削除Previewを実装する。
-- Slot置換と連続Stateを分ける。
-- GN Matrix Base + Control Bone Cursor Widgetを追加する。
-- `FULL` Mixの安定後に`MASKED` Mixを追加する。
+#### Phase 4A: Shape Key State（実装済み）
+
+- Issue #66へ接続可能なStateData Schema
+- 1D Stateと任意列×行の2D State Matrix
+- 2×2、3×2、2×4 PresetとBilinear Weight Driver
+- Matrix Pointの割当、明示的Empty、Snap
+- 行列追加時の割当維持と、削除Preview・確認
+- Slot置換と連続Stateのデータ分離
+- GN Matrix Base + Control Bone Cursor
+- `FULL` Mix
+
+#### Phase 4B: Pose State拡張（未実装）
+
+- 複数Bone、Shape Key、COA Property差分を束ねる疎なPose State
+- Triangle / Barycentric State
+- Matrix `MASKED` Mixと部分遷移境界
+- 不均等な列・行座標
+- 複製、Export Bakeを含むGate Cの残り
+
+#### Phase 4Aの基本操作
+
+1. `1D Slider`または`2D Rectangle`をBindingなしで作る。
+2. `Continuous States > Set Up State Grid`を開く。
+3. 1Dでは点数、Matrixでは列数・行数を選ぶ。
+4. 一覧でState Pointを選択し、`Assign`からMeshとShape Keyを割り当てる。
+5. Shape Keyを割り当てない意図的な基準状態は`Empty`にする。
+6. `Snap`でHandleを選択中のState Pointへ移動し、位置と割当を確認する。
+
+リグ作成時にShape Keyが揃っている必要はない。State Point一覧は後から編集でき、`Update Rig Control`と`Repair Rig`は現在のStateDataからWidgetとDriverを再生成する。
 
 ### Phase 5: Rig Graph導入判断
 
