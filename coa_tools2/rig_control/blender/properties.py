@@ -131,7 +131,7 @@ class COATOOLS2_PG_RigControl(bpy.types.PropertyGroup):
         subtype="ANGLE",
         update=_mark_control_dirty,
     )
-    tip_radius: FloatProperty(default=0.28, min=0.01, update=_mark_control_dirty)
+    tip_radius: FloatProperty(default=0.68, min=0.01, update=_mark_control_dirty)
     node_radius: FloatProperty(default=0.34, min=0.01, update=_mark_control_dirty)
     bar_width: FloatProperty(default=0.28, min=0.01, update=_mark_control_dirty)
     stroke_radius: FloatProperty(

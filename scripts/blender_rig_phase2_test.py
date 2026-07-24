@@ -95,7 +95,11 @@ def main():
 
     result = bpy.ops.coa_tools2.validate_rig()
     assert result == {"FINISHED"}
-    assert len(armature.coa_tools2_rig.rig_validation_issues) == 0
+    issues = [
+        (issue.code, issue.message)
+        for issue in armature.coa_tools2_rig.rig_validation_issues
+    ]
+    assert not issues, issues
 
     base_widget = armature.pose.bones[control.display_bone].custom_shape
     bpy.data.objects.remove(base_widget, do_unlink=True)
@@ -105,7 +109,11 @@ def main():
 
     result = bpy.ops.coa_tools2.repair_rig()
     assert result == {"FINISHED"}
-    assert len(armature.coa_tools2_rig.rig_validation_issues) == 0
+    issues = [
+        (issue.code, issue.message)
+        for issue in armature.coa_tools2_rig.rig_validation_issues
+    ]
+    assert not issues, issues
     assert armature.pose.bones[control.display_bone].custom_shape is not None
 
     counts_before = (len(armature.data.bones), len(bpy.data.objects))

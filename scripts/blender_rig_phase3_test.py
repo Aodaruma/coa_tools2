@@ -141,7 +141,11 @@ def main():
     assert abs(keys["Dial"].value - 1.0) < 1e-5, keys["Dial"].value
 
     bpy.ops.coa_tools2.validate_rig()
-    assert len(armature.coa_tools2_rig.rig_validation_issues) == 0
+    issues = [
+        (issue.code, issue.message)
+        for issue in armature.coa_tools2_rig.rig_validation_issues
+    ]
+    assert not issues, issues
 
     from coa_tools2.rig_control.blender.compiler import compile_control
 

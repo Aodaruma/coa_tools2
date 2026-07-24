@@ -322,10 +322,10 @@ WidgetはControlの値やBindingから独立したPresentation定義として保
 | `widget_id` | Widget定義の安定ID |
 | `layout_kind` | `TIP`、`LINEAR_BASE`、`RECT_BASE`、`DIAL_BASE`、`MATRIX_BASE`、`POLY_BASE` |
 | `width` / `height` | 全体寸法 |
-| `tip_radius` | 操作Tipの円半径 |
+| `tip_radius` | 操作Tipの円半径。既定値は`node_radius × 2` |
 | `node_radius` | 端点・状態点の円半径 |
-| `bar_width` | 矩形バーの太さ |
-| `stroke_radius` | 円・矩形輪郭をMesh化する線半径 |
+| `bar_width` | 中心Pathから内外へOffsetするRailの太さ |
+| `stroke_radius` | 旧Tube輪郭との互換用。表示には使わず、非表示Rail Targetの微小幅にのみ利用 |
 | `columns` / `rows` | Matrixの列数・行数 |
 | `orientation` | Horizontal、Vertical、任意角度 |
 | `arc_start` / `arc_end` | Dial/Arc表示範囲 |
@@ -337,7 +337,7 @@ Geometry Nodes側の基本Primitiveは次の二つに限定する。
 1. `CIRCLE`: Tip、端点、状態点、Dial Ring
 2. `BAR`: 二点間に配置・回転する矩形。Rail、枠、Grid線、Polygon辺
 
-1D、2D、Dial、Matrix、Triangleをこの二Primitiveの配置と合成で構築する。Control BoneにはTip用Widget、Display BoneにはBase用Widgetを割り当て、BaseがHandleと一緒に動かないようにする。
+1D、2D、Dial、Matrix、Triangleをこの二Primitiveの配置と合成で構築する。Railは中心Pathと`bar_width`から生成し、円Nodeと合成後に境界だけを面なしMesh Edgeへ変換する。このPath処理は将来のPolygon辺にも再利用する。Control BoneにはTip用Widget、Display BoneにはBase用Widgetを割り当て、BaseがHandleと一緒に動かないようにする。
 
 ### 7.5 MatrixStateSpec
 
@@ -442,14 +442,20 @@ result = w0 * state0 + w1 * state1 + w2 * state2
 
 ### 10.1 必須のGeometry Nodes Widget基盤
 
-全PresetのWidgetは、共有Geometry Node Group `COA_RigWidget_GN`から生成する。各Widget ObjectはNode Groupを共有し、Modifier Inputだけを個別に持つ。
+Widgetは全形式を一つのNode Groupで切り替えず、形態ごとの共有Geometry Node Groupから生成する。各Source Objectは該当Groupを共有し、Modifier Inputだけを個別に持つ。
+
+- `COA_RigWidget_Tip_GN`
+- `COA_RigWidget_Slider_GN`
+- `COA_RigWidget_Radial_GN`: Circle / Dial
+- `COA_RigWidget_Rectangle_GN`: Free / Grid
 
 ```text
 WidgetSpec
     -> Geometry Nodes Modifier Inputs
-    -> CIRCLE / BAR primitives
-    -> Join / Realize
-    -> Mesh output
+    -> 形態別の共有GN
+    -> Path Offset / Circle Node / Repeat Instance
+    -> Union Boundary
+    -> FaceなしMesh Edge output
     -> Pose Bone Custom Shape
 ```
 
@@ -458,14 +464,14 @@ WidgetSpec
 | Preset | Tip | Base |
 |---|---|---|
 | 1D Horizontal / Vertical | 円 | 両端円 + 矩形バー |
-| 2D Circle | 円 | 円環 |
-| Dial | 円 | 設定角度範囲の円弧Rail。HandleはRail上だけを移動 |
-| 2D Rectangle Free | 円 | 外枠のみ。Handleは内部を自由移動 |
-| 2D Rectangle Grid | 円 | 外枠 + 任意列×行のRail。HandleはRail上だけを移動 |
+| 2D Circle | 円 | 円形Railの外側境界だけを残し、内側Pathを除去 |
+| Dial | 円 | 中心円弧を内外OffsetしたRail + 端点Node。HandleはRail上だけを移動 |
+| 2D Rectangle Free | 円 | 合成形状の外側境界だけを残し、内側Pathを除去。Handleは内部を自由移動 |
+| 2D Rectangle Grid | 円 | 外側境界 + 任意列×行の内側Rail。HandleはRail上だけを移動 |
 | 2D Matrix | 円 | 各状態点円 + 隣接点間バー |
 | Triangle / Polygon | 円 | 頂点円 + 回転した辺バー |
 
-円半径、バー幅、全体寸法、向き、行列数、状態点表示をUIから変更し、同じNode Groupで見た目を調整できるようにする。WidgetのTopology変更はRig Animationとは独立しており、Control BoneのF-Curveを変更しない。
+円半径、バー幅、全体寸法、向き、行列数、状態点表示をUIから変更し、同じ形態のNode Groupで見た目を調整できるようにする。GridはPoint列とInstanceで反復生成し、CircleはCyclic Closureを用いる。WidgetのTopology変更はRig Animationとは独立しており、Control BoneのF-Curveを変更しない。
 
 ### 10.2 Live評価とEvaluated Mesh Cache
 

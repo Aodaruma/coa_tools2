@@ -38,6 +38,10 @@ class RigControlSchemaTests(unittest.TestCase):
         )
         self.assertEqual(spec, WidgetSpec.from_dict(spec.to_dict()))
 
+    def test_tip_radius_defaults_to_twice_node_radius(self):
+        spec = WidgetSpec(widget_uuid="widget-tip", layout=WidgetLayout.TIP)
+        self.assertEqual(spec.node_radius * 2.0, spec.tip_radius)
+
     def test_control_spec_round_trip(self):
         spec = ControlSpec(
             control_uuid="control-1",

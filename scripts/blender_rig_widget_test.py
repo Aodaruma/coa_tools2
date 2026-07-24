@@ -19,7 +19,13 @@ def evaluated_bounds(obj):
         if not mesh.vertices:
             raise AssertionError("Geometry Nodes widget produced no vertices.")
         xs = [vertex.co.x for vertex in mesh.vertices]
-        return min(xs), max(xs), len(mesh.vertices), len(mesh.polygons)
+        return (
+            min(xs),
+            max(xs),
+            len(mesh.vertices),
+            len(mesh.edges),
+            len(mesh.polygons),
+        )
     finally:
         evaluated.to_mesh_clear()
 
@@ -49,9 +55,11 @@ def main():
         raise RuntimeError("Could not enable coa_tools2.")
 
     from coa_tools2.rig_control.blender.widgets import (
-        NODE_GROUP_NAME,
+        LEGACY_NODE_GROUP_NAME,
+        NODE_GROUP_NAMES,
         ensure_widget,
         ensure_widget_node_group,
+        ensure_widget_node_groups,
         ensure_widget_source,
     )
     from coa_tools2.rig_control.schema import (
@@ -60,8 +68,23 @@ def main():
         WidgetSpec,
     )
 
-    group = ensure_widget_node_group()
-    assert group.name == NODE_GROUP_NAME
+    groups = ensure_widget_node_groups()
+    assert {group.name for group in groups.values()} == set(
+        NODE_GROUP_NAMES.values()
+    )
+    assert len({group.as_pointer() for group in groups.values()}) == 4
+    slider_group = ensure_widget_node_group(WidgetLayout.LINEAR)
+    assert slider_group == groups["SLIDER"]
+    assert (
+        ensure_widget_node_group(WidgetLayout.CIRCLE)
+        == ensure_widget_node_group(WidgetLayout.DIAL)
+        == groups["RADIAL"]
+    )
+    assert (
+        ensure_widget_node_group(WidgetLayout.RECTANGLE)
+        == ensure_widget_node_group(WidgetLayout.RECTANGLE_GRID)
+        == groups["RECTANGLE"]
+    )
 
     narrow = WidgetSpec(
         widget_uuid="phase0-linear",
@@ -72,6 +95,8 @@ def main():
     narrow_bounds = evaluated_bounds(source)
     assert narrow_bounds[2] > 0
     assert narrow_bounds[3] > 0
+    assert narrow_bounds[4] == 0
+    assert source.modifiers["COA Rig Widget"].node_group == groups["SLIDER"]
 
     wide = WidgetSpec(
         widget_uuid="phase0-linear",
@@ -92,6 +117,7 @@ def main():
     assert len(cache.data.vertices) > 0
     assert cache.get("coa_rig_artifact_role") == "widget_cache"
     assert connected_component_count(cache.data) == 1
+    assert len(cache.data.polygons) == 0
 
     rectangle = WidgetSpec(
         widget_uuid="phase0-rectangle",
@@ -104,15 +130,16 @@ def main():
         name="Phase0Rectangle",
         backend=WidgetBackend.EVALUATED_MESH_CACHE,
     )
-    # The unioned frame has only its outer and inner boundary loops. The old
-    # joined-path implementation produced five disconnected components.
-    assert connected_component_count(rectangle_cache.data) == 2
+    # Free mode deliberately removes the interior boundary and keeps only the
+    # outside perimeter of the merged frame/node shape.
+    assert connected_component_count(rectangle_cache.data) == 1
+    assert len(rectangle_cache.data.polygons) == 0
     assert (
         sum(
             node.bl_idname == "GeometryNodeMeshBoolean"
-            for node in group.nodes
+            for node in groups["RECTANGLE"].nodes
         )
-        == 3
+        == 2
     )
 
     grid_rectangle = WidgetSpec(
@@ -130,6 +157,20 @@ def main():
     )
     # One outside boundary plus one loop around each of the four cells.
     assert connected_component_count(grid_cache.data) == 5
+    assert len(grid_cache.data.polygons) == 0
+
+    circle = WidgetSpec(
+        widget_uuid="phase0-circle",
+        layout=WidgetLayout.CIRCLE,
+        radius=2.0,
+    )
+    circle_cache = ensure_widget(
+        circle,
+        name="Phase0Circle",
+        backend=WidgetBackend.EVALUATED_MESH_CACHE,
+    )
+    assert connected_component_count(circle_cache.data) == 1
+    assert len(circle_cache.data.polygons) == 0
 
     dial = WidgetSpec(
         widget_uuid="phase0-dial",
@@ -144,7 +185,15 @@ def main():
         backend=WidgetBackend.EVALUATED_MESH_CACHE,
     )
     assert connected_component_count(dial_cache.data) == 1
-    assert min(vertex.co.y for vertex in dial_cache.data.vertices) > -0.1
+    assert len(dial_cache.data.polygons) == 0
+    assert min(vertex.co.y for vertex in dial_cache.data.vertices) > -0.5
+    assert (
+        sum(
+            node.bl_idname == "GeometryNodeMeshBoolean"
+            for node in groups["RADIAL"].nodes
+        )
+        == 1
+    )
 
     tip = WidgetSpec(
         widget_uuid="phase0-tip",
@@ -154,6 +203,12 @@ def main():
     tip_source = ensure_widget_source(tip, name="Phase0Tip")
     tip_bounds = evaluated_bounds(tip_source)
     assert tip_bounds[2] > 0
+    assert tip_bounds[4] == 0
+    assert tip_source.modifiers["COA Rig Widget"].node_group == groups["TIP"]
+
+    defaults = WidgetSpec(widget_uuid="phase0-defaults", layout=WidgetLayout.TIP)
+    assert defaults.tip_radius == defaults.node_radius * 2.0
+    assert LEGACY_NODE_GROUP_NAME not in bpy.data.node_groups
 
     addon_utils.disable("coa_tools2", default_set=False)
     print("COA rig widget Geometry Nodes test OK.")

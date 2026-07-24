@@ -3,26 +3,45 @@
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import Any, Callable
 
 import bpy
 
 from ..schema import WidgetBackend, WidgetLayout, WidgetSpec
 
 
-NODE_GROUP_NAME = "COA_RigWidget_GN"
 WIDGET_COLLECTION_NAME = "COA Rig Widgets"
-NODE_GROUP_VERSION = 4
+NODE_GROUP_VERSION = 5
+LEGACY_NODE_GROUP_NAME = "COA_RigWidget_GN"
+NODE_GROUP_NAMES = {
+    "TIP": "COA_RigWidget_Tip_GN",
+    "SLIDER": "COA_RigWidget_Slider_GN",
+    "RADIAL": "COA_RigWidget_Radial_GN",
+    "RECTANGLE": "COA_RigWidget_Rectangle_GN",
+}
 _BOOLEAN_SOLID_DEPTH = 0.1
 
-_LAYOUT_VALUES = {
-    WidgetLayout.TIP: 0,
-    WidgetLayout.LINEAR: 1,
-    WidgetLayout.RECTANGLE: 2,
-    WidgetLayout.CIRCLE: 3,
-    WidgetLayout.DIAL: 4,
-    WidgetLayout.RECTANGLE_GRID: 5,
-}
+
+def widget_family(layout: WidgetLayout) -> str:
+    if layout == WidgetLayout.TIP:
+        return "TIP"
+    if layout == WidgetLayout.LINEAR:
+        return "SLIDER"
+    if layout in {WidgetLayout.CIRCLE, WidgetLayout.DIAL}:
+        return "RADIAL"
+    if layout in {WidgetLayout.RECTANGLE, WidgetLayout.RECTANGLE_GRID}:
+        return "RECTANGLE"
+    raise ValueError(f"Unsupported widget layout: {layout}")
+
+
+def expected_widget_node_group_names(
+    layouts: set[WidgetLayout] | None = None,
+) -> set[str]:
+    if layouts is None:
+        families = set(NODE_GROUP_NAMES)
+    else:
+        families = {widget_family(layout) for layout in layouts}
+    return {NODE_GROUP_NAMES[family] for family in families}
 
 
 def ensure_widget_collection(scene: bpy.types.Scene | None = None):
@@ -54,35 +73,24 @@ def _math_node(nodes, operation, label):
     return node
 
 
-def _circle_mesh(nodes, links, radius_socket, stroke_socket, label):
-    path = nodes.new("GeometryNodeCurvePrimitiveCircle")
-    path.mode = "RADIUS"
-    path.label = f"{label} Path"
-    path.inputs["Resolution"].default_value = 32
-    links.new(radius_socket, path.inputs["Radius"])
-
-    profile = nodes.new("GeometryNodeCurvePrimitiveCircle")
-    profile.mode = "RADIUS"
-    profile.label = f"{label} Profile"
-    profile.inputs["Resolution"].default_value = 6
-    links.new(stroke_socket, profile.inputs["Radius"])
-
-    curve_to_mesh = nodes.new("GeometryNodeCurveToMesh")
-    curve_to_mesh.label = label
-    links.new(path.outputs["Curve"], curve_to_mesh.inputs["Curve"])
-    links.new(profile.outputs["Curve"], curve_to_mesh.inputs["Profile Curve"])
-    return curve_to_mesh.outputs["Mesh"]
+def _compare_input(node, name, socket_type):
+    return next(
+        socket
+        for socket in node.inputs
+        if socket.name == name and socket.type == socket_type
+    )
 
 
-def _arc_mesh(
-    nodes,
-    links,
-    radius_socket,
-    start_socket,
-    end_socket,
-    stroke_socket,
-    label,
-):
+def _circle_curve(nodes, links, radius_socket, label):
+    circle = nodes.new("GeometryNodeCurvePrimitiveCircle")
+    circle.mode = "RADIUS"
+    circle.label = label
+    circle.inputs["Resolution"].default_value = 48
+    links.new(radius_socket, circle.inputs["Radius"])
+    return circle.outputs["Curve"]
+
+
+def _arc_curve(nodes, links, radius_socket, start_socket, end_socket, label):
     start_angle = _math_node(nodes, "ADD", f"{label} Start Angle")
     start_angle.inputs[1].default_value = math.pi * 0.5
     links.new(start_socket, start_angle.inputs[0])
@@ -90,34 +98,54 @@ def _arc_mesh(
     links.new(end_socket, sweep_angle.inputs[0])
     links.new(start_socket, sweep_angle.inputs[1])
 
-    path = nodes.new("GeometryNodeCurveArc")
-    path.mode = "RADIUS"
-    path.label = f"{label} Path"
-    path.inputs["Resolution"].default_value = 64
-    links.new(radius_socket, path.inputs["Radius"])
-    links.new(start_angle.outputs[0], path.inputs["Start Angle"])
-    links.new(sweep_angle.outputs[0], path.inputs["Sweep Angle"])
+    arc = nodes.new("GeometryNodeCurveArc")
+    arc.mode = "RADIUS"
+    arc.label = label
+    arc.inputs["Resolution"].default_value = 64
+    links.new(radius_socket, arc.inputs["Radius"])
+    links.new(start_angle.outputs[0], arc.inputs["Start Angle"])
+    links.new(sweep_angle.outputs[0], arc.inputs["Sweep Angle"])
+    return arc.outputs["Curve"]
 
-    profile = nodes.new("GeometryNodeCurvePrimitiveCircle")
-    profile.mode = "RADIUS"
-    profile.label = f"{label} Profile"
-    profile.inputs["Resolution"].default_value = 6
-    links.new(stroke_socket, profile.inputs["Radius"])
+
+def _line_curve(nodes, links, start_x_socket, end_x_socket, label):
+    start = nodes.new("ShaderNodeCombineXYZ")
+    start.label = f"{label} Start"
+    end = nodes.new("ShaderNodeCombineXYZ")
+    end.label = f"{label} End"
+    links.new(start_x_socket, start.inputs["X"])
+    links.new(end_x_socket, end.inputs["X"])
+
+    line = nodes.new("GeometryNodeCurvePrimitiveLine")
+    line.mode = "POINTS"
+    line.label = label
+    links.new(start.outputs["Vector"], line.inputs["Start"])
+    links.new(end.outputs["Vector"], line.inputs["End"])
+    return line.outputs["Curve"]
+
+
+def _curve_to_edge_mesh(nodes, links, curve_socket, label):
+    """Convert curves to mesh edges without adding an inner stroke contour."""
+
+    point_profile = nodes.new("GeometryNodeCurvePrimitiveLine")
+    point_profile.mode = "POINTS"
+    point_profile.label = f"{label} Point Profile"
+    point_profile.inputs["Start"].default_value = (0.0, 0.0, 0.0)
+    point_profile.inputs["End"].default_value = (0.0, 0.0, 0.0)
 
     curve_to_mesh = nodes.new("GeometryNodeCurveToMesh")
-    curve_to_mesh.label = label
-    links.new(path.outputs["Curve"], curve_to_mesh.inputs["Curve"])
-    links.new(profile.outputs["Curve"], curve_to_mesh.inputs["Profile Curve"])
-    return curve_to_mesh.outputs["Mesh"]
+    curve_to_mesh.label = f"{label} Curve to Edges"
+    links.new(curve_socket, curve_to_mesh.inputs["Curve"])
+    links.new(point_profile.outputs["Curve"], curve_to_mesh.inputs["Profile Curve"])
+
+    merge = nodes.new("GeometryNodeMergeByDistance")
+    merge.label = label
+    merge.inputs["Distance"].default_value = 0.0001
+    links.new(curve_to_mesh.outputs["Mesh"], merge.inputs["Geometry"])
+    return merge.outputs["Geometry"]
 
 
-def _solid_box_mesh(
-    nodes,
-    links,
-    width_socket,
-    height_socket,
-    label,
-):
+def _solid_box_mesh(nodes, links, width_socket, height_socket, label):
     size = nodes.new("ShaderNodeCombineXYZ")
     size.label = f"{label} Size"
     links.new(width_socket, size.inputs["X"])
@@ -133,7 +161,7 @@ def _solid_box_mesh(
 def _solid_circle_mesh(nodes, links, radius_socket, label):
     cylinder = nodes.new("GeometryNodeMeshCylinder")
     cylinder.label = label
-    cylinder.inputs["Vertices"].default_value = 32
+    cylinder.inputs["Vertices"].default_value = 48
     cylinder.inputs["Side Segments"].default_value = 1
     cylinder.inputs["Fill Segments"].default_value = 1
     links.new(radius_socket, cylinder.inputs["Radius"])
@@ -141,15 +169,28 @@ def _solid_circle_mesh(nodes, links, radius_socket, label):
     return cylinder.outputs["Mesh"]
 
 
-def _compare_input(node, name, socket_type):
-    return next(
-        socket
-        for socket in node.inputs
-        if socket.name == name and socket.type == socket_type
-    )
+def _solid_rail_from_path(
+    nodes,
+    links,
+    path_curve_socket,
+    bar_width_socket,
+    label,
+):
+    profile = nodes.new("GeometryNodeCurvePrimitiveQuadrilateral")
+    profile.mode = "RECTANGLE"
+    profile.label = f"{label} Rail Profile"
+    links.new(bar_width_socket, profile.inputs["Width"])
+    profile.inputs["Height"].default_value = _BOOLEAN_SOLID_DEPTH
+
+    curve_to_mesh = nodes.new("GeometryNodeCurveToMesh")
+    curve_to_mesh.label = label
+    curve_to_mesh.inputs["Fill Caps"].default_value = True
+    links.new(path_curve_socket, curve_to_mesh.inputs["Curve"])
+    links.new(profile.outputs["Curve"], curve_to_mesh.inputs["Profile Curve"])
+    return curve_to_mesh.outputs["Mesh"]
 
 
-def _union_outline_mesh(nodes, links, geometries, stroke_socket, label):
+def _boundary_curve_from_union(nodes, links, geometries, label):
     boolean = nodes.new("GeometryNodeMeshBoolean")
     boolean.operation = "UNION"
     boolean.solver = "EXACT"
@@ -204,18 +245,12 @@ def _union_outline_mesh(nodes, links, geometries, stroke_socket, label):
     boundary.label = f"{label} Boundary"
     links.new(top_surface.outputs["Selection"], boundary.inputs["Mesh"])
     links.new(is_boundary.outputs["Result"], boundary.inputs["Selection"])
+    return boundary.outputs["Curve"]
 
-    profile = nodes.new("GeometryNodeCurvePrimitiveCircle")
-    profile.mode = "RADIUS"
-    profile.label = f"{label} Profile"
-    profile.inputs["Resolution"].default_value = 6
-    links.new(stroke_socket, profile.inputs["Radius"])
 
-    curve_to_mesh = nodes.new("GeometryNodeCurveToMesh")
-    curve_to_mesh.label = label
-    links.new(boundary.outputs["Curve"], curve_to_mesh.inputs["Curve"])
-    links.new(profile.outputs["Curve"], curve_to_mesh.inputs["Profile Curve"])
-    return curve_to_mesh.outputs["Mesh"]
+def _union_outline_mesh(nodes, links, geometries, label):
+    boundary = _boundary_curve_from_union(nodes, links, geometries, label)
+    return _curve_to_edge_mesh(nodes, links, boundary, label)
 
 
 def _translated_geometry(
@@ -266,13 +301,13 @@ def _grid_bar_instances(
 
     points = nodes.new("GeometryNodeMeshLine")
     points.mode = "OFFSET"
-    points.label = f"{label} Points"
+    points.label = f"{label} Repeat Points"
     links.new(count_socket, points.inputs["Count"])
     links.new(start.outputs["Vector"], points.inputs["Start Location"])
     links.new(offset.outputs["Vector"], points.inputs["Offset"])
 
     instances = nodes.new("GeometryNodeInstanceOnPoints")
-    instances.label = label
+    instances.label = f"{label} Repeat"
     links.new(points.outputs["Mesh"], instances.inputs["Points"])
     links.new(instance_geometry, instances.inputs["Instance"])
 
@@ -282,102 +317,219 @@ def _grid_bar_instances(
     return realize.outputs["Geometry"]
 
 
-def ensure_widget_node_group():
-    existing = bpy.data.node_groups.get(NODE_GROUP_NAME)
-    if existing is not None and existing.get("coa_rig_widget_version") == NODE_GROUP_VERSION:
-        return existing
-    if existing is not None:
-        if existing.users:
-            existing.name = f"{NODE_GROUP_NAME}_legacy"
-        else:
-            bpy.data.node_groups.remove(existing)
+def _half_dimension(nodes, links, dimension_socket, label, factor=0.5):
+    value = _math_node(nodes, "MULTIPLY", label)
+    value.inputs[1].default_value = factor
+    links.new(dimension_socket, value.inputs[0])
+    return value.outputs[0]
 
-    node_group = bpy.data.node_groups.new(NODE_GROUP_NAME, "GeometryNodeTree")
-    node_group["coa_rig_managed"] = True
-    node_group["coa_rig_widget_version"] = NODE_GROUP_VERSION
 
-    _new_interface_socket(node_group, "Geometry", "OUTPUT", "NodeSocketGeometry")
-    _new_interface_socket(node_group, "Layout", "INPUT", "NodeSocketInt", 0)
-    _new_interface_socket(node_group, "Width", "INPUT", "NodeSocketFloat", 4.0)
-    _new_interface_socket(node_group, "Height", "INPUT", "NodeSocketFloat", 2.0)
-    _new_interface_socket(node_group, "Radius", "INPUT", "NodeSocketFloat", 2.0)
-    _new_interface_socket(node_group, "Tip Radius", "INPUT", "NodeSocketFloat", 0.28)
-    _new_interface_socket(node_group, "Node Radius", "INPUT", "NodeSocketFloat", 0.34)
-    _new_interface_socket(node_group, "Bar Width", "INPUT", "NodeSocketFloat", 0.28)
-    _new_interface_socket(node_group, "Stroke Radius", "INPUT", "NodeSocketFloat", 0.035)
-    _new_interface_socket(node_group, "Columns", "INPUT", "NodeSocketInt", 2)
-    _new_interface_socket(node_group, "Rows", "INPUT", "NodeSocketInt", 2)
-    _new_interface_socket(
-        node_group,
-        "Arc Start",
-        "INPUT",
-        "NodeSocketFloat",
-        -math.pi * 0.5,
-    )
-    _new_interface_socket(
-        node_group,
-        "Arc End",
-        "INPUT",
-        "NodeSocketFloat",
-        math.pi * 0.5,
-    )
+def _endpoint_instances_on_arc(
+    nodes,
+    links,
+    arc_curve_socket,
+    endpoint_geometry,
+    label,
+):
+    points = nodes.new("GeometryNodeCurveToPoints")
+    points.mode = "COUNT"
+    points.label = f"{label} Endpoint Points"
+    points.inputs["Count"].default_value = 2
+    links.new(arc_curve_socket, points.inputs["Curve"])
 
-    nodes = node_group.nodes
-    links = node_group.links
-    group_input = nodes.new("NodeGroupInput")
+    instances = nodes.new("GeometryNodeInstanceOnPoints")
+    instances.label = f"{label} Endpoint Nodes"
+    links.new(points.outputs["Points"], instances.inputs["Points"])
+    links.new(endpoint_geometry, instances.inputs["Instance"])
+
+    realize = nodes.new("GeometryNodeRealizeInstances")
+    realize.label = f"{label} Endpoints Realized"
+    links.new(instances.outputs["Instances"], realize.inputs["Geometry"])
+    return realize.outputs["Geometry"]
+
+
+def _new_group(name, family):
+    group = bpy.data.node_groups.new(name, "GeometryNodeTree")
+    group["coa_rig_managed"] = True
+    group["coa_rig_widget_version"] = NODE_GROUP_VERSION
+    group["coa_rig_widget_family"] = family
+    _new_interface_socket(group, "Geometry", "OUTPUT", "NodeSocketGeometry")
+    return group
+
+
+def _group_io(group):
+    group_input = group.nodes.new("NodeGroupInput")
     group_input.location = (-900, 0)
-    group_output = nodes.new("NodeGroupOutput")
+    group_output = group.nodes.new("NodeGroupOutput")
     group_output.location = (900, 0)
+    return group_input, group_output
 
-    tip_geometry = _circle_mesh(
+
+def _build_tip_group(name):
+    group = _new_group(name, "TIP")
+    _new_interface_socket(group, "Tip Radius", "INPUT", "NodeSocketFloat", 0.68)
+    nodes = group.nodes
+    links = group.links
+    group_input, group_output = _group_io(group)
+    circle = _circle_curve(
         nodes,
         links,
         group_input.outputs["Tip Radius"],
-        group_input.outputs["Stroke Radius"],
-        "Tip",
+        "Tip Circle Closure",
     )
+    geometry = _curve_to_edge_mesh(nodes, links, circle, "Tip Outline")
+    links.new(geometry, group_output.inputs["Geometry"])
+    return group
 
-    bar_geometry = _solid_box_mesh(
-        nodes,
-        links,
-        group_input.outputs["Width"],
-        group_input.outputs["Bar Width"],
-        "Linear Bar",
-    )
 
-    endpoint_geometry = _solid_circle_mesh(
+def _build_slider_group(name):
+    group = _new_group(name, "SLIDER")
+    _new_interface_socket(group, "Width", "INPUT", "NodeSocketFloat", 4.0)
+    _new_interface_socket(group, "Node Radius", "INPUT", "NodeSocketFloat", 0.34)
+    _new_interface_socket(group, "Bar Width", "INPUT", "NodeSocketFloat", 0.28)
+    nodes = group.nodes
+    links = group.links
+    group_input, group_output = _group_io(group)
+
+    endpoint = _solid_circle_mesh(
         nodes,
         links,
         group_input.outputs["Node Radius"],
-        "Endpoint",
+        "Slider Endpoint",
     )
-    half_width = _math_node(nodes, "MULTIPLY", "Half Width")
-    half_width.inputs[1].default_value = 0.5
-    links.new(group_input.outputs["Width"], half_width.inputs[0])
-    negative_half_width = _math_node(nodes, "MULTIPLY", "Negative Half Width")
-    negative_half_width.inputs[1].default_value = -0.5
-    links.new(group_input.outputs["Width"], negative_half_width.inputs[0])
+    half_width = _half_dimension(
+        nodes,
+        links,
+        group_input.outputs["Width"],
+        "Slider Half Width",
+    )
+    negative_half_width = _half_dimension(
+        nodes,
+        links,
+        group_input.outputs["Width"],
+        "Slider Negative Half Width",
+        -0.5,
+    )
+    centerline = _line_curve(
+        nodes,
+        links,
+        negative_half_width,
+        half_width,
+        "Slider Centerline",
+    )
+    bar = _solid_rail_from_path(
+        nodes,
+        links,
+        centerline,
+        group_input.outputs["Bar Width"],
+        "Slider Offset Rail",
+    )
+    left = _translated_geometry(
+        nodes,
+        links,
+        endpoint,
+        negative_half_width,
+        "Slider Left Endpoint",
+    )
+    right = _translated_geometry(
+        nodes,
+        links,
+        endpoint,
+        half_width,
+        "Slider Right Endpoint",
+    )
+    geometry = _union_outline_mesh(
+        nodes,
+        links,
+        (bar, left, right),
+        "Slider Outline",
+    )
+    links.new(geometry, group_output.inputs["Geometry"])
+    return group
 
-    left_endpoint = _translated_geometry(
+
+def _build_rectangle_group(name):
+    group = _new_group(name, "RECTANGLE")
+    _new_interface_socket(group, "Grid Mode", "INPUT", "NodeSocketBool", False)
+    _new_interface_socket(group, "Width", "INPUT", "NodeSocketFloat", 4.0)
+    _new_interface_socket(group, "Height", "INPUT", "NodeSocketFloat", 2.0)
+    _new_interface_socket(group, "Node Radius", "INPUT", "NodeSocketFloat", 0.34)
+    _new_interface_socket(group, "Bar Width", "INPUT", "NodeSocketFloat", 0.28)
+    _new_interface_socket(group, "Columns", "INPUT", "NodeSocketInt", 2)
+    _new_interface_socket(group, "Rows", "INPUT", "NodeSocketInt", 2)
+    nodes = group.nodes
+    links = group.links
+    group_input, group_output = _group_io(group)
+
+    half_width = _half_dimension(
         nodes,
         links,
-        endpoint_geometry,
-        negative_half_width.outputs[0],
-        "Left Endpoint",
+        group_input.outputs["Width"],
+        "Rectangle Half Width",
     )
-    right_endpoint = _translated_geometry(
+    negative_half_width = _half_dimension(
         nodes,
         links,
-        endpoint_geometry,
-        half_width.outputs[0],
-        "Right Endpoint",
+        group_input.outputs["Width"],
+        "Rectangle Negative Half Width",
+        -0.5,
     )
-    linear_geometry = _union_outline_mesh(
+    half_height = _half_dimension(
         nodes,
         links,
-        (bar_geometry, left_endpoint, right_endpoint),
-        group_input.outputs["Stroke Radius"],
-        "Linear Widget",
+        group_input.outputs["Height"],
+        "Rectangle Half Height",
+    )
+    negative_half_height = _half_dimension(
+        nodes,
+        links,
+        group_input.outputs["Height"],
+        "Rectangle Negative Half Height",
+        -0.5,
+    )
+
+    endpoint = _solid_circle_mesh(
+        nodes,
+        links,
+        group_input.outputs["Node Radius"],
+        "Rectangle Node",
+    )
+    corners = []
+    for label, x_socket, y_socket in (
+        ("Bottom Left", negative_half_width, negative_half_height),
+        ("Bottom Right", half_width, negative_half_height),
+        ("Top Left", negative_half_width, half_height),
+        ("Top Right", half_width, half_height),
+    ):
+        corners.append(
+            _translated_geometry(
+                nodes,
+                links,
+                endpoint,
+                x_socket,
+                label,
+                y_socket,
+            )
+        )
+
+    free_width = _math_node(nodes, "ADD", "Free Outer Width")
+    links.new(group_input.outputs["Width"], free_width.inputs[0])
+    links.new(group_input.outputs["Bar Width"], free_width.inputs[1])
+    free_height = _math_node(nodes, "ADD", "Free Outer Height")
+    links.new(group_input.outputs["Height"], free_height.inputs[0])
+    links.new(group_input.outputs["Bar Width"], free_height.inputs[1])
+    filled_interior = _solid_box_mesh(
+        nodes,
+        links,
+        free_width.outputs[0],
+        free_height.outputs[0],
+        "Free Interior Fill",
+    )
+    free_geometry = _union_outline_mesh(
+        nodes,
+        links,
+        (filled_interior, *corners),
+        "Rectangle Free Outer Outline",
     )
 
     horizontal_bar = _solid_box_mesh(
@@ -394,176 +546,186 @@ def ensure_widget_node_group():
         group_input.outputs["Height"],
         "Rectangle Vertical Bar",
     )
-    half_height = _math_node(nodes, "MULTIPLY", "Half Height")
-    half_height.inputs[1].default_value = 0.5
-    links.new(group_input.outputs["Height"], half_height.inputs[0])
-    negative_half_height = _math_node(nodes, "MULTIPLY", "Negative Half Height")
-    negative_half_height.inputs[1].default_value = -0.5
-    links.new(group_input.outputs["Height"], negative_half_height.inputs[0])
-    rectangle_parts = []
-    for label, y_socket in (
-        ("Bottom Bar", negative_half_height.outputs[0]),
-        ("Top Bar", half_height.outputs[0]),
-    ):
-        rectangle_parts.append(
-            _translated_geometry(
-                nodes,
-                links,
-                horizontal_bar,
-                None,
-                label,
-                y_socket,
-            )
-        )
-    for label, x_socket in (
-        ("Left Bar", negative_half_width.outputs[0]),
-        ("Right Bar", half_width.outputs[0]),
-    ):
-        rectangle_parts.append(
-            _translated_geometry(
-                nodes,
-                links,
-                vertical_bar,
-                x_socket,
-                label,
-            )
-        )
-    for label, x_socket, y_socket in (
-        (
-            "Bottom Left",
-            negative_half_width.outputs[0],
-            negative_half_height.outputs[0],
-        ),
-        ("Bottom Right", half_width.outputs[0], negative_half_height.outputs[0]),
-        ("Top Left", negative_half_width.outputs[0], half_height.outputs[0]),
-        ("Top Right", half_width.outputs[0], half_height.outputs[0]),
-    ):
-        corner = _translated_geometry(
-            nodes,
-            links,
-            endpoint_geometry,
-            x_socket,
-            label,
-            y_socket,
-        )
-        rectangle_parts.append(corner)
-    rectangle_geometry = _union_outline_mesh(
-        nodes,
-        links,
-        rectangle_parts,
-        group_input.outputs["Stroke Radius"],
-        "Rectangle Widget",
-    )
-    grid_vertical_bars = _grid_bar_instances(
+    vertical_bars = _grid_bar_instances(
         nodes,
         links,
         vertical_bar,
         group_input.outputs["Columns"],
         group_input.outputs["Width"],
-        negative_half_width.outputs[0],
+        negative_half_width,
         "X",
-        "Grid Vertical Bars",
+        "Grid Columns",
     )
-    grid_horizontal_bars = _grid_bar_instances(
+    horizontal_bars = _grid_bar_instances(
         nodes,
         links,
         horizontal_bar,
         group_input.outputs["Rows"],
         group_input.outputs["Height"],
-        negative_half_height.outputs[0],
+        negative_half_height,
         "Y",
-        "Grid Horizontal Bars",
+        "Grid Rows",
     )
-    grid_rectangle_geometry = _union_outline_mesh(
+    grid_geometry = _union_outline_mesh(
         nodes,
         links,
-        (grid_vertical_bars, grid_horizontal_bars, *rectangle_parts[-4:]),
-        group_input.outputs["Stroke Radius"],
-        "Grid Rectangle Widget",
+        (vertical_bars, horizontal_bars, *corners),
+        "Rectangle Grid Outline",
     )
 
-    circle_geometry = _circle_mesh(
+    switch = nodes.new("GeometryNodeSwitch")
+    switch.input_type = "GEOMETRY"
+    switch.label = "Free or Grid"
+    links.new(group_input.outputs["Grid Mode"], switch.inputs["Switch"])
+    links.new(free_geometry, switch.inputs["False"])
+    links.new(grid_geometry, switch.inputs["True"])
+    links.new(switch.outputs["Output"], group_output.inputs["Geometry"])
+    return group
+
+
+def _build_radial_group(name):
+    group = _new_group(name, "RADIAL")
+    _new_interface_socket(group, "Dial Mode", "INPUT", "NodeSocketBool", False)
+    _new_interface_socket(group, "Radius", "INPUT", "NodeSocketFloat", 2.0)
+    _new_interface_socket(group, "Node Radius", "INPUT", "NodeSocketFloat", 0.34)
+    _new_interface_socket(group, "Bar Width", "INPUT", "NodeSocketFloat", 0.28)
+    _new_interface_socket(
+        group,
+        "Arc Start",
+        "INPUT",
+        "NodeSocketFloat",
+        -math.pi * 0.5,
+    )
+    _new_interface_socket(
+        group,
+        "Arc End",
+        "INPUT",
+        "NodeSocketFloat",
+        math.pi * 0.5,
+    )
+    nodes = group.nodes
+    links = group.links
+    group_input, group_output = _group_io(group)
+
+    half_bar = _half_dimension(
         nodes,
         links,
-        group_input.outputs["Radius"],
-        group_input.outputs["Stroke Radius"],
-        "Circle Widget",
+        group_input.outputs["Bar Width"],
+        "Radial Half Bar Width",
     )
-    dial_geometry = _arc_mesh(
+    outer_radius = _math_node(nodes, "ADD", "Circle Outer Radius")
+    links.new(group_input.outputs["Radius"], outer_radius.inputs[0])
+    links.new(half_bar, outer_radius.inputs[1])
+    circle = _circle_curve(
+        nodes,
+        links,
+        outer_radius.outputs[0],
+        "Circle Outer Closure",
+    )
+    circle_geometry = _curve_to_edge_mesh(
+        nodes,
+        links,
+        circle,
+        "Circle Outer Outline",
+    )
+
+    dial_arc = _arc_curve(
         nodes,
         links,
         group_input.outputs["Radius"],
         group_input.outputs["Arc Start"],
         group_input.outputs["Arc End"],
-        group_input.outputs["Stroke Radius"],
-        "Dial Widget",
+        "Dial Rail Centerline",
+    )
+    dial_rail = _solid_rail_from_path(
+        nodes,
+        links,
+        dial_arc,
+        group_input.outputs["Bar Width"],
+        "Dial Offset Rail",
+    )
+    endpoint = _solid_circle_mesh(
+        nodes,
+        links,
+        group_input.outputs["Node Radius"],
+        "Dial Endpoint Node",
+    )
+    endpoints = _endpoint_instances_on_arc(
+        nodes,
+        links,
+        dial_arc,
+        endpoint,
+        "Dial",
+    )
+    dial_geometry = _union_outline_mesh(
+        nodes,
+        links,
+        (dial_rail, endpoints),
+        "Dial Rail Outline",
     )
 
-    is_linear = _math_node(nodes, "COMPARE", "Layout Is Linear")
-    is_linear.inputs[1].default_value = float(_LAYOUT_VALUES[WidgetLayout.LINEAR])
-    is_linear.inputs[2].default_value = 0.1
-    links.new(group_input.outputs["Layout"], is_linear.inputs[0])
+    switch = nodes.new("GeometryNodeSwitch")
+    switch.input_type = "GEOMETRY"
+    switch.label = "Circle or Dial"
+    links.new(group_input.outputs["Dial Mode"], switch.inputs["Switch"])
+    links.new(circle_geometry, switch.inputs["False"])
+    links.new(dial_geometry, switch.inputs["True"])
+    links.new(switch.outputs["Output"], group_output.inputs["Geometry"])
+    return group
 
-    layout_switch = nodes.new("GeometryNodeSwitch")
-    layout_switch.input_type = "GEOMETRY"
-    layout_switch.label = "Select Linear"
-    links.new(is_linear.outputs[0], layout_switch.inputs["Switch"])
-    links.new(tip_geometry, layout_switch.inputs["False"])
-    links.new(linear_geometry, layout_switch.inputs["True"])
 
-    is_rectangle = _math_node(nodes, "COMPARE", "Layout Is Rectangle")
-    is_rectangle.inputs[1].default_value = float(
-        _LAYOUT_VALUES[WidgetLayout.RECTANGLE]
+_GROUP_BUILDERS: dict[str, Callable[[str], bpy.types.GeometryNodeTree]] = {
+    "TIP": _build_tip_group,
+    "SLIDER": _build_slider_group,
+    "RADIAL": _build_radial_group,
+    "RECTANGLE": _build_rectangle_group,
+}
+
+
+def _remove_unused_legacy_groups():
+    legacy_prefixes = (
+        LEGACY_NODE_GROUP_NAME,
+        *(f"{name}_legacy" for name in NODE_GROUP_NAMES.values()),
     )
-    is_rectangle.inputs[2].default_value = 0.1
-    links.new(group_input.outputs["Layout"], is_rectangle.inputs[0])
-    rectangle_switch = nodes.new("GeometryNodeSwitch")
-    rectangle_switch.input_type = "GEOMETRY"
-    rectangle_switch.label = "Select Rectangle"
-    links.new(is_rectangle.outputs[0], rectangle_switch.inputs["Switch"])
-    links.new(layout_switch.outputs["Output"], rectangle_switch.inputs["False"])
-    links.new(rectangle_geometry, rectangle_switch.inputs["True"])
+    for group in list(bpy.data.node_groups):
+        if (
+            group.get("coa_rig_managed")
+            and group.users == 0
+            and any(group.name.startswith(prefix) for prefix in legacy_prefixes)
+        ):
+            bpy.data.node_groups.remove(group)
 
-    is_circle = _math_node(nodes, "COMPARE", "Layout Is Circle")
-    is_circle.inputs[1].default_value = float(_LAYOUT_VALUES[WidgetLayout.CIRCLE])
-    is_circle.inputs[2].default_value = 0.1
-    links.new(group_input.outputs["Layout"], is_circle.inputs[0])
-    circle_switch = nodes.new("GeometryNodeSwitch")
-    circle_switch.input_type = "GEOMETRY"
-    circle_switch.label = "Select Circle"
-    links.new(is_circle.outputs[0], circle_switch.inputs["Switch"])
-    links.new(rectangle_switch.outputs["Output"], circle_switch.inputs["False"])
-    links.new(circle_geometry, circle_switch.inputs["True"])
 
-    is_grid_rectangle = _math_node(nodes, "COMPARE", "Layout Is Grid Rectangle")
-    is_grid_rectangle.inputs[1].default_value = float(
-        _LAYOUT_VALUES[WidgetLayout.RECTANGLE_GRID]
-    )
-    is_grid_rectangle.inputs[2].default_value = 0.1
-    links.new(group_input.outputs["Layout"], is_grid_rectangle.inputs[0])
-    grid_rectangle_switch = nodes.new("GeometryNodeSwitch")
-    grid_rectangle_switch.input_type = "GEOMETRY"
-    grid_rectangle_switch.label = "Select Grid Rectangle"
-    links.new(
-        is_grid_rectangle.outputs[0],
-        grid_rectangle_switch.inputs["Switch"],
-    )
-    links.new(circle_switch.outputs["Output"], grid_rectangle_switch.inputs["False"])
-    links.new(grid_rectangle_geometry, grid_rectangle_switch.inputs["True"])
+def ensure_widget_node_group(layout: WidgetLayout = WidgetLayout.LINEAR):
+    family = widget_family(layout)
+    name = NODE_GROUP_NAMES[family]
+    existing = bpy.data.node_groups.get(name)
+    if (
+        existing is not None
+        and existing.get("coa_rig_widget_version") == NODE_GROUP_VERSION
+        and existing.get("coa_rig_widget_family") == family
+    ):
+        return existing
+    if existing is not None:
+        if existing.users:
+            existing.name = f"{name}_legacy"
+        else:
+            bpy.data.node_groups.remove(existing)
+    return _GROUP_BUILDERS[family](name)
 
-    is_dial = _math_node(nodes, "COMPARE", "Layout Is Dial")
-    is_dial.inputs[1].default_value = float(_LAYOUT_VALUES[WidgetLayout.DIAL])
-    is_dial.inputs[2].default_value = 0.1
-    links.new(group_input.outputs["Layout"], is_dial.inputs[0])
-    dial_switch = nodes.new("GeometryNodeSwitch")
-    dial_switch.input_type = "GEOMETRY"
-    dial_switch.label = "Select Dial"
-    links.new(is_dial.outputs[0], dial_switch.inputs["Switch"])
-    links.new(grid_rectangle_switch.outputs["Output"], dial_switch.inputs["False"])
-    links.new(dial_geometry, dial_switch.inputs["True"])
-    links.new(dial_switch.outputs["Output"], group_output.inputs["Geometry"])
 
-    return node_group
+def ensure_widget_node_groups():
+    return {
+        family: ensure_widget_node_group(
+            {
+                "TIP": WidgetLayout.TIP,
+                "SLIDER": WidgetLayout.LINEAR,
+                "RADIAL": WidgetLayout.CIRCLE,
+                "RECTANGLE": WidgetLayout.RECTANGLE,
+            }[family]
+        )
+        for family in NODE_GROUP_NAMES
+    }
 
 
 def _modifier_input_identifiers(node_group) -> dict[str, str]:
@@ -578,25 +740,27 @@ def _modifier_input_identifiers(node_group) -> dict[str, str]:
 
 
 def apply_widget_spec(modifier: bpy.types.NodesModifier, spec: WidgetSpec):
-    node_group = modifier.node_group or ensure_widget_node_group()
+    node_group = ensure_widget_node_group(spec.layout)
     modifier.node_group = node_group
     identifiers = _modifier_input_identifiers(node_group)
     values: dict[str, Any] = {
-        "Layout": _LAYOUT_VALUES[spec.layout],
+        "Grid Mode": spec.layout == WidgetLayout.RECTANGLE_GRID,
+        "Dial Mode": spec.layout == WidgetLayout.DIAL,
         "Width": spec.width,
         "Height": spec.height,
         "Radius": spec.radius,
         "Tip Radius": spec.tip_radius,
         "Node Radius": spec.node_radius,
         "Bar Width": spec.bar_width,
-        "Stroke Radius": spec.stroke_radius,
         "Columns": spec.columns,
         "Rows": spec.rows,
         "Arc Start": spec.arc_start,
         "Arc End": spec.arc_end,
     }
     for name, value in values.items():
-        modifier[identifiers[name]] = value
+        identifier = identifiers.get(name)
+        if identifier is not None:
+            modifier[identifier] = value
 
 
 def ensure_widget_source(spec: WidgetSpec, name: str | None = None):
@@ -620,6 +784,8 @@ def ensure_widget_source(spec: WidgetSpec, name: str | None = None):
     source["coa_rig_managed"] = True
     source["coa_rig_widget_uuid"] = spec.widget_uuid
     source["coa_rig_artifact_role"] = "widget_source"
+    source["coa_rig_widget_layout"] = spec.layout.value
+    source["coa_rig_widget_family"] = widget_family(spec.layout)
     source.hide_render = True
 
     modifier = source.modifiers.get("COA Rig Widget")
@@ -627,9 +793,9 @@ def ensure_widget_source(spec: WidgetSpec, name: str | None = None):
         if modifier is not None:
             source.modifiers.remove(modifier)
         modifier = source.modifiers.new("COA Rig Widget", "NODES")
-    modifier.node_group = ensure_widget_node_group()
     apply_widget_spec(modifier, spec)
     source.data.update()
+    _remove_unused_legacy_groups()
     return source
 
 
@@ -672,6 +838,8 @@ def sync_evaluated_mesh_cache(
     cache["coa_rig_managed"] = True
     cache["coa_rig_widget_uuid"] = spec.widget_uuid
     cache["coa_rig_artifact_role"] = "widget_cache"
+    cache["coa_rig_widget_layout"] = spec.layout.value
+    cache["coa_rig_widget_family"] = widget_family(spec.layout)
     cache.hide_render = True
     return cache
 

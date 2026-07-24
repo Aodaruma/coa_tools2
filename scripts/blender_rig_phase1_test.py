@@ -43,6 +43,7 @@ def main():
     assert result == {"FINISHED"}
     assert len(armature.coa_tools2_rig.rig_controls) == 1
     control = armature.coa_tools2_rig.rig_controls[0]
+    assert abs(control.tip_radius - control.node_radius * 2.0) < 1e-6
     assert control.control_bone in armature.pose.bones
     assert control.display_bone in armature.pose.bones
     assert not armature.data.bones[control.control_bone].use_deform

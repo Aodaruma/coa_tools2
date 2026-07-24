@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 import bpy
 
+from ..schema import WidgetLayout
 from ..validation import IssueSeverity
 from .artifacts import (
     find_bone_by_role,
@@ -15,7 +16,7 @@ from .artifacts import (
 )
 from .drivers import binding_target_key, driver_uses_control, find_driver
 from .properties import get_rig_data
-from .widgets import NODE_GROUP_NAME
+from .widgets import expected_widget_node_group_names
 
 
 @dataclass(frozen=True)
@@ -54,12 +55,31 @@ def validate_rig(armature) -> list[BlenderValidationIssue]:
     seen_control_ids: set[str] = set()
     seen_targets: dict[tuple[str, str, str, str], str] = {}
 
-    if controls and NODE_GROUP_NAME not in bpy.data.node_groups:
+    layouts = {WidgetLayout.TIP}
+    for control in controls:
+        layouts.add(
+            {
+                "SLIDER_1D": WidgetLayout.LINEAR,
+                "POINT_2D_RECT": (
+                    WidgetLayout.RECTANGLE_GRID
+                    if control.rectangle_mode == "GRID"
+                    else WidgetLayout.RECTANGLE
+                ),
+                "POINT_2D_CIRCLE": WidgetLayout.CIRCLE,
+                "DIAL": WidgetLayout.DIAL,
+            }[control.control_type]
+        )
+    missing_groups = sorted(
+        expected_widget_node_group_names(layouts)
+        - {group.name for group in bpy.data.node_groups}
+    )
+    if controls and missing_groups:
         issues.append(
             BlenderValidationIssue(
                 IssueSeverity.ERROR,
                 "artifact.missing_widget_node_group",
-                "The managed Geometry Nodes widget group is missing.",
+                "Managed Geometry Nodes widget groups are missing: "
+                + ", ".join(missing_groups),
             )
         )
 

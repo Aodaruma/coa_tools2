@@ -142,7 +142,11 @@ def main():
         )
 
     bpy.ops.coa_tools2.validate_rig()
-    assert len(armature.coa_tools2_rig.rig_validation_issues) == 0
+    issues = [
+        (issue.code, issue.message)
+        for issue in armature.coa_tools2_rig.rig_validation_issues
+    ]
+    assert not issues, issues
     addon_utils.disable("coa_tools2", default_set=False)
     print("COA rig rail-constraint test OK.")
 

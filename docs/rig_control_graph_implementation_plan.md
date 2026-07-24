@@ -291,7 +291,7 @@ class WidgetSpec:
     tip_radius: float
     node_radius: float
     bar_width: float
-    stroke_radius: float
+    stroke_radius: float  # 旧Tube輪郭互換と非表示Rail Targetの微小幅用
     columns: int
     rows: int
     orientation: float
@@ -301,9 +301,9 @@ class WidgetSpec:
     show_grid_lines: bool
 ```
 
-Geometry Nodesの基本Primitiveは円`CIRCLE`と、任意の二点間に配置する矩形`BAR`に限定する。参考デザインを次の合成へ正規化する。
+Geometry Nodesの基本Primitiveは円`CIRCLE`と、任意Pathから内外Offsetして作る`RAIL`に限定する。`tip_radius`の既定値は`node_radius × 2`とする。参考デザインを次の合成へ正規化する。
 
-| Widget | 円 | 矩形バー |
+| Widget | 円 | Rail Path |
 | --- | --- | --- |
 | 1D Slider | Tip、両端 | Rail |
 | Dial | Tip、Ringまたは状態点 | 必要な目盛 |
@@ -311,7 +311,7 @@ Geometry Nodesの基本Primitiveは円`CIRCLE`と、任意の二点間に配置�
 | State Matrix | Tip、各状態点 | 隣接点間のGrid |
 | Triangle / Polygon | Tip、各頂点 | 回転させた各辺 |
 
-Control BoneにはTip Widget、Display BoneにはBase Widgetを割り当てる。両者は同じNode Groupを共有できるが、Modifier InputとArtifact Roleは個別に持つ。
+Control BoneにはTip Widget、Display BoneにはBase Widgetを割り当てる。Source ObjectはSlider、Radial、Rectangle等の同一形態内でNode Groupを共有するが、Modifier InputとArtifact Roleは個別に持つ。全形式を一つの巨大Groupで切り替えない。
 
 ### 5.4 MatrixStateSpec
 
@@ -451,16 +451,17 @@ JSON Editor、Node Editor、Graph Inspectorは上級機能とする。共有案�
 
 ### 7.2 Widget
 
-WidgetはGeometry Nodesによるパラメトリック生成を必須とする。共有Node Group `COA_RigWidget_GN`へ`WidgetSpec`を入力し、円と矩形バーを配置・合成してMeshを出力する。
+WidgetはGeometry Nodesによるパラメトリック生成を必須とする。`Tip`、`Slider`、`Radial（Circle / Dial）`、`Rectangle（Free / Grid）`の形態別共有Node Groupへ`WidgetSpec`を入力し、中心Path、Offset Rail、円Nodeを合成して面なしMesh Edgeを出力する。
 
 - 1D: 円Tip、両端円、Rail Bar
-- 2D Free: 円Tip、四隅円、4本のFrame Bar。枠内を自由移動
+- 2D Free: 円Tip、四隅円、外側境界のみ。内側Pathを削除して枠内を自由移動
 - 2D Grid: 円Tip、任意列×行のGrid Bar。表示Rail上だけを移動
-- Dial: 円Tip、設定角度範囲のArc Rail。表示Rail上だけを移動
+- Circle: 円Tip、外側円周のみ。内側Pathを削除して円内を自由移動
+- Dial: 円Tip、設定角度範囲の内外Offset Arc Railと端点Node。表示Rail上だけを移動
 - Matrix: 円Tip、任意列×行のState Point、隣接点間のGrid Bar
 - Triangle/Polygon: 円Tip、頂点円、回転Bar
 
-主要UI Parameterは、幅、高さ、向き、Tip半径、状態点半径、Bar幅、Dial範囲、Snap数、列数、行数、Grid表示である。Preset選択後も調整でき、Control Animationを変更せずにWidgetだけを再Compileできるようにする。
+主要UI Parameterは、幅、高さ、向き、Tip半径、状態点半径、Bar幅、Dial範囲、Snap数、列数、行数、Grid表示である。Tip半径の既定値は状態点半径の2倍とする。Preset選択後も調整でき、Control Animationを変更せずにWidgetだけを再Compileできるようにする。
 
 BlenderのCustom Bone ShapeはMesh Objectを前提とするため、実装は二つのBackendを持つ。
 
