@@ -146,7 +146,7 @@ def ensure_control_bones(
         armature,
         display_pose,
         group=DISPLAY_COLLECTION,
-        theme="THEME03",
+        theme="DEFAULT",
         visible=True,
         exclusive=True,
     )
@@ -155,7 +155,7 @@ def ensure_control_bones(
         armature,
         control_pose,
         group=CONTROL_COLLECTION,
-        theme="THEME04",
+        theme="DEFAULT",
         visible=True,
         exclusive=True,
     )

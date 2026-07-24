@@ -463,6 +463,8 @@ WidgetはGeometry Nodesによるパラメトリック生成を必須とする。
 
 主要UI Parameterは、幅、高さ、向き、Tip半径、状態点半径、Bar幅、Dial範囲、Snap数、列数、行数、Grid表示である。Tip半径の既定値は状態点半径の2倍とする。Preset選択後も調整でき、Control Animationを変更せずにWidgetだけを再Compileできるようにする。
 
+初期実装ではBaseとHandleへ固有色を付けず、Bone Colorは`DEFAULT`とする。将来必要になった場合は、Control種別またはDisplay/Control等の役割単位で選択可能なThemeをPresentation設定として追加し、GeometryやDriver定義から分離する。
+
 BlenderのCustom Bone ShapeはMesh Objectを前提とするため、実装は二つのBackendを持つ。
 
 1. `LIVE_MODIFIER`: GN Modifier付きMeshを直接Custom Shapeへ使う。

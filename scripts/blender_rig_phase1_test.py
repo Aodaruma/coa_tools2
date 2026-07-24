@@ -46,6 +46,10 @@ def main():
     assert abs(control.tip_radius - control.node_radius * 2.0) < 1e-6
     assert control.control_bone in armature.pose.bones
     assert control.display_bone in armature.pose.bones
+    for bone_name in (control.control_bone, control.display_bone):
+        bone_color = getattr(armature.data.bones[bone_name], "color", None)
+        if bone_color is not None:
+            assert bone_color.palette == "DEFAULT"
     assert not armature.data.bones[control.control_bone].use_deform
     assert not armature.data.bones[control.display_bone].use_deform
     assert armature.pose.bones[control.control_bone].custom_shape is not None
