@@ -11,7 +11,7 @@ from ..schema import WidgetBackend, WidgetLayout, WidgetSpec
 
 
 WIDGET_COLLECTION_NAME = "COA Rig Widgets"
-NODE_GROUP_VERSION = 6
+NODE_GROUP_VERSION = 7
 LEGACY_NODE_GROUP_NAME = "COA_RigWidget_GN"
 NODE_GROUP_NAMES = {
     "TIP": "COA_RigWidget_Tip_GN",
@@ -587,10 +587,26 @@ def _build_rectangle_group(name):
         "Y",
         "Grid Rows",
     )
+    grid_points = _grid_points(
+        nodes,
+        links,
+        group_input.outputs["Width"],
+        group_input.outputs["Height"],
+        group_input.outputs["Columns"],
+        group_input.outputs["Rows"],
+        "Grid Intersection Points",
+    )
+    grid_nodes = _instances_on_points(
+        nodes,
+        links,
+        grid_points,
+        endpoint,
+        "Grid Intersection Nodes",
+    )
     grid_geometry = _union_outline_mesh(
         nodes,
         links,
-        (vertical_bars, horizontal_bars, *corners),
+        (vertical_bars, horizontal_bars, grid_nodes),
         "Rectangle Grid Outline",
     )
 

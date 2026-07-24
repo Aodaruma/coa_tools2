@@ -468,11 +468,13 @@ WidgetSpec
 | 2D Circle | 円 | 円形Railの外側境界だけを残し、内側Pathを除去 |
 | Dial | 円 | 中心円弧を内外OffsetしたRail + 端点Node。HandleはRail上だけを移動 |
 | 2D Rectangle Free | 円 | 合成形状の外側境界だけを残し、内側Pathを除去。Handleは内部を自由移動 |
-| 2D Rectangle Grid | 円 | 外側境界 + 任意列×行の内側Rail。HandleはRail上だけを移動 |
+| 2D Rectangle Grid | 円 | 全格子交点の円Node + 任意列×行のRail。HandleはRail上だけを移動 |
 | 2D Matrix `FULL` | 円 | 合成された外枠 + 任意列×行の状態点円。内部Railなしで自由移動 |
 | Triangle / Polygon | 円 | 頂点円 + 回転した辺バー |
 
 円半径、バー幅、全体寸法、向き、行列数、状態点表示をUIから変更し、同じ形態のNode Groupで見た目を調整できるようにする。GridはPoint列とInstanceで反復生成し、CircleはCyclic Closureを用いる。WidgetのTopology変更はRig Animationとは独立しており、Control BoneのF-Curveを変更しない。
+
+Add Rigのユーザー向け分類では、Free、Grid Rails、State Matrixを`2D Rectangle`のModeとしてまとめる。形状が似た項目をPreset一覧へ並べない一方、GridのRail拘束とMatrixのBilinear補間は内部SchemaとCompilerで分離する。
 
 初期実装ではDisplay BoneとControl Boneへ明示的な色Themeを割り当てず、Blenderの`DEFAULT`表示を使う。将来の色分けはWidget Meshへ焼き込まず、Control種別またはArtifact Roleごとの任意表示Themeとして追加する。
 

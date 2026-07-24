@@ -159,6 +159,14 @@ def main():
     # One outside boundary plus one loop around each of the four cells.
     assert connected_component_count(grid_cache.data) == 5
     assert len(grid_cache.data.polygons) == 0
+    # Every grid intersection uses the same circular node as the corners.
+    # At the center, the circle must extend diagonally beyond the crossed bars.
+    assert any(
+        0.30 < math.hypot(vertex.co.x, vertex.co.y) < 0.38
+        and abs(vertex.co.x) > 0.15
+        and abs(vertex.co.y) > 0.15
+        for vertex in grid_cache.data.vertices
+    )
 
     matrix = WidgetSpec(
         widget_uuid="phase4-matrix",

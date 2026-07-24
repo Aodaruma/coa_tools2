@@ -21,6 +21,7 @@ Phase 0〜3に加え、Phase 4AとしてShape Keyを対象にした連続StateDa
 - リグの外郭だけを先に作り、後から各State PointへShape Keyを割り当てられる。
 - 1Dは2点以上、2D Matrixは任意の`columns × rows`を保存する。
 - `2×2`、`3×2`、`2×4`のUI PresetとCustom Resizeを持つ。
+- Add Rigでは`2D Rectangle`のModeとしてFree、Grid Rails、State Matrixを選ぶ。
 - 各State Shape Keyへ区分線形基底またはBilinear Weight Driverを生成する。
 - State PointのAssign、明示的なEmpty、Snap、Validate、Repairに対応する。
 - 行列拡張時は既存座標の割当を維持し、縮小で失われる割当を一覧Previewして確認を要求する。
@@ -629,14 +630,16 @@ No-pop Space Switchは専用Operatorとし、切替前後のWorld Transform一�
 
 #### Phase 4Aの基本操作
 
-1. `1D Slider`または`2D Rectangle`をBindingなしで作る。
-2. `Continuous States > Set Up State Grid`を開く。
-3. 1Dでは点数、Matrixでは列数・行数を選ぶ。
+1. 1Dは`1D Slider`をBindingなしで作り、`Continuous States > Set Up State Grid`を開く。
+2. MatrixはAdd Rigの`2D Rectangle`で`State Matrix` Modeを選び、列数・行数を指定する。
+3. 既存のFree/Grid RectangleをMatrixへ変える場合も`Set Up State Grid`を使える。
 4. 一覧でState Pointを選択し、`Assign`からMeshとShape Keyを割り当てる。
 5. Shape Keyを割り当てない意図的な基準状態は`Empty`にする。
 6. `Snap`でHandleを選択中のState Pointへ移動し、位置と割当を確認する。
 
 リグ作成時にShape Keyが揃っている必要はない。State Point一覧は後から編集でき、`Update Rig Control`と`Repair Rig`は現在のStateDataからWidgetとDriverを再生成する。
+
+Rectangle系はAdd Rig上で一つにまとめるが、内部評価は分離する。`Grid Rails`は全格子交点へ円Nodeを置き、内部Rail上だけを移動する。`State Matrix`の`FULL` Mixは外枠と状態点を表示し、セル内部を自由移動してBilinear補間する。
 
 ### Phase 5: Rig Graph導入判断
 

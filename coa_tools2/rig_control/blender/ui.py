@@ -116,8 +116,14 @@ class COATOOLS2_PT_RigControls(bpy.types.Panel):
             row = box.row(align=True)
             row.prop(control, "width")
             row.prop(control, "height")
-            box.prop(control, "rectangle_mode")
-            if control.rectangle_mode == "GRID":
+            if control.state_mode == "MATRIX_2D":
+                box.label(text="Rectangle Mode: State Matrix", icon="MESH_GRID")
+            else:
+                box.prop(control, "rectangle_mode")
+            if (
+                control.state_mode != "MATRIX_2D"
+                and control.rectangle_mode == "GRID"
+            ):
                 row = box.row(align=True)
                 row.prop(control, "grid_columns")
                 row.prop(control, "grid_rows")

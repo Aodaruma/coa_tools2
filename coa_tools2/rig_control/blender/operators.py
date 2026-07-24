@@ -192,6 +192,32 @@ def _restore_state_point(point, values):
         setattr(point, name, value)
 
 
+def _replace_state_points(control, columns, rows, snapshots=None):
+    snapshots = snapshots or {}
+    previous_index = control.state_points_index
+    control.state_points.clear()
+    for row in range(rows):
+        for column in range(columns):
+            point = control.state_points.add()
+            values = snapshots.get((column, row))
+            if values is not None:
+                _restore_state_point(point, values)
+            else:
+                point.state_uuid = str(uuid.uuid4())
+                point.label = (
+                    f"State {column + 1}"
+                    if rows == 1
+                    else f"State {column + 1}, {row + 1}"
+                )
+            point.control_uuid = control.control_uuid
+            point.column = column
+            point.row = row
+    control.state_points_index = min(
+        previous_index,
+        len(control.state_points) - 1,
+    )
+
+
 class COATOOLS2_OT_AddRigControl(bpy.types.Operator):
     bl_idname = "coa_tools2.add_rig_control"
     bl_label = "Add Rig Control"
@@ -222,6 +248,11 @@ class COATOOLS2_OT_AddRigControl(bpy.types.Operator):
         items=(
             ("FREE", "Free Interior", "Move freely inside the rectangular area"),
             ("GRID", "Grid Rails", "Move only along the displayed grid rails"),
+            (
+                "MATRIX",
+                "State Matrix",
+                "Continuously interpolate states inside the rectangle",
+            ),
         ),
         default="FREE",
     )
@@ -270,7 +301,7 @@ class COATOOLS2_OT_AddRigControl(bpy.types.Operator):
             row.prop(self, "width")
             row.prop(self, "height")
             layout.prop(self, "rectangle_mode", expand=True)
-            if self.rectangle_mode == "GRID":
+            if self.rectangle_mode in {"GRID", "MATRIX"}:
                 row = layout.row(align=True)
                 row.prop(self, "grid_columns")
                 row.prop(self, "grid_rows")
@@ -281,9 +312,14 @@ class COATOOLS2_OT_AddRigControl(bpy.types.Operator):
             row = layout.row(align=True)
             row.prop(self, "angle_min")
             row.prop(self, "angle_max")
-        layout.separator()
-        layout.prop(self, "create_initial_binding")
-        if self.create_initial_binding:
+        is_state_matrix = (
+            self.control_type == "POINT_2D_RECT"
+            and self.rectangle_mode == "MATRIX"
+        )
+        if not is_state_matrix:
+            layout.separator()
+            layout.prop(self, "create_initial_binding")
+        if self.create_initial_binding and not is_state_matrix:
             if self.control_type in {"POINT_2D_RECT", "POINT_2D_CIRCLE"}:
                 layout.prop(self, "source_component", expand=True)
             layout.prop_search(
@@ -301,6 +337,13 @@ class COATOOLS2_OT_AddRigControl(bpy.types.Operator):
             self.report({"ERROR"}, "No SpriteObject Armature found.")
             return {"CANCELLED"}
         rig_data = get_rig_data(armature)
+
+        is_state_matrix = (
+            self.control_type == "POINT_2D_RECT"
+            and self.rectangle_mode == "MATRIX"
+        )
+        if is_state_matrix:
+            self.create_initial_binding = False
 
         target_object = None
         shape_key = ""
@@ -325,16 +368,16 @@ class COATOOLS2_OT_AddRigControl(bpy.types.Operator):
         control.control_type = self.control_type
         source_component = (
             "ROTATION"
-            if self.control_type == "DIAL"
+            if control.control_type == "DIAL"
             else self.axis
-            if self.control_type == "SLIDER_1D"
+            if control.control_type == "SLIDER_1D"
             else self.source_component
         )
         control.axis = source_component
         control.width = self.width
         control.height = self.height
         control.radius = self.radius
-        control.rectangle_mode = self.rectangle_mode
+        control.rectangle_mode = "FREE" if is_state_matrix else self.rectangle_mode
         control.grid_columns = self.grid_columns
         control.grid_rows = self.grid_rows
         control.angle_min = self.angle_min
@@ -343,6 +386,15 @@ class COATOOLS2_OT_AddRigControl(bpy.types.Operator):
             control,
             source_component,
         )
+        if is_state_matrix:
+            control.state_mode = "MATRIX_2D"
+            control.state_columns = self.grid_columns
+            control.state_rows = self.grid_rows
+            _replace_state_points(
+                control,
+                self.grid_columns,
+                self.grid_rows,
+            )
 
         if self.create_initial_binding:
             binding = control.bindings.add()
@@ -652,27 +704,7 @@ class COATOOLS2_OT_SetupRigStates(bpy.types.Operator):
         control.state_mode = self.mode
         control.state_columns = columns
         control.state_rows = rows
-        control.state_points.clear()
-        for row in range(rows):
-            for column in range(columns):
-                point = control.state_points.add()
-                values = snapshots.get((column, row))
-                if values is not None:
-                    _restore_state_point(point, values)
-                else:
-                    point.state_uuid = str(uuid.uuid4())
-                    point.label = (
-                        f"State {column + 1}"
-                        if rows == 1
-                        else f"State {column + 1}, {row + 1}"
-                    )
-                point.control_uuid = control.control_uuid
-                point.column = column
-                point.row = row
-        control.state_points_index = min(
-            control.state_points_index,
-            len(control.state_points) - 1,
-        )
+        _replace_state_points(control, columns, rows, snapshots)
         try:
             compile_control(armature, control)
         except Exception as exc:

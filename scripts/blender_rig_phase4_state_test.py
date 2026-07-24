@@ -83,18 +83,13 @@ def main():
         control_type="POINT_2D_RECT",
         width=4.0,
         height=3.0,
-        rectangle_mode="FREE",
+        rectangle_mode="MATRIX",
+        grid_columns=3,
+        grid_rows=2,
         create_initial_binding=False,
     )
     assert result == {"FINISHED"}, result
     matrix = armature.coa_tools2_rig.rig_controls[-1]
-    result = bpy.ops.coa_tools2.setup_rig_states(
-        "EXEC_DEFAULT",
-        mode="MATRIX_2D",
-        columns=3,
-        rows=2,
-    )
-    assert result == {"FINISHED"}, result
     assert matrix.state_mode == "MATRIX_2D"
     assert matrix.rectangle_mode == "FREE"
     assert (matrix.grid_columns, matrix.grid_rows) == (3, 2)
