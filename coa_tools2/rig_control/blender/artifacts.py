@@ -7,7 +7,7 @@ import re
 import uuid
 
 import bpy
-from mathutils import Vector
+from mathutils import Matrix, Vector
 
 from ... import functions
 from ..schema import (
@@ -19,12 +19,15 @@ from ..schema import (
 )
 from .properties import get_rig_data
 from .rail_targets import ensure_rail_target
+from .states import state_mix_mask
 from .widgets import ensure_widget
 
 
 GLOBAL_CONTROL_BONE = "GLOBAL_CTRL"
 CONTROL_COLLECTION = "COA Rig Controls"
 DISPLAY_COLLECTION = "COA Rig Display"
+NAME_COLLECTION = "COA Rig Names"
+NAME_TEXT_COLLECTION = "COA Rig Labels"
 
 
 def slugify(value: str) -> str:
@@ -60,6 +63,44 @@ def find_bone_by_role(armature, control_uuid: str, role: str):
     return None
 
 
+def find_object_by_role(control_uuid: str, role: str):
+    return next(
+        (
+            obj
+            for obj in bpy.data.objects
+            if obj.get("coa_rig_control_uuid") == control_uuid
+            and obj.get("coa_rig_artifact_role") == role
+        ),
+        None,
+    )
+
+
+def _ensure_name_text_collection():
+    collection = bpy.data.collections.get(NAME_TEXT_COLLECTION)
+    if collection is None:
+        collection = bpy.data.collections.new(NAME_TEXT_COLLECTION)
+    scene = bpy.context.scene
+    if collection.name not in {
+        child.name for child in scene.collection.children
+    }:
+        scene.collection.children.link(collection)
+    collection.hide_render = True
+    return collection
+
+
+def _control_bottom_extent(control) -> float:
+    handle_extent = max(control.node_radius, control.tip_radius)
+    if control.control_type == "SLIDER_1D":
+        return (
+            control.width * 0.5 + handle_extent
+            if control.axis == "Y"
+            else handle_extent
+        )
+    if control.control_type == "POINT_2D_RECT":
+        return control.height * 0.5 + handle_extent
+    return control.radius + max(handle_extent, control.bar_width * 0.5)
+
+
 def _switch_to_edit_mode(armature):
     if bpy.context.active_object != armature:
         for selected in list(bpy.context.selected_objects):
@@ -88,8 +129,10 @@ def ensure_control_bones(
     origin = Vector(origin)
     existing_display = find_bone_by_role(armature, control.control_uuid, "display_bone")
     existing_control = find_bone_by_role(armature, control.control_uuid, "control_bone")
+    existing_name = find_bone_by_role(armature, control.control_uuid, "name_bone")
     existing_display_name = existing_display.name if existing_display else ""
     existing_control_name = existing_control.name if existing_control else ""
+    existing_name_name = existing_name.name if existing_name else ""
 
     _switch_to_edit_mode(armature)
     _ensure_global_bone(armature)
@@ -98,6 +141,7 @@ def ensure_control_bones(
     slug = slugify(control.semantic_id or control.label)
     display_name = existing_display_name or control.display_bone or f"DISP_{slug}"
     control_name = existing_control_name or control.control_bone or f"CTRL_{slug}"
+    name_name = existing_name_name or control.name_bone or f"NAME_{slug}"
 
     display = armature.data.edit_bones.get(display_name)
     if display is None:
@@ -132,15 +176,32 @@ def ensure_control_bones(
     handle.use_connect = False
     handle.use_deform = False
 
+    name_position = origin.copy()
+    name_position.z -= _control_bottom_extent(control) + control.name_offset
+    name_bone_length = max(control.name_size, 0.1)
+    name_bone = armature.data.edit_bones.get(name_name)
+    if name_bone is None:
+        name_bone = armature.data.edit_bones.new(name_name)
+    # Bone-parented objects use the bone tail as their local origin.
+    # Place that tail at the requested text center.
+    name_bone.head = name_position - Vector((0.0, 0.0, name_bone_length))
+    name_bone.tail = name_position
+    name_bone.parent = global_bone
+    name_bone.use_connect = False
+    name_bone.use_deform = False
+
     display_name = display.name
     handle_name = handle.name
+    name_name = name_bone.name
     bpy.ops.object.mode_set(mode="POSE")
     display_pose = armature.pose.bones[display_name]
     control_pose = armature.pose.bones[handle_name]
+    name_pose = armature.pose.bones[name_name]
 
     for pose_bone, role in (
         (display_pose, "display_bone"),
         (control_pose, "control_bone"),
+        (name_pose, "name_bone"),
     ):
         data_bone = pose_bone.bone
         data_bone["coa_rig_managed"] = True
@@ -168,12 +229,70 @@ def ensure_control_bones(
         visible=True,
         exclusive=True,
     )
+    functions.set_bone_group(
+        None,
+        armature,
+        name_pose,
+        group=NAME_COLLECTION,
+        theme="DEFAULT",
+        visible=True,
+        exclusive=True,
+    )
     _set_bone_palette(display_pose, "DEFAULT")
     _set_bone_palette(control_pose, "DEFAULT")
+    _set_bone_palette(name_pose, "DEFAULT")
 
     control.display_bone = display_pose.name
     control.control_bone = control_pose.name
-    return display_pose, control_pose
+    control.name_bone = name_pose.name
+    return display_pose, control_pose, name_pose
+
+
+def ensure_control_name_text(armature, name_pose, control):
+    """Create a viewport-only text layer parented to the control's name bone."""
+
+    text_object = find_object_by_role(control.control_uuid, "name_text")
+    if text_object is not None and text_object.type != "FONT":
+        text_object = None
+    if text_object is None:
+        text_curve = bpy.data.curves.new(
+            f"TXT_{slugify(control.semantic_id or control.label)}_Curve",
+            "FONT",
+        )
+        text_object = bpy.data.objects.new(
+            f"TXT_{slugify(control.semantic_id or control.label)}",
+            text_curve,
+        )
+        _ensure_name_text_collection().objects.link(text_object)
+
+    text_curve = text_object.data
+    text_curve.body = control.label
+    text_curve.align_x = "CENTER"
+    text_curve.align_y = "CENTER"
+    text_curve.size = control.name_size
+    text_curve.extrude = 0.0
+    text_curve.bevel_depth = 0.0
+
+    text_object["coa_rig_managed"] = True
+    text_object["coa_rig_instance_id"] = ensure_rig_instance_id(armature)
+    text_object["coa_rig_control_uuid"] = control.control_uuid
+    text_object["coa_rig_artifact_role"] = "name_text"
+    text_object.parent = armature
+    text_object.parent_type = "BONE"
+    text_object.parent_bone = name_pose.name
+    text_object.matrix_parent_inverse = Matrix.Identity(4)
+    text_object.location = (0.0, 0.0, 0.0)
+    text_object.rotation_mode = "XYZ"
+    # Bone parenting already rotates the local XY text plane into the
+    # armature's XZ control plane.
+    text_object.rotation_euler = (0.0, 0.0, 0.0)
+    text_object.scale = (1.0, 1.0, 1.0)
+    text_object.show_in_front = True
+    text_object.hide_render = True
+    text_object.hide_set(not control.show_name)
+    name_pose.bone.hide = not control.show_name
+    control.name_text_object = text_object.name
+    return text_object
 
 
 def limit_location_name(control_uuid: str) -> str:
@@ -261,7 +380,10 @@ def ensure_control_constraints(armature, display_pose, control_pose, control):
         expected.add(limit_distance_name(control.control_uuid))
     elif control.control_type == "DIAL" or (
         control.control_type == "POINT_2D_RECT"
-        and control.rectangle_mode == "GRID"
+        and (
+            control.rectangle_mode == "GRID"
+            or control.state_mode == "MATRIX_2D"
+        )
     ):
         expected.add(rail_constraint_name(control.control_uuid))
 
@@ -292,7 +414,10 @@ def ensure_control_constraints(armature, display_pose, control_pose, control):
         constraint.target_space = "WORLD"
     elif control.control_type == "DIAL" or (
         control.control_type == "POINT_2D_RECT"
-        and control.rectangle_mode == "GRID"
+        and (
+            control.rectangle_mode == "GRID"
+            or control.state_mode == "MATRIX_2D"
+        )
     ):
         ensure_rail_constraint(armature, control_pose, control)
 
@@ -348,6 +473,11 @@ def ensure_control_widgets(display_pose, control_pose, control):
             control.state_rows
             if control.state_mode == "MATRIX_2D"
             else control.grid_rows
+        ),
+        mix_cells=(
+            state_mix_mask(control)
+            if control.state_mode == "MATRIX_2D"
+            else None
         ),
         arc_start=control.angle_min,
         arc_end=control.angle_max,

@@ -94,6 +94,8 @@ def main():
     assert matrix.rectangle_mode == "FREE"
     assert (matrix.grid_columns, matrix.grid_rows) == (3, 2)
     assert len(matrix.state_points) == 6
+    assert len(matrix.state_cells) == 2
+    assert all(cell.mix_enabled for cell in matrix.state_cells)
     assign_all_states(armature, matrix, matrix_target, "Matrix")
 
     matrix_handle = armature.pose.bones[matrix.control_bone]
@@ -124,6 +126,8 @@ def main():
     )
     assert result == {"FINISHED"}, result
     assert len(matrix.state_points) == 8
+    assert len(matrix.state_cells) == 3
+    assert all(cell.mix_enabled for cell in matrix.state_cells)
     for point in matrix.state_points:
         if point.column < 3:
             assert point.target_object == matrix_target
@@ -153,8 +157,88 @@ def main():
     )
     assert result == {"FINISHED"}, result
     assert len(matrix.state_points) == 4
+    assert len(matrix.state_cells) == 1
     matrix_drivers = matrix_target.data.shape_keys.animation_data.drivers
     assert len(matrix_drivers) == 4, len(matrix_drivers)
+
+    partial_names = [
+        f"Partial_{column}_{row}"
+        for row in range(3)
+        for column in range(2)
+    ]
+    partial_target, partial_keys = create_shape_target(
+        armature,
+        "Phase5PartialMatrixTarget",
+        partial_names,
+    )
+    result = bpy.ops.coa_tools2.add_rig_control(
+        "EXEC_DEFAULT",
+        label="Partial State Matrix",
+        control_type="POINT_2D_RECT",
+        width=4.0,
+        height=3.0,
+        rectangle_mode="MATRIX",
+        grid_columns=2,
+        grid_rows=3,
+        matrix_mix_policy="NO_MIX",
+        create_initial_binding=False,
+    )
+    assert result == {"FINISHED"}, result
+    partial = armature.coa_tools2_rig.rig_controls[-1]
+    assert len(partial.state_cells) == 2
+    assert partial.state_mix_policy == "NO_MIX"
+    assert not any(cell.mix_enabled for cell in partial.state_cells)
+    bottom_cell = next(
+        cell
+        for cell in partial.state_cells
+        if (cell.column, cell.row) == (0, 0)
+    )
+    result = bpy.ops.coa_tools2.toggle_rig_state_cell(
+        "EXEC_DEFAULT",
+        cell_uuid=bottom_cell.cell_uuid,
+    )
+    assert result == {"FINISHED"}, result
+    assert partial.state_mix_policy == "PARTIAL"
+    assert [cell.mix_enabled for cell in partial.state_cells] == [True, False]
+    assign_all_states(armature, partial, partial_target, "Partial")
+
+    from coa_tools2.rig_control.blender.rail_targets import find_rail_target
+
+    domain_target = find_rail_target(partial.control_uuid)
+    assert domain_target is not None
+    assert domain_target["coa_rig_rail_kind"] == "MATRIX_DOMAIN"
+    # Two vertical and three horizontal centerline curtains plus one free cell.
+    assert len(domain_target.data.polygons) == 6
+
+    partial_handle = armature.pose.bones[partial.control_bone]
+    partial_handle.location.x = 2.0
+    partial_handle.location.y = 0.75
+    assert_values(
+        partial_keys,
+        {
+            "Partial_0_0": 0.25,
+            "Partial_1_0": 0.25,
+            "Partial_0_1": 0.25,
+            "Partial_1_1": 0.25,
+            "Partial_0_2": 0.0,
+            "Partial_1_2": 0.0,
+        },
+    )
+    # The upper cell is no-mix. Its interior is projected to the middle rail,
+    # producing a two-state interpolation instead of a four-state blend.
+    partial_handle.location.x = 1.7
+    partial_handle.location.y = 2.2
+    assert_values(
+        partial_keys,
+        {
+            "Partial_0_0": 0.0,
+            "Partial_1_0": 0.0,
+            "Partial_0_1": 0.575,
+            "Partial_1_1": 0.425,
+            "Partial_0_2": 0.0,
+            "Partial_1_2": 0.0,
+        },
+    )
 
     linear_names = [f"Linear_{column}_0" for column in range(3)]
     linear_target, linear_keys = create_shape_target(

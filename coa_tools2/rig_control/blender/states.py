@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
-from ..schema import state_grid_size, state_point_position
+import uuid
+
+from ..schema import (
+    StateMixPolicy,
+    state_cell_grid_size,
+    state_grid_size,
+    state_point_position,
+)
 from .drivers import (
     BindingConflictError,
     binding_target_key,
@@ -17,6 +24,72 @@ def state_dimensions(control) -> tuple[int, int]:
         control.state_columns,
         control.state_rows,
     )
+
+
+def state_cell_dimensions(control) -> tuple[int, int]:
+    columns, rows = state_dimensions(control)
+    return state_cell_grid_size(columns, rows)
+
+
+def summarize_state_mix_policy(control) -> str:
+    enabled = [bool(cell.mix_enabled) for cell in control.state_cells]
+    if enabled and all(enabled):
+        return StateMixPolicy.FULL.value
+    if not enabled or not any(enabled):
+        return StateMixPolicy.NO_MIX.value
+    return StateMixPolicy.PARTIAL.value
+
+
+def ensure_state_cells(control):
+    """Populate and normalize the persisted four-point matrix cell mask."""
+
+    if control.state_mode != "MATRIX_2D":
+        return control.state_cells
+    columns, rows = state_cell_dimensions(control)
+    expected = {
+        (column, row)
+        for row in range(rows)
+        for column in range(columns)
+    }
+    snapshots = {}
+    for cell in control.state_cells:
+        coordinate = (cell.column, cell.row)
+        if coordinate in expected and coordinate not in snapshots:
+            snapshots[coordinate] = {
+                "cell_uuid": cell.cell_uuid,
+                "mix_enabled": bool(cell.mix_enabled),
+            }
+    actual = [(cell.column, cell.row) for cell in control.state_cells]
+    if set(actual) == expected and len(actual) == len(expected):
+        control.state_mix_policy = summarize_state_mix_policy(control)
+        return control.state_cells
+
+    default_enabled = control.state_mix_policy == StateMixPolicy.FULL.value
+    control.state_cells.clear()
+    for row in range(rows):
+        for column in range(columns):
+            cell = control.state_cells.add()
+            snapshot = snapshots.get((column, row))
+            cell.cell_uuid = (
+                snapshot["cell_uuid"]
+                if snapshot and snapshot["cell_uuid"]
+                else str(uuid.uuid4())
+            )
+            cell.control_uuid = control.control_uuid
+            cell.column = column
+            cell.row = row
+            cell.mix_enabled = (
+                snapshot["mix_enabled"] if snapshot else default_enabled
+            )
+    control.state_mix_policy = summarize_state_mix_policy(control)
+    return control.state_cells
+
+
+def state_mix_mask(control) -> tuple[bool, ...]:
+    """Return the matrix cell mask in bottom-to-top row-major order."""
+
+    ensure_state_cells(control)
+    return tuple(bool(cell.mix_enabled) for cell in control.state_cells)
 
 
 def state_target_key(point) -> tuple[str, str, str, str]:
@@ -158,6 +231,7 @@ def sync_state_control_geometry(control):
         control.rectangle_mode = "FREE"
         control.grid_columns = control.state_columns
         control.grid_rows = control.state_rows
+        ensure_state_cells(control)
 
 
 def ensure_state_drivers(armature, control) -> int:

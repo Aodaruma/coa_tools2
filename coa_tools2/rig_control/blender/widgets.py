@@ -11,7 +11,7 @@ from ..schema import WidgetBackend, WidgetLayout, WidgetSpec
 
 
 WIDGET_COLLECTION_NAME = "COA Rig Widgets"
-NODE_GROUP_VERSION = 7
+NODE_GROUP_VERSION = 8
 LEGACY_NODE_GROUP_NAME = "COA_RigWidget_GN"
 NODE_GROUP_NAMES = {
     "TIP": "COA_RigWidget_Tip_GN",
@@ -713,6 +713,12 @@ def _build_radial_group(name):
 
 def _build_matrix_group(name):
     group = _new_group(name, "MATRIX")
+    _new_interface_socket(
+        group,
+        "Mix Cells",
+        "INPUT",
+        "NodeSocketGeometry",
+    )
     _new_interface_socket(group, "Width", "INPUT", "NodeSocketFloat", 4.0)
     _new_interface_socket(group, "Height", "INPUT", "NodeSocketFloat", 2.0)
     _new_interface_socket(group, "Node Radius", "INPUT", "NodeSocketFloat", 0.34)
@@ -723,17 +729,19 @@ def _build_matrix_group(name):
     links = group.links
     group_input, group_output = _group_io(group)
 
-    half_width = _half_dimension(
+    negative_half_width = _half_dimension(
         nodes,
         links,
         group_input.outputs["Width"],
-        "Matrix Half Width",
+        "Matrix Negative Half Width",
+        -0.5,
     )
-    half_height = _half_dimension(
+    negative_half_height = _half_dimension(
         nodes,
         links,
         group_input.outputs["Height"],
-        "Matrix Half Height",
+        "Matrix Negative Half Height",
+        -0.5,
     )
     points = _grid_points(
         nodes,
@@ -744,34 +752,6 @@ def _build_matrix_group(name):
         group_input.outputs["Rows"],
         "Matrix State Points",
     )
-    position = nodes.new("GeometryNodeInputPosition")
-    separate_position = nodes.new("ShaderNodeSeparateXYZ")
-    links.new(position.outputs["Position"], separate_position.inputs["Vector"])
-    absolute_x = _math_node(nodes, "ABSOLUTE", "Matrix Absolute X")
-    absolute_y = _math_node(nodes, "ABSOLUTE", "Matrix Absolute Y")
-    links.new(separate_position.outputs["X"], absolute_x.inputs[0])
-    links.new(separate_position.outputs["Y"], absolute_y.inputs[0])
-    inner_x_limit = _math_node(nodes, "SUBTRACT", "Matrix Inner X Limit")
-    inner_y_limit = _math_node(nodes, "SUBTRACT", "Matrix Inner Y Limit")
-    inner_x_limit.inputs[1].default_value = 0.0001
-    inner_y_limit.inputs[1].default_value = 0.0001
-    links.new(half_width, inner_x_limit.inputs[0])
-    links.new(half_height, inner_y_limit.inputs[0])
-    inside_x = _math_node(nodes, "LESS_THAN", "Matrix Interior X")
-    inside_y = _math_node(nodes, "LESS_THAN", "Matrix Interior Y")
-    links.new(absolute_x.outputs[0], inside_x.inputs[0])
-    links.new(inner_x_limit.outputs[0], inside_x.inputs[1])
-    links.new(absolute_y.outputs[0], inside_y.inputs[0])
-    links.new(inner_y_limit.outputs[0], inside_y.inputs[1])
-    interior = nodes.new("FunctionNodeBooleanMath")
-    interior.operation = "AND"
-    interior.label = "Matrix Interior Points"
-    links.new(inside_x.outputs[0], interior.inputs[0])
-    links.new(inside_y.outputs[0], interior.inputs[1])
-    separate_points = nodes.new("GeometryNodeSeparateGeometry")
-    separate_points.domain = "POINT"
-    links.new(points, separate_points.inputs["Geometry"])
-    links.new(interior.outputs[0], separate_points.inputs["Selection"])
 
     solid_node = _solid_circle_mesh(
         nodes,
@@ -779,32 +759,79 @@ def _build_matrix_group(name):
         group_input.outputs["Node Radius"],
         "Matrix Solid Node",
     )
-    boundary_nodes = _instances_on_points(
+    grid_nodes = _instances_on_points(
         nodes,
         links,
-        separate_points.outputs["Inverted"],
+        points,
         solid_node,
-        "Matrix Boundary State Nodes",
+        "Matrix State Nodes",
     )
-    outer_width = _math_node(nodes, "ADD", "Matrix Outer Width")
-    links.new(group_input.outputs["Width"], outer_width.inputs[0])
-    links.new(group_input.outputs["Bar Width"], outer_width.inputs[1])
-    outer_height = _math_node(nodes, "ADD", "Matrix Outer Height")
-    links.new(group_input.outputs["Height"], outer_height.inputs[0])
-    links.new(group_input.outputs["Bar Width"], outer_height.inputs[1])
-    filled_interior = _solid_box_mesh(
+
+    horizontal_bar = _solid_box_mesh(
         nodes,
         links,
-        outer_width.outputs[0],
-        outer_height.outputs[0],
-        "Matrix Interior Fill",
+        group_input.outputs["Width"],
+        group_input.outputs["Bar Width"],
+        "Matrix Horizontal Rail",
+    )
+    vertical_bar = _solid_box_mesh(
+        nodes,
+        links,
+        group_input.outputs["Bar Width"],
+        group_input.outputs["Height"],
+        "Matrix Vertical Rail",
+    )
+    vertical_bars = _grid_bar_instances(
+        nodes,
+        links,
+        vertical_bar,
+        group_input.outputs["Columns"],
+        group_input.outputs["Width"],
+        negative_half_width,
+        "X",
+        "Matrix Grid Columns",
+    )
+    horizontal_bars = _grid_bar_instances(
+        nodes,
+        links,
+        horizontal_bar,
+        group_input.outputs["Rows"],
+        group_input.outputs["Height"],
+        negative_half_height,
+        "Y",
+        "Matrix Grid Rows",
     )
     outer_outline = _union_outline_mesh(
         nodes,
         links,
-        (filled_interior, boundary_nodes),
-        "Matrix Outer Outline",
+        (
+            vertical_bars,
+            horizontal_bars,
+            grid_nodes,
+            group_input.outputs["Mix Cells"],
+        ),
+        "Matrix Domain Outline",
     )
+
+    # A node completely surrounded by freely mixable cells disappears into the
+    # filled union. Restore only those swallowed state-point circles.
+    proximity = nodes.new("GeometryNodeProximity")
+    proximity.target_element = "EDGES"
+    proximity.label = "Matrix Point to Domain Boundary"
+    links.new(outer_outline, proximity.inputs["Target"])
+    position = nodes.new("GeometryNodeInputPosition")
+    links.new(position.outputs["Position"], proximity.inputs["Source Position"])
+    threshold = _math_node(nodes, "MULTIPLY", "Matrix Interior Node Threshold")
+    threshold.inputs[1].default_value = 1.1
+    links.new(group_input.outputs["Node Radius"], threshold.inputs[0])
+    is_interior = _math_node(nodes, "GREATER_THAN", "Matrix Swallowed Nodes")
+    links.new(proximity.outputs["Distance"], is_interior.inputs[0])
+    links.new(threshold.outputs[0], is_interior.inputs[1])
+    separate_points = nodes.new("GeometryNodeSeparateGeometry")
+    separate_points.domain = "POINT"
+    separate_points.label = "Matrix Interior State Points"
+    links.new(points, separate_points.inputs["Geometry"])
+    links.new(is_interior.outputs[0], separate_points.inputs["Selection"])
 
     circle = _circle_curve(
         nodes,
@@ -924,6 +951,80 @@ def apply_widget_spec(modifier: bpy.types.NodesModifier, spec: WidgetSpec):
             modifier[identifier] = value
 
 
+def _append_solid_cell(vertices, faces, x_min, x_max, y_min, y_max):
+    start = len(vertices)
+    half_depth = _BOOLEAN_SOLID_DEPTH * 0.5
+    vertices.extend(
+        (
+            (x_min, y_min, -half_depth),
+            (x_max, y_min, -half_depth),
+            (x_max, y_max, -half_depth),
+            (x_min, y_max, -half_depth),
+            (x_min, y_min, half_depth),
+            (x_max, y_min, half_depth),
+            (x_max, y_max, half_depth),
+            (x_min, y_max, half_depth),
+        )
+    )
+    faces.extend(
+        (
+            (start, start + 3, start + 2, start + 1),
+            (start + 4, start + 5, start + 6, start + 7),
+            (start, start + 1, start + 5, start + 4),
+            (start + 1, start + 2, start + 6, start + 5),
+            (start + 2, start + 3, start + 7, start + 6),
+            (start + 3, start, start + 4, start + 7),
+        )
+    )
+
+
+def _sync_widget_source_mesh(source: bpy.types.Object, spec: WidgetSpec):
+    """Encode the variable-length matrix cell mask in the source geometry."""
+
+    mesh = source.data
+    mesh.clear_geometry()
+    if spec.layout != WidgetLayout.MATRIX:
+        mesh.update()
+        return
+
+    cell_columns = max(1, int(spec.columns) - 1)
+    cell_rows = max(1, int(spec.rows) - 1)
+    expected_count = cell_columns * cell_rows
+    mask = (
+        tuple(True for _index in range(expected_count))
+        if spec.mix_cells is None
+        else tuple(bool(value) for value in spec.mix_cells)
+    )
+    if len(mask) != expected_count:
+        raise ValueError(
+            f"Matrix widget requires {expected_count} cell mask values, "
+            f"got {len(mask)}."
+        )
+
+    vertices = []
+    faces = []
+    half_width = spec.width * 0.5
+    half_height = spec.height * 0.5
+    cell_width = spec.width / cell_columns
+    cell_height = spec.height / cell_rows
+    for row in range(cell_rows):
+        for column in range(cell_columns):
+            if not mask[row * cell_columns + column]:
+                continue
+            x_min = -half_width + column * cell_width
+            y_min = -half_height + row * cell_height
+            _append_solid_cell(
+                vertices,
+                faces,
+                x_min,
+                x_min + cell_width,
+                y_min,
+                y_min + cell_height,
+            )
+    mesh.from_pydata(vertices, (), faces)
+    mesh.update()
+
+
 def ensure_widget_source(spec: WidgetSpec, name: str | None = None):
     collection = ensure_widget_collection()
     source = next(
@@ -948,6 +1049,7 @@ def ensure_widget_source(spec: WidgetSpec, name: str | None = None):
     source["coa_rig_widget_layout"] = spec.layout.value
     source["coa_rig_widget_family"] = widget_family(spec.layout)
     source.hide_render = True
+    _sync_widget_source_mesh(source, spec)
 
     modifier = source.modifiers.get("COA Rig Widget")
     if modifier is None or modifier.type != "NODES":
@@ -955,7 +1057,6 @@ def ensure_widget_source(spec: WidgetSpec, name: str | None = None):
             source.modifiers.remove(modifier)
         modifier = source.modifiers.new("COA Rig Widget", "NODES")
     apply_widget_spec(modifier, spec)
-    source.data.update()
     _remove_unused_legacy_groups()
     return source
 

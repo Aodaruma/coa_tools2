@@ -69,6 +69,29 @@ class COATOOLS2_UL_RigStatePoints(bpy.types.UIList):
         layout.label(text=f"[{coordinate}] {target}", icon=icon)
 
 
+class COATOOLS2_UL_RigStateCells(bpy.types.UIList):
+    def draw_item(
+        self,
+        _context,
+        layout,
+        _data,
+        item,
+        _icon,
+        _active_data,
+        _active_propname,
+        _index,
+    ):
+        operator = layout.operator(
+            "coa_tools2.toggle_rig_state_cell",
+            text=(
+                f"Cell C{item.column + 1}-C{item.column + 2} / "
+                f"R{item.row + 1}-R{item.row + 2}"
+            ),
+            depress=item.mix_enabled,
+        )
+        operator.cell_uuid = item.cell_uuid
+
+
 class COATOOLS2_PT_RigControls(bpy.types.Panel):
     bl_idname = "COATOOLS2_PT_rig_controls"
     bl_label = "Rig Controls"
@@ -141,6 +164,14 @@ class COATOOLS2_PT_RigControls(bpy.types.Panel):
         row.prop(control, "node_radius")
         widget_box.prop(control, "bar_width")
         widget_box.prop(control, "widget_backend")
+        name_box = box.box()
+        name_box.label(text="Rig Name")
+        name_box.prop(control, "show_name")
+        if control.show_name:
+            row = name_box.row(align=True)
+            row.prop(control, "name_size")
+            row.prop(control, "name_offset")
+        name_box.label(text=f"Name Bone: {control.name_bone or 'Pending'}")
         box.label(text=f"Control Bone: {control.control_bone}")
         box.operator("coa_tools2.update_rig_control", icon="FILE_REFRESH")
         if control.needs_rebuild:
@@ -205,7 +236,65 @@ class COATOOLS2_PT_RigControls(bpy.types.Panel):
                             text=label,
                         )
                         operator.preset = preset
-                states_box.prop(control, "state_mix_policy")
+                if control.state_mode == "MATRIX_2D":
+                    domain_box = states_box.box()
+                    domain_box.label(text="Mix Domain", icon="MOD_SHRINKWRAP")
+                    preset_row = domain_box.row(align=True)
+                    operator = preset_row.operator(
+                        "coa_tools2.set_rig_state_mix_policy",
+                        text="Full",
+                        depress=control.state_mix_policy == "FULL",
+                    )
+                    operator.policy = "FULL"
+                    operator = preset_row.operator(
+                        "coa_tools2.set_rig_state_mix_policy",
+                        text="Grid Only",
+                        depress=control.state_mix_policy == "NO_MIX",
+                    )
+                    operator.policy = "NO_MIX"
+                    if control.state_cells and len(control.state_cells) > 64:
+                        domain_box.template_list(
+                            "COATOOLS2_UL_RigStateCells",
+                            "",
+                            control,
+                            "state_cells",
+                            control,
+                            "state_cells_index",
+                            rows=8,
+                        )
+                    elif control.state_cells:
+                        domain_box.label(
+                            text="Allow Mix per four-point cell (top row first)"
+                        )
+                        cells_by_coordinate = {
+                            (cell.column, cell.row): cell
+                            for cell in control.state_cells
+                        }
+                        for row_index in reversed(
+                            range(max(0, control.state_rows - 1))
+                        ):
+                            cell_row = domain_box.row(align=True)
+                            cell_row.label(text=f"R{row_index + 1}")
+                            for column_index in range(
+                                max(0, control.state_columns - 1)
+                            ):
+                                cell = cells_by_coordinate.get(
+                                    (column_index, row_index)
+                                )
+                                if cell is None:
+                                    cell_row.label(text="?")
+                                    continue
+                                operator = cell_row.operator(
+                                    "coa_tools2.toggle_rig_state_cell",
+                                    text=f"C{column_index + 1}",
+                                    depress=cell.mix_enabled,
+                                )
+                                operator.cell_uuid = cell.cell_uuid
+                    else:
+                        domain_box.label(
+                            text="Update Rig Control to initialize matrix cells.",
+                            icon="INFO",
+                        )
                 states_box.template_list(
                     "COATOOLS2_UL_RigStatePoints",
                     "",
@@ -245,5 +334,6 @@ CLASSES = (
     COATOOLS2_UL_RigControls,
     COATOOLS2_UL_RigBindings,
     COATOOLS2_UL_RigStatePoints,
+    COATOOLS2_UL_RigStateCells,
     COATOOLS2_PT_RigControls,
 )

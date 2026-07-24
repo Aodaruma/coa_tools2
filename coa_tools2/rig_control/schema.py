@@ -8,7 +8,7 @@ import math
 from typing import Any, Mapping, Sequence
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 class StringEnum(str, Enum):
@@ -41,6 +41,8 @@ class StateMode(StringEnum):
 
 class StateMixPolicy(StringEnum):
     FULL = "FULL"
+    NO_MIX = "NO_MIX"
+    PARTIAL = "PARTIAL"
 
 
 class WidgetLayout(StringEnum):
@@ -75,6 +77,7 @@ class WidgetSpec:
     arc_start: float = 0.0
     arc_end: float = 6.283185307179586
     schema_version: int = SCHEMA_VERSION
+    mix_cells: tuple[bool, ...] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -85,6 +88,8 @@ class WidgetSpec:
     def from_dict(cls, data: Mapping[str, Any]) -> "WidgetSpec":
         values = dict(data)
         values["layout"] = WidgetLayout(values["layout"])
+        if values.get("mix_cells") is not None:
+            values["mix_cells"] = tuple(values["mix_cells"])
         return cls(**values)
 
 
@@ -182,6 +187,23 @@ class StatePointSpec:
 
 
 @dataclass(frozen=True)
+class StateCellSpec:
+    cell_uuid: str
+    control_uuid: str
+    column: int
+    row: int
+    mix_enabled: bool = True
+    schema_version: int = SCHEMA_VERSION
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "StateCellSpec":
+        return cls(**dict(data))
+
+
+@dataclass(frozen=True)
 class StateDataSpec:
     control_uuid: str
     mode: StateMode
@@ -190,12 +212,14 @@ class StateDataSpec:
     points: tuple[StatePointSpec, ...] = ()
     mix_policy: StateMixPolicy = StateMixPolicy.FULL
     schema_version: int = SCHEMA_VERSION
+    cells: tuple[StateCellSpec, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["mode"] = self.mode.value
         data["mix_policy"] = self.mix_policy.value
         data["points"] = [point.to_dict() for point in self.points]
+        data["cells"] = [cell.to_dict() for cell in self.cells]
         return data
 
     @classmethod
@@ -205,6 +229,9 @@ class StateDataSpec:
         values["mix_policy"] = StateMixPolicy(values.get("mix_policy", "FULL"))
         values["points"] = tuple(
             StatePointSpec.from_dict(point) for point in values.get("points", ())
+        )
+        values["cells"] = tuple(
+            StateCellSpec.from_dict(cell) for cell in values.get("cells", ())
         )
         return cls(**values)
 
@@ -285,4 +312,43 @@ def validate_state_points(
         for point in points
     ):
         issues.append("state.unassigned_point")
+    return tuple(issues)
+
+
+def state_cell_grid_size(columns: int, rows: int) -> tuple[int, int]:
+    """Return the number of four-point cells in a matrix state grid."""
+
+    return max(0, int(columns) - 1), max(0, int(rows) - 1)
+
+
+def summarize_state_mix(cells: Sequence[StateCellSpec | Any]) -> StateMixPolicy:
+    """Return the preset that exactly describes a persisted cell mask."""
+
+    enabled = [bool(cell.mix_enabled) for cell in cells]
+    if enabled and all(enabled):
+        return StateMixPolicy.FULL
+    if not enabled or not any(enabled):
+        return StateMixPolicy.NO_MIX
+    return StateMixPolicy.PARTIAL
+
+
+def validate_state_cells(
+    cells: Sequence[StateCellSpec],
+    columns: int,
+    rows: int,
+) -> tuple[str, ...]:
+    """Return stable validation codes for the matrix domain cell mask."""
+
+    cell_columns, cell_rows = state_cell_grid_size(columns, rows)
+    expected = {
+        (column, row)
+        for row in range(cell_rows)
+        for column in range(cell_columns)
+    }
+    coordinates = [(cell.column, cell.row) for cell in cells]
+    issues: list[str] = []
+    if len(coordinates) != len(set(coordinates)):
+        issues.append("state.duplicate_cell")
+    if set(coordinates) != expected:
+        issues.append("state.incomplete_cell_grid")
     return tuple(issues)

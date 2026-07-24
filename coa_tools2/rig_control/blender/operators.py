@@ -26,10 +26,12 @@ from .drivers import (
 )
 from .properties import get_rig_data
 from .states import (
+    ensure_state_cells,
     ensure_state_driver,
     remove_state_driver,
     state_dimensions,
     state_point_local_position,
+    summarize_state_mix_policy,
     state_target_key,
 )
 from .validation import store_validation_issues, validate_rig
@@ -218,6 +220,40 @@ def _replace_state_points(control, columns, rows, snapshots=None):
     )
 
 
+def _state_cell_snapshot(cell):
+    return {
+        "cell_uuid": cell.cell_uuid,
+        "mix_enabled": cell.mix_enabled,
+    }
+
+
+def _replace_state_cells(control, columns, rows, snapshots=None):
+    snapshots = snapshots or {}
+    previous_index = control.state_cells_index
+    default_enabled = control.state_mix_policy == "FULL"
+    control.state_cells.clear()
+    for row in range(max(0, rows - 1)):
+        for column in range(max(0, columns - 1)):
+            cell = control.state_cells.add()
+            values = snapshots.get((column, row))
+            cell.cell_uuid = (
+                values["cell_uuid"]
+                if values and values.get("cell_uuid")
+                else str(uuid.uuid4())
+            )
+            cell.control_uuid = control.control_uuid
+            cell.column = column
+            cell.row = row
+            cell.mix_enabled = (
+                bool(values["mix_enabled"]) if values else default_enabled
+            )
+    control.state_cells_index = min(
+        previous_index,
+        max(0, len(control.state_cells) - 1),
+    )
+    control.state_mix_policy = summarize_state_mix_policy(control)
+
+
 class COATOOLS2_OT_AddRigControl(bpy.types.Operator):
     bl_idname = "coa_tools2.add_rig_control"
     bl_label = "Add Rig Control"
@@ -258,6 +294,14 @@ class COATOOLS2_OT_AddRigControl(bpy.types.Operator):
     )
     grid_columns: IntProperty(default=3, min=2, max=32)
     grid_rows: IntProperty(default=3, min=2, max=32)
+    matrix_mix_policy: EnumProperty(
+        name="Mix Domain",
+        items=(
+            ("FULL", "Full", "Allow mixing inside every matrix cell"),
+            ("NO_MIX", "Grid Only", "Keep the handle on matrix rails"),
+        ),
+        default="FULL",
+    )
     angle_min: FloatProperty(default=-math.pi * 0.5, subtype="ANGLE")
     angle_max: FloatProperty(default=math.pi * 0.5, subtype="ANGLE")
     source_component: EnumProperty(
@@ -305,6 +349,8 @@ class COATOOLS2_OT_AddRigControl(bpy.types.Operator):
                 row = layout.row(align=True)
                 row.prop(self, "grid_columns")
                 row.prop(self, "grid_rows")
+            if self.rectangle_mode == "MATRIX":
+                layout.prop(self, "matrix_mix_policy", expand=True)
         elif self.control_type == "POINT_2D_CIRCLE":
             layout.prop(self, "radius")
         else:
@@ -390,7 +436,13 @@ class COATOOLS2_OT_AddRigControl(bpy.types.Operator):
             control.state_mode = "MATRIX_2D"
             control.state_columns = self.grid_columns
             control.state_rows = self.grid_rows
+            control.state_mix_policy = self.matrix_mix_policy
             _replace_state_points(
+                control,
+                self.grid_columns,
+                self.grid_rows,
+            )
+            _replace_state_cells(
                 control,
                 self.grid_columns,
                 self.grid_rows,
@@ -673,6 +725,12 @@ class COATOOLS2_OT_SetupRigStates(bpy.types.Operator):
             return {"CANCELLED"}
 
         columns, rows = state_grid_size(self.mode, self.columns, self.rows)
+        if control.state_mode == "MATRIX_2D":
+            ensure_state_cells(control)
+        cell_snapshots = {
+            (cell.column, cell.row): _state_cell_snapshot(cell)
+            for cell in control.state_cells
+        }
         expected = {
             (column, row)
             for row in range(rows)
@@ -705,6 +763,11 @@ class COATOOLS2_OT_SetupRigStates(bpy.types.Operator):
         control.state_columns = columns
         control.state_rows = rows
         _replace_state_points(control, columns, rows, snapshots)
+        if self.mode == "MATRIX_2D":
+            _replace_state_cells(control, columns, rows, cell_snapshots)
+        else:
+            control.state_cells.clear()
+            control.state_mix_policy = "FULL"
         try:
             compile_control(armature, control)
         except Exception as exc:
@@ -712,6 +775,80 @@ class COATOOLS2_OT_SetupRigStates(bpy.types.Operator):
             self.report({"ERROR"}, f"State grid compile failed: {exc}")
             return {"CANCELLED"}
         self.report({"INFO"}, f"State grid ready: {columns} x {rows}.")
+        return {"FINISHED"}
+
+
+class COATOOLS2_OT_SetRigStateMixPolicy(bpy.types.Operator):
+    bl_idname = "coa_tools2.set_rig_state_mix_policy"
+    bl_label = "Set Matrix Mix Domain"
+    bl_description = "Allow mixing in all cells or keep the handle on grid rails"
+    bl_options = {"REGISTER", "UNDO"}
+
+    policy: EnumProperty(
+        items=(
+            ("FULL", "Full", "Allow mixing inside every matrix cell"),
+            ("NO_MIX", "Grid Only", "Disable mixing inside every matrix cell"),
+        ),
+        default="FULL",
+        options={"HIDDEN"},
+    )
+
+    @classmethod
+    def poll(cls, context):
+        _armature_object, control = _active_control(context)
+        return control is not None and control.state_mode == "MATRIX_2D"
+
+    def execute(self, context):
+        armature, control = _active_control(context)
+        ensure_state_cells(control)
+        enabled = self.policy == "FULL"
+        for cell in control.state_cells:
+            cell.mix_enabled = enabled
+        control.state_mix_policy = self.policy
+        try:
+            compile_control(armature, control)
+        except Exception as exc:
+            traceback.print_exc()
+            self.report({"ERROR"}, f"Matrix domain update failed: {exc}")
+            return {"CANCELLED"}
+        return {"FINISHED"}
+
+
+class COATOOLS2_OT_ToggleRigStateCell(bpy.types.Operator):
+    bl_idname = "coa_tools2.toggle_rig_state_cell"
+    bl_label = "Toggle Matrix Cell Mix"
+    bl_description = "Toggle free bilinear mixing inside this four-point cell"
+    bl_options = {"REGISTER", "UNDO"}
+
+    cell_uuid: StringProperty(options={"HIDDEN"})
+
+    @classmethod
+    def poll(cls, context):
+        _armature_object, control = _active_control(context)
+        return control is not None and control.state_mode == "MATRIX_2D"
+
+    def execute(self, context):
+        armature, control = _active_control(context)
+        ensure_state_cells(control)
+        cell = next(
+            (
+                candidate
+                for candidate in control.state_cells
+                if candidate.cell_uuid == self.cell_uuid
+            ),
+            None,
+        )
+        if cell is None:
+            self.report({"ERROR"}, "Matrix cell was not found.")
+            return {"CANCELLED"}
+        cell.mix_enabled = not cell.mix_enabled
+        control.state_mix_policy = summarize_state_mix_policy(control)
+        try:
+            compile_control(armature, control)
+        except Exception as exc:
+            traceback.print_exc()
+            self.report({"ERROR"}, f"Matrix cell update failed: {exc}")
+            return {"CANCELLED"}
         return {"FINISHED"}
 
 
@@ -927,6 +1064,8 @@ CLASSES = (
     COATOOLS2_OT_AddRigBinding,
     COATOOLS2_OT_RemoveRigBinding,
     COATOOLS2_OT_SetupRigStates,
+    COATOOLS2_OT_SetRigStateMixPolicy,
+    COATOOLS2_OT_ToggleRigStateCell,
     COATOOLS2_OT_AssignRigStatePoint,
     COATOOLS2_OT_ClearRigStatePoint,
     COATOOLS2_OT_SnapRigStatePoint,

@@ -36,6 +36,19 @@ def _append_quad(vertices, faces, x_min, x_max, y_min, y_max):
     faces.append((start, start + 1, start + 2, start + 3))
 
 
+def _append_curtain(vertices, faces, start_point, end_point, half_depth):
+    start = len(vertices)
+    vertices.extend(
+        (
+            (*start_point, -half_depth),
+            (*end_point, -half_depth),
+            (*end_point, half_depth),
+            (*start_point, half_depth),
+        )
+    )
+    faces.append((start, start + 1, start + 2, start + 3))
+
+
 def _grid_rail_geometry(control):
     vertices = []
     faces = []
@@ -86,10 +99,74 @@ def _dial_rail_geometry(control):
     return vertices, faces
 
 
+def _matrix_domain_geometry(control):
+    """Build exact grid centerlines plus freely mixable cell surfaces."""
+
+    vertices = []
+    faces = []
+    half_width = control.width * 0.5
+    half_height = control.height * 0.5
+    half_depth = max(control.stroke_radius, 0.01)
+    columns = max(2, control.state_columns)
+    rows = max(2, control.state_rows)
+    x_values = [
+        -half_width + control.width * column / (columns - 1)
+        for column in range(columns)
+    ]
+    y_values = [
+        -half_height + control.height * row / (rows - 1)
+        for row in range(rows)
+    ]
+
+    # Vertical curtain faces force Nearest Surface to the exact rail
+    # centerline instead of the edge of a thin horizontal strip.
+    for x in x_values:
+        _append_curtain(
+            vertices,
+            faces,
+            (x, -half_height),
+            (x, half_height),
+            half_depth,
+        )
+    for y in y_values:
+        _append_curtain(
+            vertices,
+            faces,
+            (-half_width, y),
+            (half_width, y),
+            half_depth,
+        )
+
+    cells = {
+        (cell.column, cell.row): cell
+        for cell in control.state_cells
+    }
+    for row in range(rows - 1):
+        for column in range(columns - 1):
+            cell = cells.get((column, row))
+            if cell is None or not cell.mix_enabled:
+                continue
+            _append_quad(
+                vertices,
+                faces,
+                x_values[column],
+                x_values[column + 1],
+                y_values[row],
+                y_values[row + 1],
+            )
+    return vertices, faces
+
+
 def ensure_rail_target(armature, control):
     if control.control_type == "DIAL":
         vertices, faces = _dial_rail_geometry(control)
         rail_kind = "DIAL"
+    elif (
+        control.control_type == "POINT_2D_RECT"
+        and control.state_mode == "MATRIX_2D"
+    ):
+        vertices, faces = _matrix_domain_geometry(control)
+        rail_kind = "MATRIX_DOMAIN"
     elif (
         control.control_type == "POINT_2D_RECT"
         and control.rectangle_mode == "GRID"

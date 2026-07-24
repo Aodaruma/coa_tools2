@@ -46,12 +46,34 @@ def main():
     assert abs(control.tip_radius - control.node_radius * 2.0) < 1e-6
     assert control.control_bone in armature.pose.bones
     assert control.display_bone in armature.pose.bones
-    for bone_name in (control.control_bone, control.display_bone):
+    assert control.name_bone in armature.pose.bones
+    assert control.name_text_object in bpy.data.objects
+    name_text = bpy.data.objects[control.name_text_object]
+    assert name_text.type == "FONT"
+    assert name_text.data.body == "Smile"
+    assert name_text.parent == armature
+    assert name_text.parent_type == "BONE"
+    assert name_text.parent_bone == control.name_bone
+    assert name_text.hide_render
+    update_scene()
+    expected_name_z = (
+        control.origin[2]
+        - max(control.tip_radius, control.node_radius)
+        - control.name_offset
+    )
+    assert abs(name_text.matrix_world.translation.x - control.origin[0]) < 1e-6
+    assert abs(name_text.matrix_world.translation.z - expected_name_z) < 1e-5
+    for bone_name in (
+        control.control_bone,
+        control.display_bone,
+        control.name_bone,
+    ):
         bone_color = getattr(armature.data.bones[bone_name], "color", None)
         if bone_color is not None:
             assert bone_color.palette == "DEFAULT"
     assert not armature.data.bones[control.control_bone].use_deform
     assert not armature.data.bones[control.display_bone].use_deform
+    assert not armature.data.bones[control.name_bone].use_deform
     assert armature.pose.bones[control.control_bone].custom_shape is not None
     assert armature.pose.bones[control.display_bone].custom_shape is not None
 
@@ -91,6 +113,19 @@ def main():
             bone_color = getattr(owner, "color", None)
             if bone_color is not None:
                 assert bone_color.palette == "DEFAULT"
+
+    control.label = "Smile Control"
+    result = bpy.ops.coa_tools2.update_rig_control()
+    assert result == {"FINISHED"}
+    assert bpy.data.objects[control.name_text_object].data.body == "Smile Control"
+    control.show_name = False
+    result = bpy.ops.coa_tools2.update_rig_control()
+    assert result == {"FINISHED"}
+    assert bpy.data.objects[control.name_text_object].hide_get()
+    control.show_name = True
+    result = bpy.ops.coa_tools2.update_rig_control()
+    assert result == {"FINISHED"}
+    assert not bpy.data.objects[control.name_text_object].hide_get()
 
     pose_bone = armature.pose.bones[control.control_bone]
     pose_bone.location.x = 0.0

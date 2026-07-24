@@ -90,6 +90,19 @@ class COATOOLS2_PG_RigStatePoint(bpy.types.PropertyGroup):
     enabled: BoolProperty(default=True)
 
 
+class COATOOLS2_PG_RigStateCell(bpy.types.PropertyGroup):
+    schema_version: IntProperty(default=SCHEMA_VERSION)
+    cell_uuid: StringProperty()
+    control_uuid: StringProperty()
+    column: IntProperty(default=0, min=0)
+    row: IntProperty(default=0, min=0)
+    mix_enabled: BoolProperty(
+        name="Allow Mix",
+        description="Allow free bilinear mixing inside this four-point cell",
+        default=True,
+    )
+
+
 class COATOOLS2_PG_RigControl(bpy.types.PropertyGroup):
     schema_version: IntProperty(default=SCHEMA_VERSION)
     control_uuid: StringProperty()
@@ -116,6 +129,28 @@ class COATOOLS2_PG_RigControl(bpy.types.PropertyGroup):
     )
     control_bone: StringProperty()
     display_bone: StringProperty()
+    name_bone: StringProperty()
+    name_text_object: StringProperty()
+    show_name: BoolProperty(
+        name="Show Rig Name",
+        description="Show the control name below the widget",
+        default=True,
+        update=_mark_control_dirty,
+    )
+    name_offset: FloatProperty(
+        name="Name Offset",
+        description="Distance between the widget bottom and its name",
+        default=0.45,
+        min=0.0,
+        update=_mark_control_dirty,
+    )
+    name_size: FloatProperty(
+        name="Name Size",
+        description="Viewport text size for the rig control name",
+        default=0.4,
+        min=0.05,
+        update=_mark_control_dirty,
+    )
     tip_widget_uuid: StringProperty()
     base_widget_uuid: StringProperty()
     width: FloatProperty(default=4.0, min=0.1, update=_mark_control_dirty)
@@ -196,14 +231,24 @@ class COATOOLS2_PG_RigControl(bpy.types.PropertyGroup):
         update=_mark_control_dirty,
     )
     state_mix_policy: EnumProperty(
-        name="Mix",
-        items=(("FULL", "Full", "Blend all assigned states continuously"),),
+        name="Mix Domain",
+        items=(
+            ("FULL", "Full", "Allow continuous mixing in every cell"),
+            ("NO_MIX", "Grid Only", "Keep the handle on state grid rails"),
+            (
+                "PARTIAL",
+                "Per Cell",
+                "Allow mixing only in selected four-point cells",
+            ),
+        ),
         default="FULL",
     )
     state_columns: IntProperty(default=2, min=2, max=32, update=_mark_control_dirty)
     state_rows: IntProperty(default=2, min=1, max=32, update=_mark_control_dirty)
     state_points: CollectionProperty(type=COATOOLS2_PG_RigStatePoint)
     state_points_index: IntProperty(default=0, min=0)
+    state_cells: CollectionProperty(type=COATOOLS2_PG_RigStateCell)
+    state_cells_index: IntProperty(default=0, min=0)
     origin: FloatVectorProperty(size=3, subtype="XYZ")
     needs_rebuild: BoolProperty(default=False)
 
@@ -228,6 +273,11 @@ _CONTROL_FIELDS = (
     "axis",
     "control_bone",
     "display_bone",
+    "name_bone",
+    "name_text_object",
+    "show_name",
+    "name_offset",
+    "name_size",
     "tip_widget_uuid",
     "base_widget_uuid",
     "width",
@@ -251,6 +301,7 @@ _CONTROL_FIELDS = (
     "state_columns",
     "state_rows",
     "state_points_index",
+    "state_cells_index",
     "origin",
     "needs_rebuild",
 )
@@ -290,6 +341,14 @@ _STATE_POINT_FIELDS = (
     "generated_data_path",
     "is_empty",
     "enabled",
+)
+_STATE_CELL_FIELDS = (
+    "schema_version",
+    "cell_uuid",
+    "control_uuid",
+    "column",
+    "row",
+    "mix_enabled",
 )
 _MISSING = object()
 
@@ -364,6 +423,11 @@ def _migrate_legacy_rig_data(obj, rig_data):
             ) or ():
                 state = control.state_points.add()
                 _copy_fields(legacy_state, state, _STATE_POINT_FIELDS)
+            for legacy_cell in _legacy_collection(
+                legacy_control, "state_cells"
+            ) or ():
+                cell = control.state_cells.add()
+                _copy_fields(legacy_cell, cell, _STATE_CELL_FIELDS)
         if rig_data.rig_controls:
             rig_data.rig_controls_index = min(
                 _legacy_value(legacy, "rig_controls_index", 0),
@@ -395,6 +459,7 @@ CLASSES = (
     COATOOLS2_PG_RigBinding,
     COATOOLS2_PG_RigValidationIssue,
     COATOOLS2_PG_RigStatePoint,
+    COATOOLS2_PG_RigStateCell,
     COATOOLS2_PG_RigControl,
     COATOOLS2_PG_RigObjectProperties,
 )

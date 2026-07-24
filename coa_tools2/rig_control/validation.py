@@ -50,7 +50,11 @@ def validate_widget_spec(spec: WidgetSpec) -> list[ValidationIssue]:
                     spec.widget_uuid,
                 )
             )
-    if spec.layout in {WidgetLayout.RECTANGLE} and (
+    if spec.layout in {
+        WidgetLayout.RECTANGLE,
+        WidgetLayout.RECTANGLE_GRID,
+        WidgetLayout.MATRIX,
+    } and (
         spec.columns < 2 or spec.rows < 2
     ):
         issues.append(
@@ -58,6 +62,19 @@ def validate_widget_spec(spec: WidgetSpec) -> list[ValidationIssue]:
                 IssueSeverity.ERROR,
                 "widget.invalid_grid_size",
                 "Matrix widgets require at least two columns and two rows.",
+                spec.widget_uuid,
+            )
+        )
+    if (
+        spec.layout == WidgetLayout.MATRIX
+        and spec.mix_cells is not None
+        and len(spec.mix_cells) != (spec.columns - 1) * (spec.rows - 1)
+    ):
+        issues.append(
+            ValidationIssue(
+                IssueSeverity.ERROR,
+                "widget.invalid_cell_mask",
+                "Matrix cell mask size must match the state grid.",
                 spec.widget_uuid,
             )
         )

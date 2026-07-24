@@ -186,6 +186,47 @@ def main():
     assert connected_component_count(matrix_cache.data) == 2
     assert len(matrix_cache.data.polygons) == 0
 
+    partial_matrix = WidgetSpec(
+        widget_uuid="phase5-partial-matrix",
+        layout=WidgetLayout.MATRIX,
+        width=4.0,
+        height=3.0,
+        columns=2,
+        rows=3,
+        # Bottom cell is free; top cell remains a no-mix rail cell.
+        mix_cells=(True, False),
+    )
+    partial_source = ensure_widget_source(
+        partial_matrix,
+        name="Phase5PartialMatrix",
+    )
+    assert len(partial_source.data.polygons) == 6
+    partial_cache = ensure_widget(
+        partial_matrix,
+        name="Phase5PartialMatrix",
+        backend=WidgetBackend.EVALUATED_MESH_CACHE,
+    )
+    # The enabled lower-cell interior is removed while the disabled upper
+    # cell remains one enclosed rail loop.
+    assert connected_component_count(partial_cache.data) == 2
+    assert len(partial_cache.data.polygons) == 0
+
+    no_mix_matrix = WidgetSpec(
+        widget_uuid="phase5-no-mix-matrix",
+        layout=WidgetLayout.MATRIX,
+        width=4.0,
+        height=3.0,
+        columns=2,
+        rows=2,
+        mix_cells=(False,),
+    )
+    no_mix_cache = ensure_widget(
+        no_mix_matrix,
+        name="Phase5NoMixMatrix",
+        backend=WidgetBackend.EVALUATED_MESH_CACHE,
+    )
+    assert connected_component_count(no_mix_cache.data) == 2
+
     circle = WidgetSpec(
         widget_uuid="phase0-circle",
         layout=WidgetLayout.CIRCLE,

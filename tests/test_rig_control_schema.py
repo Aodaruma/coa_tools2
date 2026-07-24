@@ -13,7 +13,9 @@ from rig_control.schema import (  # noqa: E402
     ControlAxis,
     ControlSpec,
     ControlType,
+    StateCellSpec,
     StateDataSpec,
+    StateMixPolicy,
     StateMode,
     StatePointSpec,
     TargetKind,
@@ -22,7 +24,9 @@ from rig_control.schema import (  # noqa: E402
     dial_point,
     dial_rest_angle,
     state_point_position,
+    summarize_state_mix,
     state_weights,
+    validate_state_cells,
     validate_state_points,
 )
 from rig_control.validation import (  # noqa: E402
@@ -92,12 +96,18 @@ class RigControlSchemaTests(unittest.TestCase):
             for row in range(2)
             for column in range(3)
         )
+        cells = (
+            StateCellSpec("cell-0", "control-matrix", 0, 0, True),
+            StateCellSpec("cell-1", "control-matrix", 1, 0, False),
+        )
         spec = StateDataSpec(
             control_uuid="control-matrix",
             mode=StateMode.MATRIX_2D,
             columns=3,
             rows=2,
             points=points,
+            cells=cells,
+            mix_policy=StateMixPolicy.PARTIAL,
         )
         self.assertEqual(spec, StateDataSpec.from_dict(spec.to_dict()))
         self.assertEqual((0.5, 1.0), state_point_position(1, 1, 3, 2))
@@ -105,6 +115,19 @@ class RigControlSchemaTests(unittest.TestCase):
         self.assertAlmostEqual(1.0, sum(weights))
         self.assertEqual((0.25, 0.25, 0.0, 0.25, 0.25, 0.0), weights)
         self.assertEqual((), validate_state_points(points, 3, 2))
+        self.assertEqual((), validate_state_cells(cells, 3, 2))
+        self.assertEqual(StateMixPolicy.PARTIAL, summarize_state_mix(cells))
+
+    def test_matrix_widget_cell_mask_round_trip(self):
+        spec = WidgetSpec(
+            widget_uuid="matrix-mask",
+            layout=WidgetLayout.MATRIX,
+            columns=2,
+            rows=3,
+            mix_cells=(True, False),
+        )
+        self.assertEqual(spec, WidgetSpec.from_dict(spec.to_dict()))
+        self.assertFalse(validate_widget_spec(spec))
 
     def test_state_validation_allows_explicit_empty_points(self):
         points = (

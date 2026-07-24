@@ -10,6 +10,7 @@ from ..schema import WidgetLayout
 from ..validation import IssueSeverity
 from .artifacts import (
     find_bone_by_role,
+    find_object_by_role,
     limit_distance_name,
     limit_location_name,
     rail_constraint_name,
@@ -20,6 +21,7 @@ from .states import (
     state_dimensions,
     state_point_driver,
     state_point_target,
+    summarize_state_mix_policy,
     state_target_key,
 )
 from .widgets import expected_widget_node_group_names
@@ -117,6 +119,10 @@ def validate_rig(armature) -> list[BlenderValidationIssue]:
         control_bone = find_bone_by_role(
             armature, control.control_uuid, "control_bone"
         )
+        name_bone = find_bone_by_role(
+            armature, control.control_uuid, "name_bone"
+        )
+        name_text = find_object_by_role(control.control_uuid, "name_text")
         if display_bone is None:
             issues.append(
                 BlenderValidationIssue(
@@ -132,6 +138,34 @@ def validate_rig(armature) -> list[BlenderValidationIssue]:
                     IssueSeverity.ERROR,
                     "artifact.missing_control_bone",
                     f"Control bone is missing for {control.label}.",
+                    control.control_uuid,
+                )
+            )
+        if name_bone is None:
+            issues.append(
+                BlenderValidationIssue(
+                    IssueSeverity.ERROR,
+                    "artifact.missing_name_bone",
+                    f"Name bone is missing for {control.label}.",
+                    control.control_uuid,
+                )
+            )
+        if (
+            name_text is None
+            or name_text.type != "FONT"
+            or name_text.data.body != control.label
+            or name_text.parent != armature
+            or name_text.parent_type != "BONE"
+            or (
+                name_bone is not None
+                and name_text.parent_bone != name_bone.name
+            )
+        ):
+            issues.append(
+                BlenderValidationIssue(
+                    IssueSeverity.ERROR,
+                    "artifact.invalid_name_text",
+                    f"Rig name text is missing or stale for {control.label}.",
                     control.control_uuid,
                 )
             )
@@ -163,7 +197,10 @@ def validate_rig(armature) -> list[BlenderValidationIssue]:
                     expected_constraints.append(limit_distance_name(control.control_uuid))
                 elif control.control_type == "DIAL" or (
                     control.control_type == "POINT_2D_RECT"
-                    and control.rectangle_mode == "GRID"
+                    and (
+                        control.rectangle_mode == "GRID"
+                        or control.state_mode == "MATRIX_2D"
+                    )
                 ):
                     expected_constraints.append(
                         rail_constraint_name(control.control_uuid)
@@ -270,6 +307,40 @@ def validate_rig(armature) -> list[BlenderValidationIssue]:
                         control.control_uuid,
                     )
                 )
+
+            if control.state_mode == "MATRIX_2D" and control.state_cells:
+                expected_cells = {
+                    (column, row)
+                    for row in range(rows - 1)
+                    for column in range(columns - 1)
+                }
+                cell_coordinates = [
+                    (cell.column, cell.row) for cell in control.state_cells
+                ]
+                if (
+                    set(cell_coordinates) != expected_cells
+                    or len(cell_coordinates) != len(expected_cells)
+                ):
+                    issues.append(
+                        BlenderValidationIssue(
+                            IssueSeverity.ERROR,
+                            "state.incomplete_cell_grid",
+                            f"Matrix mix cells must be rebuilt for {control.label}.",
+                            control.control_uuid,
+                        )
+                    )
+                elif (
+                    control.state_mix_policy
+                    != summarize_state_mix_policy(control)
+                ):
+                    issues.append(
+                        BlenderValidationIssue(
+                            IssueSeverity.WARNING,
+                            "state.mix_policy_mismatch",
+                            f"Matrix mix preset is stale for {control.label}.",
+                            control.control_uuid,
+                        )
+                    )
 
             seen_state_ids: set[str] = set()
             for point in control.state_points:

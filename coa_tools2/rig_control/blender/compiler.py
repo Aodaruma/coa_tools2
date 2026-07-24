@@ -9,6 +9,7 @@ from mathutils import Vector
 from .artifacts import (
     ensure_control_bones,
     ensure_control_constraints,
+    ensure_control_name_text,
     ensure_control_widgets,
     ensure_rig_instance_id,
 )
@@ -43,11 +44,12 @@ def compile_control(armature, control, origin=None):
     ensure_rig_instance_id(armature)
     origin = Vector(control.origin if origin is None else origin)
     control.origin = origin
-    display_pose, control_pose = ensure_control_bones(
+    display_pose, control_pose, name_pose = ensure_control_bones(
         armature,
         control,
         origin,
     )
+    ensure_control_name_text(armature, name_pose, control)
     ensure_control_constraints(armature, display_pose, control_pose, control)
     ensure_control_widgets(display_pose, control_pose, control)
     for binding in control.bindings:
@@ -57,6 +59,7 @@ def compile_control(armature, control, origin=None):
     return {
         "display_bone": display_pose.name,
         "control_bone": control_pose.name,
+        "name_bone": name_pose.name,
         "bindings": len(control.bindings),
         "state_drivers": state_driver_count,
     }
