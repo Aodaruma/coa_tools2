@@ -74,15 +74,23 @@ def main():
         (control.display_bone, "THEME03"),
         (control.control_bone, "THEME04"),
     ):
-        bone_color = getattr(armature.data.bones[bone_name], "color", None)
-        if bone_color is not None:
-            bone_color.palette = palette
+        for owner in (
+            armature.data.bones[bone_name],
+            armature.pose.bones[bone_name],
+        ):
+            bone_color = getattr(owner, "color", None)
+            if bone_color is not None:
+                bone_color.palette = palette
     result = bpy.ops.coa_tools2.update_rig_control()
     assert result == {"FINISHED"}
     for bone_name in (control.control_bone, control.display_bone):
-        bone_color = getattr(armature.data.bones[bone_name], "color", None)
-        if bone_color is not None:
-            assert bone_color.palette == "DEFAULT"
+        for owner in (
+            armature.data.bones[bone_name],
+            armature.pose.bones[bone_name],
+        ):
+            bone_color = getattr(owner, "color", None)
+            if bone_color is not None:
+                assert bone_color.palette == "DEFAULT"
 
     pose_bone = armature.pose.bones[control.control_bone]
     pose_bone.location.x = 0.0

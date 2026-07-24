@@ -41,6 +41,15 @@ def ensure_rig_instance_id(armature: bpy.types.Object) -> str:
     return instance_id
 
 
+def _set_bone_palette(pose_bone, palette: str):
+    """Apply presentation color to data and pose-level color overrides."""
+
+    for owner in (pose_bone.bone, pose_bone):
+        color = getattr(owner, "color", None)
+        if color is not None and hasattr(color, "palette"):
+            color.palette = palette
+
+
 def find_bone_by_role(armature, control_uuid: str, role: str):
     for bone in armature.data.bones:
         if (
@@ -159,6 +168,8 @@ def ensure_control_bones(
         visible=True,
         exclusive=True,
     )
+    _set_bone_palette(display_pose, "DEFAULT")
+    _set_bone_palette(control_pose, "DEFAULT")
 
     control.display_bone = display_pose.name
     control.control_bone = control_pose.name
