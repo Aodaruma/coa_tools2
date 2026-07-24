@@ -72,7 +72,7 @@ def main():
     assert {group.name for group in groups.values()} == set(
         NODE_GROUP_NAMES.values()
     )
-    assert len({group.as_pointer() for group in groups.values()}) == 4
+    assert len({group.as_pointer() for group in groups.values()}) == 5
     slider_group = ensure_widget_node_group(WidgetLayout.LINEAR)
     assert slider_group == groups["SLIDER"]
     assert (
@@ -85,6 +85,7 @@ def main():
         == ensure_widget_node_group(WidgetLayout.RECTANGLE_GRID)
         == groups["RECTANGLE"]
     )
+    assert ensure_widget_node_group(WidgetLayout.MATRIX) == groups["MATRIX"]
 
     narrow = WidgetSpec(
         widget_uuid="phase0-linear",
@@ -158,6 +159,24 @@ def main():
     # One outside boundary plus one loop around each of the four cells.
     assert connected_component_count(grid_cache.data) == 5
     assert len(grid_cache.data.polygons) == 0
+
+    matrix = WidgetSpec(
+        widget_uuid="phase4-matrix",
+        layout=WidgetLayout.MATRIX,
+        width=4.0,
+        height=3.0,
+        columns=3,
+        rows=3,
+    )
+    matrix_cache = ensure_widget(
+        matrix,
+        name="Phase4Matrix",
+        backend=WidgetBackend.EVALUATED_MESH_CACHE,
+    )
+    # FULL mix keeps the interior free: the outside frame is one component
+    # and the center state point is a separate circle, with no internal rails.
+    assert connected_component_count(matrix_cache.data) == 2
+    assert len(matrix_cache.data.polygons) == 0
 
     circle = WidgetSpec(
         widget_uuid="phase0-circle",

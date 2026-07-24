@@ -48,6 +48,7 @@ class WidgetLayout(StringEnum):
     LINEAR = "LINEAR"
     RECTANGLE = "RECTANGLE"
     RECTANGLE_GRID = "RECTANGLE_GRID"
+    MATRIX = "MATRIX"
     CIRCLE = "CIRCLE"
     DIAL = "DIAL"
 

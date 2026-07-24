@@ -11,13 +11,14 @@ from ..schema import WidgetBackend, WidgetLayout, WidgetSpec
 
 
 WIDGET_COLLECTION_NAME = "COA Rig Widgets"
-NODE_GROUP_VERSION = 5
+NODE_GROUP_VERSION = 6
 LEGACY_NODE_GROUP_NAME = "COA_RigWidget_GN"
 NODE_GROUP_NAMES = {
     "TIP": "COA_RigWidget_Tip_GN",
     "SLIDER": "COA_RigWidget_Slider_GN",
     "RADIAL": "COA_RigWidget_Radial_GN",
     "RECTANGLE": "COA_RigWidget_Rectangle_GN",
+    "MATRIX": "COA_RigWidget_Matrix_GN",
 }
 _BOOLEAN_SOLID_DEPTH = 0.1
 
@@ -31,6 +32,8 @@ def widget_family(layout: WidgetLayout) -> str:
         return "RADIAL"
     if layout in {WidgetLayout.RECTANGLE, WidgetLayout.RECTANGLE_GRID}:
         return "RECTANGLE"
+    if layout == WidgetLayout.MATRIX:
+        return "MATRIX"
     raise ValueError(f"Unsupported widget layout: {layout}")
 
 
@@ -317,6 +320,27 @@ def _grid_bar_instances(
     return realize.outputs["Geometry"]
 
 
+def _instances_on_points(nodes, links, points, instance_geometry, label):
+    instances = nodes.new("GeometryNodeInstanceOnPoints")
+    instances.label = label
+    links.new(points, instances.inputs["Points"])
+    links.new(instance_geometry, instances.inputs["Instance"])
+    realize = nodes.new("GeometryNodeRealizeInstances")
+    realize.label = f"{label} Realized"
+    links.new(instances.outputs["Instances"], realize.inputs["Geometry"])
+    return realize.outputs["Geometry"]
+
+
+def _grid_points(nodes, links, width, height, columns, rows, label):
+    grid = nodes.new("GeometryNodeMeshGrid")
+    grid.label = label
+    links.new(width, grid.inputs["Size X"])
+    links.new(height, grid.inputs["Size Y"])
+    links.new(columns, grid.inputs["Vertices X"])
+    links.new(rows, grid.inputs["Vertices Y"])
+    return grid.outputs["Mesh"]
+
+
 def _half_dimension(nodes, links, dimension_socket, label, factor=0.5):
     value = _math_node(nodes, "MULTIPLY", label)
     value.inputs[1].default_value = factor
@@ -387,6 +411,7 @@ def _build_slider_group(name):
     _new_interface_socket(group, "Width", "INPUT", "NodeSocketFloat", 4.0)
     _new_interface_socket(group, "Node Radius", "INPUT", "NodeSocketFloat", 0.34)
     _new_interface_socket(group, "Bar Width", "INPUT", "NodeSocketFloat", 0.28)
+    _new_interface_socket(group, "Columns", "INPUT", "NodeSocketInt", 2)
     nodes = group.nodes
     links = group.links
     group_input, group_output = _group_io(group)
@@ -424,24 +449,20 @@ def _build_slider_group(name):
         group_input.outputs["Bar Width"],
         "Slider Offset Rail",
     )
-    left = _translated_geometry(
+    endpoints = _grid_bar_instances(
         nodes,
         links,
         endpoint,
+        group_input.outputs["Columns"],
+        group_input.outputs["Width"],
         negative_half_width,
-        "Slider Left Endpoint",
-    )
-    right = _translated_geometry(
-        nodes,
-        links,
-        endpoint,
-        half_width,
-        "Slider Right Endpoint",
+        "X",
+        "Slider State Nodes",
     )
     geometry = _union_outline_mesh(
         nodes,
         links,
-        (bar, left, right),
+        (bar, endpoints),
         "Slider Outline",
     )
     links.new(geometry, group_output.inputs["Geometry"])
@@ -674,11 +695,134 @@ def _build_radial_group(name):
     return group
 
 
+def _build_matrix_group(name):
+    group = _new_group(name, "MATRIX")
+    _new_interface_socket(group, "Width", "INPUT", "NodeSocketFloat", 4.0)
+    _new_interface_socket(group, "Height", "INPUT", "NodeSocketFloat", 2.0)
+    _new_interface_socket(group, "Node Radius", "INPUT", "NodeSocketFloat", 0.34)
+    _new_interface_socket(group, "Bar Width", "INPUT", "NodeSocketFloat", 0.28)
+    _new_interface_socket(group, "Columns", "INPUT", "NodeSocketInt", 2)
+    _new_interface_socket(group, "Rows", "INPUT", "NodeSocketInt", 2)
+    nodes = group.nodes
+    links = group.links
+    group_input, group_output = _group_io(group)
+
+    half_width = _half_dimension(
+        nodes,
+        links,
+        group_input.outputs["Width"],
+        "Matrix Half Width",
+    )
+    half_height = _half_dimension(
+        nodes,
+        links,
+        group_input.outputs["Height"],
+        "Matrix Half Height",
+    )
+    points = _grid_points(
+        nodes,
+        links,
+        group_input.outputs["Width"],
+        group_input.outputs["Height"],
+        group_input.outputs["Columns"],
+        group_input.outputs["Rows"],
+        "Matrix State Points",
+    )
+    position = nodes.new("GeometryNodeInputPosition")
+    separate_position = nodes.new("ShaderNodeSeparateXYZ")
+    links.new(position.outputs["Position"], separate_position.inputs["Vector"])
+    absolute_x = _math_node(nodes, "ABSOLUTE", "Matrix Absolute X")
+    absolute_y = _math_node(nodes, "ABSOLUTE", "Matrix Absolute Y")
+    links.new(separate_position.outputs["X"], absolute_x.inputs[0])
+    links.new(separate_position.outputs["Y"], absolute_y.inputs[0])
+    inner_x_limit = _math_node(nodes, "SUBTRACT", "Matrix Inner X Limit")
+    inner_y_limit = _math_node(nodes, "SUBTRACT", "Matrix Inner Y Limit")
+    inner_x_limit.inputs[1].default_value = 0.0001
+    inner_y_limit.inputs[1].default_value = 0.0001
+    links.new(half_width, inner_x_limit.inputs[0])
+    links.new(half_height, inner_y_limit.inputs[0])
+    inside_x = _math_node(nodes, "LESS_THAN", "Matrix Interior X")
+    inside_y = _math_node(nodes, "LESS_THAN", "Matrix Interior Y")
+    links.new(absolute_x.outputs[0], inside_x.inputs[0])
+    links.new(inner_x_limit.outputs[0], inside_x.inputs[1])
+    links.new(absolute_y.outputs[0], inside_y.inputs[0])
+    links.new(inner_y_limit.outputs[0], inside_y.inputs[1])
+    interior = nodes.new("FunctionNodeBooleanMath")
+    interior.operation = "AND"
+    interior.label = "Matrix Interior Points"
+    links.new(inside_x.outputs[0], interior.inputs[0])
+    links.new(inside_y.outputs[0], interior.inputs[1])
+    separate_points = nodes.new("GeometryNodeSeparateGeometry")
+    separate_points.domain = "POINT"
+    links.new(points, separate_points.inputs["Geometry"])
+    links.new(interior.outputs[0], separate_points.inputs["Selection"])
+
+    solid_node = _solid_circle_mesh(
+        nodes,
+        links,
+        group_input.outputs["Node Radius"],
+        "Matrix Solid Node",
+    )
+    boundary_nodes = _instances_on_points(
+        nodes,
+        links,
+        separate_points.outputs["Inverted"],
+        solid_node,
+        "Matrix Boundary State Nodes",
+    )
+    outer_width = _math_node(nodes, "ADD", "Matrix Outer Width")
+    links.new(group_input.outputs["Width"], outer_width.inputs[0])
+    links.new(group_input.outputs["Bar Width"], outer_width.inputs[1])
+    outer_height = _math_node(nodes, "ADD", "Matrix Outer Height")
+    links.new(group_input.outputs["Height"], outer_height.inputs[0])
+    links.new(group_input.outputs["Bar Width"], outer_height.inputs[1])
+    filled_interior = _solid_box_mesh(
+        nodes,
+        links,
+        outer_width.outputs[0],
+        outer_height.outputs[0],
+        "Matrix Interior Fill",
+    )
+    outer_outline = _union_outline_mesh(
+        nodes,
+        links,
+        (filled_interior, boundary_nodes),
+        "Matrix Outer Outline",
+    )
+
+    circle = _circle_curve(
+        nodes,
+        links,
+        group_input.outputs["Node Radius"],
+        "Matrix Interior Node Circle",
+    )
+    circle_edges = _curve_to_edge_mesh(
+        nodes,
+        links,
+        circle,
+        "Matrix Interior Node Outline",
+    )
+    interior_nodes = _instances_on_points(
+        nodes,
+        links,
+        separate_points.outputs["Selection"],
+        circle_edges,
+        "Matrix Interior Node Instances",
+    )
+    join = nodes.new("GeometryNodeJoinGeometry")
+    join.label = "Matrix Outline and Interior Nodes"
+    links.new(outer_outline, join.inputs["Geometry"])
+    links.new(interior_nodes, join.inputs["Geometry"])
+    links.new(join.outputs["Geometry"], group_output.inputs["Geometry"])
+    return group
+
+
 _GROUP_BUILDERS: dict[str, Callable[[str], bpy.types.GeometryNodeTree]] = {
     "TIP": _build_tip_group,
     "SLIDER": _build_slider_group,
     "RADIAL": _build_radial_group,
     "RECTANGLE": _build_rectangle_group,
+    "MATRIX": _build_matrix_group,
 }
 
 
@@ -722,6 +866,7 @@ def ensure_widget_node_groups():
                 "SLIDER": WidgetLayout.LINEAR,
                 "RADIAL": WidgetLayout.CIRCLE,
                 "RECTANGLE": WidgetLayout.RECTANGLE,
+                "MATRIX": WidgetLayout.MATRIX,
             }[family]
         )
         for family in NODE_GROUP_NAMES

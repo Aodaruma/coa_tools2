@@ -13,6 +13,7 @@ from .artifacts import (
     ensure_rig_instance_id,
 )
 from .drivers import ensure_binding_driver
+from .states import ensure_state_drivers, sync_state_control_geometry
 
 
 class RigCompileError(RuntimeError):
@@ -37,6 +38,8 @@ def compile_control(armature, control, origin=None):
         and control.angle_max - control.angle_min > math.tau
     ):
         raise RigCompileError("Dial angle range cannot exceed one full turn.")
+    if control.state_mode != "NONE":
+        sync_state_control_geometry(control)
     ensure_rig_instance_id(armature)
     origin = Vector(control.origin if origin is None else origin)
     control.origin = origin
@@ -49,9 +52,11 @@ def compile_control(armature, control, origin=None):
     ensure_control_widgets(display_pose, control_pose, control)
     for binding in control.bindings:
         ensure_binding_driver(armature, control, binding)
+    state_driver_count = ensure_state_drivers(armature, control)
     control.needs_rebuild = False
     return {
         "display_bone": display_pose.name,
         "control_bone": control_pose.name,
         "bindings": len(control.bindings),
+        "state_drivers": state_driver_count,
     }

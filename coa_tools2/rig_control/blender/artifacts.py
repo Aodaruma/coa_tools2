@@ -307,7 +307,9 @@ def ensure_control_widgets(display_pose, control_pose, control):
         "DIAL": WidgetLayout.DIAL,
     }
     base_layout = (
-        WidgetLayout.RECTANGLE_GRID
+        WidgetLayout.MATRIX
+        if control.state_mode == "MATRIX_2D"
+        else WidgetLayout.RECTANGLE_GRID
         if control.control_type == "POINT_2D_RECT"
         and control.rectangle_mode == "GRID"
         else WidgetLayout.RECTANGLE
@@ -324,8 +326,18 @@ def ensure_control_widgets(display_pose, control_pose, control):
         node_radius=control.node_radius,
         bar_width=control.bar_width,
         stroke_radius=control.stroke_radius,
-        columns=control.grid_columns,
-        rows=control.grid_rows,
+        columns=(
+            control.state_columns
+            if control.state_mode in {"LINEAR_1D", "MATRIX_2D"}
+            else 2
+            if control.control_type == "SLIDER_1D"
+            else control.grid_columns
+        ),
+        rows=(
+            control.state_rows
+            if control.state_mode == "MATRIX_2D"
+            else control.grid_rows
+        ),
         arc_start=control.angle_min,
         arc_end=control.angle_max,
     )

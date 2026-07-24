@@ -16,6 +16,12 @@ from .artifacts import (
 )
 from .drivers import binding_target_key, driver_uses_control, find_driver
 from .properties import get_rig_data
+from .states import (
+    state_dimensions,
+    state_point_driver,
+    state_point_target,
+    state_target_key,
+)
 from .widgets import expected_widget_node_group_names
 
 
@@ -58,7 +64,9 @@ def validate_rig(armature) -> list[BlenderValidationIssue]:
     layouts = {WidgetLayout.TIP}
     for control in controls:
         layouts.add(
-            {
+            WidgetLayout.MATRIX
+            if control.state_mode == "MATRIX_2D"
+            else {
                 "SLIDER_1D": WidgetLayout.LINEAR,
                 "POINT_2D_RECT": (
                     WidgetLayout.RECTANGLE_GRID
@@ -224,6 +232,122 @@ def validate_rig(armature) -> list[BlenderValidationIssue]:
                         binding.binding_uuid,
                     )
                 )
+
+        if control.state_mode != "NONE":
+            compatible = (
+                control.state_mode == "LINEAR_1D"
+                and control.control_type == "SLIDER_1D"
+            ) or (
+                control.state_mode == "MATRIX_2D"
+                and control.control_type == "POINT_2D_RECT"
+            )
+            if not compatible:
+                issues.append(
+                    BlenderValidationIssue(
+                        IssueSeverity.ERROR,
+                        "state.incompatible_control",
+                        f"State mode is incompatible with {control.label}.",
+                        control.control_uuid,
+                    )
+                )
+                continue
+
+            columns, rows = state_dimensions(control)
+            expected = {
+                (column, row)
+                for row in range(rows)
+                for column in range(columns)
+            }
+            coordinates = [
+                (point.column, point.row) for point in control.state_points
+            ]
+            if set(coordinates) != expected or len(coordinates) != len(expected):
+                issues.append(
+                    BlenderValidationIssue(
+                        IssueSeverity.ERROR,
+                        "state.incomplete_grid",
+                        f"State grid must be rebuilt for {control.label}.",
+                        control.control_uuid,
+                    )
+                )
+
+            seen_state_ids: set[str] = set()
+            for point in control.state_points:
+                if not point.state_uuid or point.state_uuid in seen_state_ids:
+                    issues.append(
+                        BlenderValidationIssue(
+                            IssueSeverity.ERROR,
+                            "state.invalid_uuid",
+                            f"State point ID is missing or duplicated for {control.label}.",
+                            control.control_uuid,
+                            point.state_uuid,
+                        )
+                    )
+                seen_state_ids.add(point.state_uuid)
+                if not point.enabled or point.is_empty:
+                    continue
+                target_key = state_target_key(point)
+                if not target_key[1] or not target_key[3]:
+                    issues.append(
+                        BlenderValidationIssue(
+                            IssueSeverity.WARNING,
+                            "state.unassigned_point",
+                            f"State [{point.column + 1}, {point.row + 1}] "
+                            f"is unassigned for {control.label}.",
+                            control.control_uuid,
+                            point.state_uuid,
+                        )
+                    )
+                    continue
+                _shape_keys, key_block = state_point_target(point)
+                if key_block is None:
+                    issues.append(
+                        BlenderValidationIssue(
+                            IssueSeverity.ERROR,
+                            "state.missing_target",
+                            f"State target is missing: {target_key[1:]}",
+                            control.control_uuid,
+                            point.state_uuid,
+                        )
+                    )
+                    continue
+                previous = seen_targets.get(target_key)
+                if previous is not None and previous != point.state_uuid:
+                    issues.append(
+                        BlenderValidationIssue(
+                            IssueSeverity.ERROR,
+                            "state.duplicate_target",
+                            f"Target is used by multiple rig inputs: {target_key[1:]}",
+                            control.control_uuid,
+                            point.state_uuid,
+                        )
+                    )
+                seen_targets[target_key] = point.state_uuid
+                fcurve = state_point_driver(point)
+                if fcurve is None:
+                    issues.append(
+                        BlenderValidationIssue(
+                            IssueSeverity.ERROR,
+                            "state.missing_driver",
+                            f"State driver is missing for {target_key[1:]}",
+                            control.control_uuid,
+                            point.state_uuid,
+                        )
+                    )
+                elif control_bone is not None and not driver_uses_control(
+                    fcurve,
+                    armature,
+                    control_bone.name,
+                ):
+                    issues.append(
+                        BlenderValidationIssue(
+                            IssueSeverity.ERROR,
+                            "state.driver_source_mismatch",
+                            f"State driver uses a different control for {target_key[1:]}",
+                            control.control_uuid,
+                            point.state_uuid,
+                        )
+                    )
     return issues
 
 
