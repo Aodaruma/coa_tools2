@@ -775,7 +775,8 @@ Forward Rigの意味的Controlが安定し、評価関数をBlenderなしでも�
 | Geometry Nodes動的Widget | 採用・必須 | 円+矩形バーの共有生成基盤として全Presetで使う |
 | 任意列×行の2D State Matrix | 採用 | Live2D型の多状態連続補間に直接貢献する |
 | Matrix `FULL` Bilinear Mix | 採用 | Blender-native Driverへ分解しやすく連続性を保証できる |
-| Matrix `MASKED` Mix | 段階採用 | FULLの操作感を検証後、部分Mix用途へ追加 |
+| Matrix Cell Mask Mix | 採用 | Cell単位でGrid Railと自由なBilinear Mixを同一Domainに統合 |
+| Name Bone + Text Layer | 採用 | 各Controlの意味をViewport上で識別し、下部中央へ追従表示する |
 | 3D -> 2D Projection | 別Epic | 不確実性と評価指標がIssue #47と異なる |
 | 初期から別Addon化 | 不採用 | 現行COA Adapterと密接。内部境界だけ設ける |
 
@@ -804,6 +805,7 @@ Forward Rigの意味的Controlが安定し、評価関数をBlenderなしでも�
 ## 16. 参照
 
 - [2Dリグコントローラー調査・設計案](rig_control_design.md)
+- [Phase 5: Matrix DomainとRig Name表示](rig_control_phase5_matrix_domain.md)
 - [Issue #47: Add Sliders for Shapekeys and Advanced 2D Rigging Features](https://github.com/Aodaruma/coa_tools2/issues/47)
 - [Issue #62: Slot index causes Blender to crash during rendering](https://github.com/Aodaruma/coa_tools2/issues/62)
 - [Issue #66: StateData for smooth transition animation](https://github.com/Aodaruma/coa_tools2/issues/66)

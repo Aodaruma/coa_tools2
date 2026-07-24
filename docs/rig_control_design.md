@@ -257,7 +257,7 @@ Custom Shapeの見た目と、値を制限するDomainは別概念として扱�
 | `DIAL` | 1角度 | 円弧Rail + Handle | Local Location + Rail MeshへのShrinkwrap。評価位置から角度を算出 | 1 |
 | `TOGGLE` | 0/1 | Checkbox風 | Snap + Driver | 2 |
 | `POINT_2D_CIRCLE` | 2値 | 円領域 + Handle | Limit Distanceまたは専用Gizmoの比較試験 | 2 |
-| `STATE_MATRIX_2D` | 2値 | 任意列×行のGrid + Handle | Local Limit Location + セル内Bilinear補間 | 2 |
+| `STATE_MATRIX_2D` | 2値 | 任意列×行のGrid + Handle | 外周Limit Location + Cell Domain MeshへのShrinkwrap | 2 |
 | `POINT_2D_TRIANGLE` | 3 Weight | 三角領域 + Handle | Barycentric clampを行う専用Gizmo | 3 |
 | `STATE_LINE` | 1値 | 状態目盛付きSlider | 1D key-pose補間 | 3 |
 
@@ -351,10 +351,13 @@ Geometry Nodes側の基本Primitiveは次の二つに限定する。
 | `x_positions` / `y_positions` | 各列・行の正規化座標。初期値は等間隔 |
 | `state_points` | 各Grid頂点に対応するPose State参照 |
 | `interpolation` | 初期は`BILINEAR` |
-| `mix_policy` | 初期は`FULL`。将来`MASKED`を追加 |
+| `mix_policy` | `FULL`、`NO_MIX`、`PARTIAL`のMask要約 |
+| `state_cells` | 各4点区間の`mix_enabled`。`(columns-1)×(rows-1)`個 |
 | `clamp` | Grid外を端へClampするか |
 
 列・行数を変更するとState Point数と意味が変わるため、自動的に破棄しない。UIで追加・削除のPreviewを表示し、既存Stateを維持できない変更には確認を要求する。
+
+State Matrixの到達領域は、全Grid中心線と`mix_enabled` Cell面の和集合とする。全Cell無効はno-mix Grid、全Cell有効は全面Bilinear Mix、混在は部分Mixになる。表示WidgetとShrinkwrap Targetは同じCell Maskから生成する。
 
 ## 8. Driver設計
 
