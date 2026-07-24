@@ -13,11 +13,17 @@ from rig_control.schema import (  # noqa: E402
     ControlAxis,
     ControlSpec,
     ControlType,
+    StateDataSpec,
+    StateMode,
+    StatePointSpec,
     TargetKind,
     WidgetLayout,
     WidgetSpec,
     dial_point,
     dial_rest_angle,
+    state_point_position,
+    state_weights,
+    validate_state_points,
 )
 from rig_control.validation import (  # noqa: E402
     find_duplicate_ids,
@@ -72,6 +78,43 @@ class RigControlSchemaTests(unittest.TestCase):
             target_name="Smile",
         )
         self.assertEqual(spec, BindingSpec.from_dict(spec.to_dict()))
+
+    def test_state_data_round_trip_and_matrix_weights(self):
+        points = tuple(
+            StatePointSpec(
+                state_uuid=f"state-{column}-{row}",
+                control_uuid="control-matrix",
+                column=column,
+                row=row,
+                target_object_name="Face",
+                target_name=f"Pose_{column}_{row}",
+            )
+            for row in range(2)
+            for column in range(3)
+        )
+        spec = StateDataSpec(
+            control_uuid="control-matrix",
+            mode=StateMode.MATRIX_2D,
+            columns=3,
+            rows=2,
+            points=points,
+        )
+        self.assertEqual(spec, StateDataSpec.from_dict(spec.to_dict()))
+        self.assertEqual((0.5, 1.0), state_point_position(1, 1, 3, 2))
+        weights = state_weights(0.25, 0.5, 3, 2)
+        self.assertAlmostEqual(1.0, sum(weights))
+        self.assertEqual((0.25, 0.25, 0.0, 0.25, 0.25, 0.0), weights)
+        self.assertEqual((), validate_state_points(points, 3, 2))
+
+    def test_state_validation_allows_explicit_empty_points(self):
+        points = (
+            StatePointSpec("a", "control", 0, 0, is_empty=True),
+            StatePointSpec("b", "control", 1, 0),
+        )
+        self.assertEqual(
+            ("state.unassigned_point",),
+            validate_state_points(points, 2, 1),
+        )
 
     def test_invalid_specs_produce_structured_issues(self):
         widget = WidgetSpec(

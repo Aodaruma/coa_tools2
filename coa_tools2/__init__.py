@@ -223,6 +223,7 @@ classes = (
     props.AnimationCollections,
     rig_control_properties.COATOOLS2_PG_RigBinding,
     rig_control_properties.COATOOLS2_PG_RigValidationIssue,
+    rig_control_properties.COATOOLS2_PG_RigStatePoint,
     rig_control_properties.COATOOLS2_PG_RigControl,
     rig_control_properties.COATOOLS2_PG_RigObjectProperties,
     props.ObjectProperties,

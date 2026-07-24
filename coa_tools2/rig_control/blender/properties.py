@@ -72,6 +72,24 @@ class COATOOLS2_PG_RigValidationIssue(bpy.types.PropertyGroup):
     binding_uuid: StringProperty()
 
 
+class COATOOLS2_PG_RigStatePoint(bpy.types.PropertyGroup):
+    schema_version: IntProperty(default=SCHEMA_VERSION)
+    state_uuid: StringProperty()
+    control_uuid: StringProperty()
+    label: StringProperty()
+    column: IntProperty(default=0, min=0)
+    row: IntProperty(default=0, min=0)
+    target_object: PointerProperty(type=bpy.types.Object)
+    target_name: StringProperty()
+    generated_data_path: StringProperty()
+    is_empty: BoolProperty(
+        name="Empty State",
+        description="Keep this point intentionally empty without a validation warning",
+        default=False,
+    )
+    enabled: BoolProperty(default=True)
+
+
 class COATOOLS2_PG_RigControl(bpy.types.PropertyGroup):
     schema_version: IntProperty(default=SCHEMA_VERSION)
     control_uuid: StringProperty()
@@ -159,6 +177,33 @@ class COATOOLS2_PG_RigControl(bpy.types.PropertyGroup):
     )
     bindings: CollectionProperty(type=COATOOLS2_PG_RigBinding)
     bindings_index: IntProperty(default=0, min=0)
+    state_mode: EnumProperty(
+        name="State Mode",
+        items=(
+            ("NONE", "None", "Use ordinary bindings only"),
+            (
+                "LINEAR_1D",
+                "1D States",
+                "Interpolate Shape Key states along a 1D slider",
+            ),
+            (
+                "MATRIX_2D",
+                "2D State Matrix",
+                "Interpolate Shape Key states on an arbitrary grid",
+            ),
+        ),
+        default="NONE",
+        update=_mark_control_dirty,
+    )
+    state_mix_policy: EnumProperty(
+        name="Mix",
+        items=(("FULL", "Full", "Blend all assigned states continuously"),),
+        default="FULL",
+    )
+    state_columns: IntProperty(default=2, min=2, max=32, update=_mark_control_dirty)
+    state_rows: IntProperty(default=2, min=1, max=32, update=_mark_control_dirty)
+    state_points: CollectionProperty(type=COATOOLS2_PG_RigStatePoint)
+    state_points_index: IntProperty(default=0, min=0)
     origin: FloatVectorProperty(size=3, subtype="XYZ")
     needs_rebuild: BoolProperty(default=False)
 
@@ -201,6 +246,11 @@ _CONTROL_FIELDS = (
     "input_max",
     "widget_backend",
     "bindings_index",
+    "state_mode",
+    "state_mix_policy",
+    "state_columns",
+    "state_rows",
+    "state_points_index",
     "origin",
     "needs_rebuild",
 )
@@ -227,6 +277,19 @@ _ISSUE_FIELDS = (
     "message",
     "control_uuid",
     "binding_uuid",
+)
+_STATE_POINT_FIELDS = (
+    "schema_version",
+    "state_uuid",
+    "control_uuid",
+    "label",
+    "column",
+    "row",
+    "target_object",
+    "target_name",
+    "generated_data_path",
+    "is_empty",
+    "enabled",
 )
 _MISSING = object()
 
@@ -296,6 +359,11 @@ def _migrate_legacy_rig_data(obj, rig_data):
             ) or ():
                 binding = control.bindings.add()
                 _copy_fields(legacy_binding, binding, _BINDING_FIELDS)
+            for legacy_state in _legacy_collection(
+                legacy_control, "state_points"
+            ) or ():
+                state = control.state_points.add()
+                _copy_fields(legacy_state, state, _STATE_POINT_FIELDS)
         if rig_data.rig_controls:
             rig_data.rig_controls_index = min(
                 _legacy_value(legacy, "rig_controls_index", 0),
@@ -326,6 +394,7 @@ def get_rig_data(obj):
 CLASSES = (
     COATOOLS2_PG_RigBinding,
     COATOOLS2_PG_RigValidationIssue,
+    COATOOLS2_PG_RigStatePoint,
     COATOOLS2_PG_RigControl,
     COATOOLS2_PG_RigObjectProperties,
 )
