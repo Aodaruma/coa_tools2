@@ -8,7 +8,13 @@ import traceback
 import uuid
 
 import bpy
-from bpy.props import BoolProperty, EnumProperty, FloatProperty, StringProperty
+from bpy.props import (
+    BoolProperty,
+    EnumProperty,
+    FloatProperty,
+    IntProperty,
+    StringProperty,
+)
 
 from ... import functions
 from .compiler import RigCompileError, compile_control
@@ -142,7 +148,7 @@ def _binding_source_items(_self, context):
     labels = {
         "X": ("X", "Control local X"),
         "Y": ("Y", "Control local Y"),
-        "ROTATION": ("Rotation", "Control local Z rotation"),
+        "ROTATION": ("Angle", "Position along the dial rail"),
     }
     return [
         (component, labels[component][0], labels[component][1])
@@ -162,7 +168,7 @@ class COATOOLS2_OT_AddRigControl(bpy.types.Operator):
             ("SLIDER_1D", "1D Slider", "Linear slider"),
             ("POINT_2D_RECT", "2D Rectangle", "Rectangular 2D control"),
             ("POINT_2D_CIRCLE", "2D Circle", "Circular 2D control"),
-            ("DIAL", "Dial", "Rotational dial"),
+            ("DIAL", "Dial", "Angular control constrained to a visible rail"),
         ),
         default="SLIDER_1D",
     )
@@ -176,6 +182,15 @@ class COATOOLS2_OT_AddRigControl(bpy.types.Operator):
     width: FloatProperty(default=4.0, min=0.1)
     height: FloatProperty(default=3.0, min=0.1)
     radius: FloatProperty(default=2.0, min=0.1)
+    rectangle_mode: EnumProperty(
+        items=(
+            ("FREE", "Free Interior", "Move freely inside the rectangular area"),
+            ("GRID", "Grid Rails", "Move only along the displayed grid rails"),
+        ),
+        default="FREE",
+    )
+    grid_columns: IntProperty(default=3, min=2, max=32)
+    grid_rows: IntProperty(default=3, min=2, max=32)
     angle_min: FloatProperty(default=-math.pi * 0.5, subtype="ANGLE")
     angle_max: FloatProperty(default=math.pi * 0.5, subtype="ANGLE")
     source_component: EnumProperty(
@@ -218,6 +233,11 @@ class COATOOLS2_OT_AddRigControl(bpy.types.Operator):
             row = layout.row(align=True)
             row.prop(self, "width")
             row.prop(self, "height")
+            layout.prop(self, "rectangle_mode", expand=True)
+            if self.rectangle_mode == "GRID":
+                row = layout.row(align=True)
+                row.prop(self, "grid_columns")
+                row.prop(self, "grid_rows")
         elif self.control_type == "POINT_2D_CIRCLE":
             layout.prop(self, "radius")
         else:
@@ -278,6 +298,9 @@ class COATOOLS2_OT_AddRigControl(bpy.types.Operator):
         control.width = self.width
         control.height = self.height
         control.radius = self.radius
+        control.rectangle_mode = self.rectangle_mode
+        control.grid_columns = self.grid_columns
+        control.grid_rows = self.grid_rows
         control.angle_min = self.angle_min
         control.angle_max = self.angle_max
         control.input_min, control.input_max = _control_input_range(

@@ -10,8 +10,15 @@ import bpy
 from mathutils import Vector
 
 from ... import functions
-from ..schema import WidgetBackend, WidgetLayout, WidgetSpec
+from ..schema import (
+    WidgetBackend,
+    WidgetLayout,
+    WidgetSpec,
+    dial_point,
+    dial_rest_angle,
+)
 from .properties import get_rig_data
+from .rail_targets import ensure_rail_target
 from .widgets import ensure_widget
 
 
@@ -101,6 +108,11 @@ def ensure_control_bones(
     elif control.control_type == "POINT_2D_RECT":
         handle_origin.x -= control.width * 0.5
         handle_origin.z -= control.height * 0.5
+    elif control.control_type == "DIAL":
+        angle = dial_rest_angle(control.angle_min, control.angle_max)
+        dial_x, dial_y = dial_point(control.radius, angle)
+        handle_origin.x += dial_x
+        handle_origin.z += dial_y
 
     handle = armature.data.edit_bones.get(control_name)
     if handle is None:
@@ -165,6 +177,10 @@ def limit_rotation_name(control_uuid: str) -> str:
     return f"COA_{control_uuid[:8]}_LimitRotation"
 
 
+def rail_constraint_name(control_uuid: str) -> str:
+    return f"COA_{control_uuid[:8]}_Rail"
+
+
 def ensure_limit_location(control_pose, control):
     constraint_name = limit_location_name(control.control_uuid)
     constraint = control_pose.constraints.get(constraint_name)
@@ -175,17 +191,13 @@ def ensure_limit_location(control_pose, control):
     constraint.use_transform_limit = True
 
     for axis in "xyz":
-        setattr(constraint, f"use_min_{axis}", False)
-        setattr(constraint, f"use_max_{axis}", False)
+        setattr(constraint, f"use_min_{axis}", True)
+        setattr(constraint, f"use_max_{axis}", True)
         setattr(constraint, f"min_{axis}", 0.0)
         setattr(constraint, f"max_{axis}", 0.0)
-    constraint.use_min_z = True
-    constraint.use_max_z = True
 
     if control.control_type == "SLIDER_1D":
         axis = "y" if control.axis == "Y" else "x"
-        setattr(constraint, f"use_min_{axis}", True)
-        setattr(constraint, f"use_max_{axis}", True)
         setattr(constraint, f"max_{axis}", control.width)
         control.input_min = 0.0
         control.input_max = control.width
@@ -199,15 +211,36 @@ def ensure_limit_location(control_pose, control):
         control.input_min = 0.0
         control.input_max = control.height if control.axis == "Y" else control.width
     elif control.control_type == "POINT_2D_CIRCLE":
+        constraint.use_min_x = False
+        constraint.use_max_x = False
+        constraint.use_min_y = False
+        constraint.use_max_y = False
         control.input_min = -control.radius
         control.input_max = control.radius
     elif control.control_type == "DIAL":
-        constraint.use_min_x = True
-        constraint.use_max_x = True
-        constraint.use_min_y = True
-        constraint.use_max_y = True
+        constraint.use_min_x = False
+        constraint.use_max_x = False
+        constraint.use_min_y = False
+        constraint.use_max_y = False
         control.input_min = control.angle_min
         control.input_max = control.angle_max
+    return constraint
+
+
+def ensure_rail_constraint(armature, control_pose, control):
+    name = rail_constraint_name(control.control_uuid)
+    constraint = control_pose.constraints.get(name)
+    if constraint is None or constraint.type != "SHRINKWRAP":
+        if constraint is not None:
+            control_pose.constraints.remove(constraint)
+        constraint = control_pose.constraints.new("SHRINKWRAP")
+    constraint.name = name
+    constraint.target = ensure_rail_target(armature, control)
+    constraint.shrinkwrap_type = "NEAREST_SURFACE"
+    constraint.wrap_mode = "ON_SURFACE"
+    constraint.distance = 0.0
+    constraint.owner_space = "WORLD"
+    constraint.target_space = "WORLD"
     return constraint
 
 
@@ -215,13 +248,17 @@ def ensure_control_constraints(armature, display_pose, control_pose, control):
     expected = {limit_location_name(control.control_uuid)}
     if control.control_type == "POINT_2D_CIRCLE":
         expected.add(limit_distance_name(control.control_uuid))
-    elif control.control_type == "DIAL":
-        expected.add(limit_rotation_name(control.control_uuid))
+    elif control.control_type == "DIAL" or (
+        control.control_type == "POINT_2D_RECT"
+        and control.rectangle_mode == "GRID"
+    ):
+        expected.add(rail_constraint_name(control.control_uuid))
 
     managed_names = {
         limit_location_name(control.control_uuid),
         limit_distance_name(control.control_uuid),
         limit_rotation_name(control.control_uuid),
+        rail_constraint_name(control.control_uuid),
     }
     for constraint in list(control_pose.constraints):
         if constraint.name in managed_names and constraint.name not in expected:
@@ -242,23 +279,11 @@ def ensure_control_constraints(armature, display_pose, control_pose, control):
         constraint.limit_mode = "LIMITDIST_INSIDE"
         constraint.owner_space = "WORLD"
         constraint.target_space = "WORLD"
-    elif control.control_type == "DIAL":
-        name = limit_rotation_name(control.control_uuid)
-        constraint = control_pose.constraints.get(name)
-        if constraint is None or constraint.type != "LIMIT_ROTATION":
-            if constraint is not None:
-                control_pose.constraints.remove(constraint)
-            constraint = control_pose.constraints.new("LIMIT_ROTATION")
-        constraint.name = name
-        constraint.owner_space = "LOCAL"
-        constraint.use_transform_limit = True
-        for axis in "xyz":
-            setattr(constraint, f"use_limit_{axis}", True)
-            setattr(constraint, f"min_{axis}", 0.0)
-            setattr(constraint, f"max_{axis}", 0.0)
-        constraint.min_z = control.angle_min
-        constraint.max_z = control.angle_max
-        control_pose.rotation_mode = "XYZ"
+    elif control.control_type == "DIAL" or (
+        control.control_type == "POINT_2D_RECT"
+        and control.rectangle_mode == "GRID"
+    ):
+        ensure_rail_constraint(armature, control_pose, control)
 
 
 def ensure_control_widgets(display_pose, control_pose, control):
@@ -278,13 +303,20 @@ def ensure_control_widgets(display_pose, control_pose, control):
     )
     layout_by_type = {
         "SLIDER_1D": WidgetLayout.LINEAR,
-        "POINT_2D_RECT": WidgetLayout.RECTANGLE,
         "POINT_2D_CIRCLE": WidgetLayout.CIRCLE,
         "DIAL": WidgetLayout.DIAL,
     }
+    base_layout = (
+        WidgetLayout.RECTANGLE_GRID
+        if control.control_type == "POINT_2D_RECT"
+        and control.rectangle_mode == "GRID"
+        else WidgetLayout.RECTANGLE
+        if control.control_type == "POINT_2D_RECT"
+        else layout_by_type[control.control_type]
+    )
     base_spec = WidgetSpec(
         widget_uuid=control.base_widget_uuid,
-        layout=layout_by_type[control.control_type],
+        layout=base_layout,
         width=control.width,
         height=control.height,
         radius=control.radius,
@@ -292,6 +324,10 @@ def ensure_control_widgets(display_pose, control_pose, control):
         node_radius=control.node_radius,
         bar_width=control.bar_width,
         stroke_radius=control.stroke_radius,
+        columns=control.grid_columns,
+        rows=control.grid_rows,
+        arc_start=control.angle_min,
+        arc_end=control.angle_max,
     )
     tip = ensure_widget(tip_spec, name=f"WGT_{control.semantic_id}_TIP", backend=backend)
     base = ensure_widget(
@@ -310,10 +346,6 @@ def ensure_control_widgets(display_pose, control_pose, control):
             pose_bone.custom_shape_translation = (0.0, 0.0, 0.0)
         if hasattr(pose_bone, "custom_shape_rotation_euler"):
             pose_bone.custom_shape_rotation_euler = (0.0, 0.0, 0.0)
-    if control.control_type == "DIAL" and hasattr(
-        control_pose, "custom_shape_translation"
-    ):
-        control_pose.custom_shape_translation = (0.0, control.radius, 0.0)
     if (
         control.control_type == "SLIDER_1D"
         and control.axis == "Y"

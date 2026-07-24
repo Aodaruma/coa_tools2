@@ -82,7 +82,7 @@ class COATOOLS2_PG_RigControl(bpy.types.PropertyGroup):
             ("SLIDER_1D", "1D Slider", "One-dimensional slider"),
             ("POINT_2D_RECT", "2D Rectangle", "Rectangular 2D slider"),
             ("POINT_2D_CIRCLE", "2D Circle", "Circular 2D slider"),
-            ("DIAL", "Dial", "Rotational slider"),
+            ("DIAL", "Dial", "Angular slider constrained to a visible rail"),
         ),
         default="SLIDER_1D",
         update=_mark_control_dirty,
@@ -91,7 +91,7 @@ class COATOOLS2_PG_RigControl(bpy.types.PropertyGroup):
         items=(
             ("X", "Horizontal", "Move along local X"),
             ("Y", "Vertical", "Move along local Y"),
-            ("ROTATION", "Rotation", "Rotate in the control plane"),
+            ("ROTATION", "Angle", "Position along the dial rail"),
         ),
         default="X",
         update=_mark_control_dirty,
@@ -103,6 +103,24 @@ class COATOOLS2_PG_RigControl(bpy.types.PropertyGroup):
     width: FloatProperty(default=4.0, min=0.1, update=_mark_control_dirty)
     height: FloatProperty(default=2.0, min=0.1, update=_mark_control_dirty)
     radius: FloatProperty(default=2.0, min=0.1, update=_mark_control_dirty)
+    rectangle_mode: EnumProperty(
+        items=(
+            (
+                "FREE",
+                "Free Interior",
+                "Move freely anywhere inside the rectangular area",
+            ),
+            (
+                "GRID",
+                "Grid Rails",
+                "Draw internal rails and keep the tip on the grid",
+            ),
+        ),
+        default="FREE",
+        update=_mark_control_dirty,
+    )
+    grid_columns: IntProperty(default=3, min=2, max=32, update=_mark_control_dirty)
+    grid_rows: IntProperty(default=3, min=2, max=32, update=_mark_control_dirty)
     angle_min: FloatProperty(
         default=-math.pi * 0.5,
         subtype="ANGLE",
@@ -170,6 +188,9 @@ _CONTROL_FIELDS = (
     "width",
     "height",
     "radius",
+    "rectangle_mode",
+    "grid_columns",
+    "grid_rows",
     "angle_min",
     "angle_max",
     "tip_radius",

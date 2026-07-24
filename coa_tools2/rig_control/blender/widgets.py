@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import bpy
@@ -11,7 +12,7 @@ from ..schema import WidgetBackend, WidgetLayout, WidgetSpec
 
 NODE_GROUP_NAME = "COA_RigWidget_GN"
 WIDGET_COLLECTION_NAME = "COA Rig Widgets"
-NODE_GROUP_VERSION = 3
+NODE_GROUP_VERSION = 4
 _BOOLEAN_SOLID_DEPTH = 0.1
 
 _LAYOUT_VALUES = {
@@ -20,6 +21,7 @@ _LAYOUT_VALUES = {
     WidgetLayout.RECTANGLE: 2,
     WidgetLayout.CIRCLE: 3,
     WidgetLayout.DIAL: 4,
+    WidgetLayout.RECTANGLE_GRID: 5,
 }
 
 
@@ -58,6 +60,43 @@ def _circle_mesh(nodes, links, radius_socket, stroke_socket, label):
     path.label = f"{label} Path"
     path.inputs["Resolution"].default_value = 32
     links.new(radius_socket, path.inputs["Radius"])
+
+    profile = nodes.new("GeometryNodeCurvePrimitiveCircle")
+    profile.mode = "RADIUS"
+    profile.label = f"{label} Profile"
+    profile.inputs["Resolution"].default_value = 6
+    links.new(stroke_socket, profile.inputs["Radius"])
+
+    curve_to_mesh = nodes.new("GeometryNodeCurveToMesh")
+    curve_to_mesh.label = label
+    links.new(path.outputs["Curve"], curve_to_mesh.inputs["Curve"])
+    links.new(profile.outputs["Curve"], curve_to_mesh.inputs["Profile Curve"])
+    return curve_to_mesh.outputs["Mesh"]
+
+
+def _arc_mesh(
+    nodes,
+    links,
+    radius_socket,
+    start_socket,
+    end_socket,
+    stroke_socket,
+    label,
+):
+    start_angle = _math_node(nodes, "ADD", f"{label} Start Angle")
+    start_angle.inputs[1].default_value = math.pi * 0.5
+    links.new(start_socket, start_angle.inputs[0])
+    sweep_angle = _math_node(nodes, "SUBTRACT", f"{label} Sweep Angle")
+    links.new(end_socket, sweep_angle.inputs[0])
+    links.new(start_socket, sweep_angle.inputs[1])
+
+    path = nodes.new("GeometryNodeCurveArc")
+    path.mode = "RADIUS"
+    path.label = f"{label} Path"
+    path.inputs["Resolution"].default_value = 64
+    links.new(radius_socket, path.inputs["Radius"])
+    links.new(start_angle.outputs[0], path.inputs["Start Angle"])
+    links.new(sweep_angle.outputs[0], path.inputs["Sweep Angle"])
 
     profile = nodes.new("GeometryNodeCurvePrimitiveCircle")
     profile.mode = "RADIUS"
@@ -201,6 +240,48 @@ def _translated_geometry(
     return transform.outputs["Geometry"]
 
 
+def _grid_bar_instances(
+    nodes,
+    links,
+    instance_geometry,
+    count_socket,
+    span_socket,
+    negative_half_span_socket,
+    axis,
+    label,
+):
+    step_count = _math_node(nodes, "SUBTRACT", f"{label} Step Count")
+    step_count.inputs[1].default_value = 1.0
+    links.new(count_socket, step_count.inputs[0])
+    spacing = _math_node(nodes, "DIVIDE", f"{label} Spacing")
+    links.new(span_socket, spacing.inputs[0])
+    links.new(step_count.outputs[0], spacing.inputs[1])
+
+    start = nodes.new("ShaderNodeCombineXYZ")
+    start.label = f"{label} Start"
+    offset = nodes.new("ShaderNodeCombineXYZ")
+    offset.label = f"{label} Offset"
+    links.new(negative_half_span_socket, start.inputs[axis])
+    links.new(spacing.outputs[0], offset.inputs[axis])
+
+    points = nodes.new("GeometryNodeMeshLine")
+    points.mode = "OFFSET"
+    points.label = f"{label} Points"
+    links.new(count_socket, points.inputs["Count"])
+    links.new(start.outputs["Vector"], points.inputs["Start Location"])
+    links.new(offset.outputs["Vector"], points.inputs["Offset"])
+
+    instances = nodes.new("GeometryNodeInstanceOnPoints")
+    instances.label = label
+    links.new(points.outputs["Mesh"], instances.inputs["Points"])
+    links.new(instance_geometry, instances.inputs["Instance"])
+
+    realize = nodes.new("GeometryNodeRealizeInstances")
+    realize.label = f"{label} Realized"
+    links.new(instances.outputs["Instances"], realize.inputs["Geometry"])
+    return realize.outputs["Geometry"]
+
+
 def ensure_widget_node_group():
     existing = bpy.data.node_groups.get(NODE_GROUP_NAME)
     if existing is not None and existing.get("coa_rig_widget_version") == NODE_GROUP_VERSION:
@@ -226,6 +307,20 @@ def ensure_widget_node_group():
     _new_interface_socket(node_group, "Stroke Radius", "INPUT", "NodeSocketFloat", 0.035)
     _new_interface_socket(node_group, "Columns", "INPUT", "NodeSocketInt", 2)
     _new_interface_socket(node_group, "Rows", "INPUT", "NodeSocketInt", 2)
+    _new_interface_socket(
+        node_group,
+        "Arc Start",
+        "INPUT",
+        "NodeSocketFloat",
+        -math.pi * 0.5,
+    )
+    _new_interface_socket(
+        node_group,
+        "Arc End",
+        "INPUT",
+        "NodeSocketFloat",
+        math.pi * 0.5,
+    )
 
     nodes = node_group.nodes
     links = node_group.links
@@ -359,6 +454,33 @@ def ensure_widget_node_group():
         group_input.outputs["Stroke Radius"],
         "Rectangle Widget",
     )
+    grid_vertical_bars = _grid_bar_instances(
+        nodes,
+        links,
+        vertical_bar,
+        group_input.outputs["Columns"],
+        group_input.outputs["Width"],
+        negative_half_width.outputs[0],
+        "X",
+        "Grid Vertical Bars",
+    )
+    grid_horizontal_bars = _grid_bar_instances(
+        nodes,
+        links,
+        horizontal_bar,
+        group_input.outputs["Rows"],
+        group_input.outputs["Height"],
+        negative_half_height.outputs[0],
+        "Y",
+        "Grid Horizontal Bars",
+    )
+    grid_rectangle_geometry = _union_outline_mesh(
+        nodes,
+        links,
+        (grid_vertical_bars, grid_horizontal_bars, *rectangle_parts[-4:]),
+        group_input.outputs["Stroke Radius"],
+        "Grid Rectangle Widget",
+    )
 
     circle_geometry = _circle_mesh(
         nodes,
@@ -366,6 +488,15 @@ def ensure_widget_node_group():
         group_input.outputs["Radius"],
         group_input.outputs["Stroke Radius"],
         "Circle Widget",
+    )
+    dial_geometry = _arc_mesh(
+        nodes,
+        links,
+        group_input.outputs["Radius"],
+        group_input.outputs["Arc Start"],
+        group_input.outputs["Arc End"],
+        group_input.outputs["Stroke Radius"],
+        "Dial Widget",
     )
 
     is_linear = _math_node(nodes, "COMPARE", "Layout Is Linear")
@@ -404,6 +535,22 @@ def ensure_widget_node_group():
     links.new(rectangle_switch.outputs["Output"], circle_switch.inputs["False"])
     links.new(circle_geometry, circle_switch.inputs["True"])
 
+    is_grid_rectangle = _math_node(nodes, "COMPARE", "Layout Is Grid Rectangle")
+    is_grid_rectangle.inputs[1].default_value = float(
+        _LAYOUT_VALUES[WidgetLayout.RECTANGLE_GRID]
+    )
+    is_grid_rectangle.inputs[2].default_value = 0.1
+    links.new(group_input.outputs["Layout"], is_grid_rectangle.inputs[0])
+    grid_rectangle_switch = nodes.new("GeometryNodeSwitch")
+    grid_rectangle_switch.input_type = "GEOMETRY"
+    grid_rectangle_switch.label = "Select Grid Rectangle"
+    links.new(
+        is_grid_rectangle.outputs[0],
+        grid_rectangle_switch.inputs["Switch"],
+    )
+    links.new(circle_switch.outputs["Output"], grid_rectangle_switch.inputs["False"])
+    links.new(grid_rectangle_geometry, grid_rectangle_switch.inputs["True"])
+
     is_dial = _math_node(nodes, "COMPARE", "Layout Is Dial")
     is_dial.inputs[1].default_value = float(_LAYOUT_VALUES[WidgetLayout.DIAL])
     is_dial.inputs[2].default_value = 0.1
@@ -412,8 +559,8 @@ def ensure_widget_node_group():
     dial_switch.input_type = "GEOMETRY"
     dial_switch.label = "Select Dial"
     links.new(is_dial.outputs[0], dial_switch.inputs["Switch"])
-    links.new(circle_switch.outputs["Output"], dial_switch.inputs["False"])
-    links.new(circle_geometry, dial_switch.inputs["True"])
+    links.new(grid_rectangle_switch.outputs["Output"], dial_switch.inputs["False"])
+    links.new(dial_geometry, dial_switch.inputs["True"])
     links.new(dial_switch.outputs["Output"], group_output.inputs["Geometry"])
 
     return node_group
@@ -445,6 +592,8 @@ def apply_widget_spec(modifier: bpy.types.NodesModifier, spec: WidgetSpec):
         "Stroke Radius": spec.stroke_radius,
         "Columns": spec.columns,
         "Rows": spec.rows,
+        "Arc Start": spec.arc_start,
+        "Arc End": spec.arc_end,
     }
     for name, value in values.items():
         modifier[identifiers[name]] = value

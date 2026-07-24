@@ -87,6 +87,11 @@ class COATOOLS2_PT_RigControls(bpy.types.Panel):
             row = box.row(align=True)
             row.prop(control, "width")
             row.prop(control, "height")
+            box.prop(control, "rectangle_mode")
+            if control.rectangle_mode == "GRID":
+                row = box.row(align=True)
+                row.prop(control, "grid_columns")
+                row.prop(control, "grid_rows")
         elif control.control_type == "POINT_2D_CIRCLE":
             box.prop(control, "radius")
         elif control.control_type == "DIAL":

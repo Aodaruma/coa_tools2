@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from mathutils import Vector
 
 from .artifacts import (
@@ -30,6 +32,11 @@ def compile_control(armature, control, origin=None):
         raise RigCompileError(f"Unsupported rig control: {control.control_type}.")
     if control.control_type == "DIAL" and control.angle_min >= control.angle_max:
         raise RigCompileError("Dial minimum angle must be less than its maximum.")
+    if (
+        control.control_type == "DIAL"
+        and control.angle_max - control.angle_min > math.tau
+    ):
+        raise RigCompileError("Dial angle range cannot exceed one full turn.")
     ensure_rig_instance_id(armature)
     origin = Vector(control.origin if origin is None else origin)
     control.origin = origin

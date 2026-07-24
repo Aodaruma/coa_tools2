@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import math
 import sys
 
 import addon_utils
@@ -111,8 +112,39 @@ def main():
             node.bl_idname == "GeometryNodeMeshBoolean"
             for node in group.nodes
         )
-        == 2
+        == 3
     )
+
+    grid_rectangle = WidgetSpec(
+        widget_uuid="phase0-grid-rectangle",
+        layout=WidgetLayout.RECTANGLE_GRID,
+        width=4.0,
+        height=3.0,
+        columns=3,
+        rows=3,
+    )
+    grid_cache = ensure_widget(
+        grid_rectangle,
+        name="Phase0GridRectangle",
+        backend=WidgetBackend.EVALUATED_MESH_CACHE,
+    )
+    # One outside boundary plus one loop around each of the four cells.
+    assert connected_component_count(grid_cache.data) == 5
+
+    dial = WidgetSpec(
+        widget_uuid="phase0-dial",
+        layout=WidgetLayout.DIAL,
+        radius=2.0,
+        arc_start=-math.pi * 0.5,
+        arc_end=math.pi * 0.5,
+    )
+    dial_cache = ensure_widget(
+        dial,
+        name="Phase0Dial",
+        backend=WidgetBackend.EVALUATED_MESH_CACHE,
+    )
+    assert connected_component_count(dial_cache.data) == 1
+    assert min(vertex.co.y for vertex in dial_cache.data.vertices) > -0.1
 
     tip = WidgetSpec(
         widget_uuid="phase0-tip",

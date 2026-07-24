@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from enum import Enum
+import math
 from typing import Any, Mapping
 
 
@@ -36,6 +37,7 @@ class WidgetLayout(StringEnum):
     TIP = "TIP"
     LINEAR = "LINEAR"
     RECTANGLE = "RECTANGLE"
+    RECTANGLE_GRID = "RECTANGLE_GRID"
     CIRCLE = "CIRCLE"
     DIAL = "DIAL"
 
@@ -73,6 +75,18 @@ class WidgetSpec:
         values = dict(data)
         values["layout"] = WidgetLayout(values["layout"])
         return cls(**values)
+
+
+def dial_rest_angle(angle_min: float, angle_max: float) -> float:
+    """Choose the neutral dial angle while staying inside its rail."""
+
+    return min(max(0.0, angle_min), angle_max)
+
+
+def dial_point(radius: float, angle: float) -> tuple[float, float]:
+    """Return dial-plane coordinates where angle zero is at the top."""
+
+    return (-math.sin(angle) * radius, math.cos(angle) * radius)
 
 
 @dataclass(frozen=True)

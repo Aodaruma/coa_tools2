@@ -1,3 +1,4 @@
+import math
 import sys
 import unittest
 from pathlib import Path
@@ -15,6 +16,8 @@ from rig_control.schema import (  # noqa: E402
     TargetKind,
     WidgetLayout,
     WidgetSpec,
+    dial_point,
+    dial_rest_angle,
 )
 from rig_control.validation import (  # noqa: E402
     find_duplicate_ids,
@@ -47,6 +50,13 @@ class RigControlSchemaTests(unittest.TestCase):
             widget_spec_id="widget-1",
         )
         self.assertEqual(spec, ControlSpec.from_dict(spec.to_dict()))
+
+    def test_dial_helpers_use_top_as_zero_and_clamp_rest_to_arc(self):
+        self.assertEqual(0.0, dial_rest_angle(-1.0, 1.0))
+        self.assertEqual(0.5, dial_rest_angle(0.5, 1.0))
+        x, y = dial_point(2.0, math.pi * 0.5)
+        self.assertAlmostEqual(-2.0, x)
+        self.assertAlmostEqual(0.0, y)
 
     def test_binding_spec_round_trip(self):
         spec = BindingSpec(

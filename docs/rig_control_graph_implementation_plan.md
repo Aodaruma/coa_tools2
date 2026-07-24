@@ -143,7 +143,7 @@ Driver、Constraint、Widget Meshは生成物であり、Rig Definitionから修
 | Control | 推奨Host | 例 |
 | --- | --- | --- |
 | 1D / 2D Slider | Pose Bone local location | 表情、視線、口形状 |
-| Dial / Arc | Pose Bone local rotation | 回転、捻り、連続Parameter |
+| Dial / Arc | Pose Bone local location（円弧Rail上の評価位置から角度へ変換） | 回転、捻り、連続Parameter |
 | Direct Transform | Pose Bone transform | IK Target、Body Control |
 | Toggle / Enum / Rig Mode | `GLOBAL_CTRL`等のPose Bone Custom Property | IK/FK、Space、表示Mode |
 | 非空間Scalar | Pose Bone Custom Property | 数値として扱う方が自然な設定 |
@@ -190,7 +190,7 @@ Issue [#66](https://github.com/Aodaruma/coa_tools2/issues/66)は`PoseState`に�
 - Bone Transformは`TRANSFORMS` Driver Variableで読む。
 - 1Dは線形範囲変換とClampを基本にする。
 - 2DはX/Yを独立に読み、Target Adapter側で必要なWeightへ変換する。
-- ConstraintはControl Boneの移動/回転範囲を制限する。
+- 1DとFree 2DのConstraintはControl Boneの移動範囲を制限し、Grid 2DとDialは表示と同形状の非表示Rail MeshへShrinkwrapする。
 - Driver Expressionは単純式に限定する。
 - 任意Python、frame handler、Driver Namespace Functionを必須にしない。
 - 離散値はConstant補間または専用Operatorで扱う。
@@ -454,8 +454,9 @@ JSON Editor、Node Editor、Graph Inspectorは上級機能とする。共有案�
 WidgetはGeometry Nodesによるパラメトリック生成を必須とする。共有Node Group `COA_RigWidget_GN`へ`WidgetSpec`を入力し、円と矩形バーを配置・合成してMeshを出力する。
 
 - 1D: 円Tip、両端円、Rail Bar
-- 2D: 円Tip、四隅円、4本のFrame Bar
-- Dial: 円Tip、Circle/Ring、任意のSnap Point
+- 2D Free: 円Tip、四隅円、4本のFrame Bar。枠内を自由移動
+- 2D Grid: 円Tip、任意列×行のGrid Bar。表示Rail上だけを移動
+- Dial: 円Tip、設定角度範囲のArc Rail。表示Rail上だけを移動
 - Matrix: 円Tip、任意列×行のState Point、隣接点間のGrid Bar
 - Triangle/Polygon: 円Tip、頂点円、回転Bar
 

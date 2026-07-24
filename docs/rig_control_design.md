@@ -234,6 +234,7 @@ COAの2D画面はX-Z平面、奥行きはYである。Control BoneはRest Pose�
 - Parentの回転・ScaleがControl値に混入しないRest OrientationをGeneratorが保証する。
 - 1D/2D移動Controlは使わない軸をLockする。
 - Limit Location/Rotationでは `Affect Transform` を有効にする。BlenderのLimit Constraintは、既定では見た目だけ制限し、内部Transform値が範囲外へ進み得るためである。
+- Grid表示付き2DとDialは、表示と同じ形状の非表示MeshへShrinkwrapし、Handleを描画Rail上へ制限する。
 - DriverはRawな `pose_bone.location[n]` より、Constraint評価を含められるTransform Channel Variableを優先する。
 
 参考:
@@ -241,6 +242,7 @@ COAの2D画面はX-Z平面、奥行きはYである。Control BoneはRest Pose�
 - [Blender: Bone Custom Shape](https://docs.blender.org/manual/en/latest/animation/armatures/bones/properties/display.html)
 - [Blender: Limit Location Constraint](https://docs.blender.org/manual/en/latest/animation/constraints/transform/limit_location.html)
 - [Blender: Limit Rotation Constraint](https://docs.blender.org/manual/en/latest/animation/constraints/transform/limit_rotation.html)
+- [Blender: Shrinkwrap Constraint](https://docs.blender.org/manual/en/latest/animation/constraints/relationship/shrinkwrap.html)
 - [Blender: Drivers Panel / Variables](https://docs.blender.org/manual/en/latest/animation/drivers/drivers_panel.html)
 
 ## 6. Control種別
@@ -250,8 +252,8 @@ Custom Shapeの見た目と、値を制限するDomainは別概念として扱�
 | 種別 | 入力 | 表示 | 制限方法 | 初期優先度 |
 |---|---:|---|---|---:|
 | `SLIDER_1D` | 1値 | 線/四角Track + Handle | Local Limit Location | 1 |
-| `POINT_2D_RECT` | 2値 | 四角領域 + Handle | Local Limit Location | 1 |
-| `DIAL` | 1角度 | 円/円弧 + Handle | Local Limit Rotation | 1 |
+| `POINT_2D_RECT` | 2値 | 四角領域 + Handle | FreeはLocal Limit Location、GridはRail MeshへのShrinkwrapを併用 | 1 |
+| `DIAL` | 1角度 | 円弧Rail + Handle | Local Location + Rail MeshへのShrinkwrap。評価位置から角度を算出 | 1 |
 | `TOGGLE` | 0/1 | Checkbox風 | Snap + Driver | 2 |
 | `POINT_2D_CIRCLE` | 2値 | 円領域 + Handle | Limit Distanceまたは専用Gizmoの比較試験 | 2 |
 | `STATE_MATRIX_2D` | 2値 | 任意列×行のGrid + Handle | Local Limit Location + セル内Bilinear補間 | 2 |
@@ -456,8 +458,10 @@ WidgetSpec
 | Preset | Tip | Base |
 |---|---|---|
 | 1D Horizontal / Vertical | 円 | 両端円 + 矩形バー |
-| Dial / Circle | 円 | 円環。Snap時は状態点を追加 |
-| 2D Rectangle | 円 | 四隅円 + 水平/垂直バー |
+| 2D Circle | 円 | 円環 |
+| Dial | 円 | 設定角度範囲の円弧Rail。HandleはRail上だけを移動 |
+| 2D Rectangle Free | 円 | 外枠のみ。Handleは内部を自由移動 |
+| 2D Rectangle Grid | 円 | 外枠 + 任意列×行のRail。HandleはRail上だけを移動 |
 | 2D Matrix | 円 | 各状態点円 + 隣接点間バー |
 | Triangle / Polygon | 円 | 頂点円 + 回転した辺バー |
 

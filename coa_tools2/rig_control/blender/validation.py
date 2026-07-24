@@ -11,7 +11,7 @@ from .artifacts import (
     find_bone_by_role,
     limit_distance_name,
     limit_location_name,
-    limit_rotation_name,
+    rail_constraint_name,
 )
 from .drivers import binding_target_key, driver_uses_control, find_driver
 from .properties import get_rig_data
@@ -133,8 +133,13 @@ def validate_rig(armature) -> list[BlenderValidationIssue]:
                 expected_constraints = [limit_location_name(control.control_uuid)]
                 if control.control_type == "POINT_2D_CIRCLE":
                     expected_constraints.append(limit_distance_name(control.control_uuid))
-                elif control.control_type == "DIAL":
-                    expected_constraints.append(limit_rotation_name(control.control_uuid))
+                elif control.control_type == "DIAL" or (
+                    control.control_type == "POINT_2D_RECT"
+                    and control.rectangle_mode == "GRID"
+                ):
+                    expected_constraints.append(
+                        rail_constraint_name(control.control_uuid)
+                    )
                 if any(
                     pose_bone.constraints.get(name) is None
                     for name in expected_constraints

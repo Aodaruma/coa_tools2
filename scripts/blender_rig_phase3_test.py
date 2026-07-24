@@ -118,15 +118,25 @@ def main():
     dial = armature.coa_tools2_rig.rig_controls[-1]
     assert_widget(dial, armature)
     dial_pose = armature.pose.bones[dial.control_bone]
-    rotation_limit = dial_pose.constraints.get(
-        f"COA_{dial.control_uuid[:8]}_LimitRotation"
+    from coa_tools2.rig_control.blender.artifacts import rail_constraint_name
+    from coa_tools2.rig_control.schema import dial_point, dial_rest_angle
+
+    rail = dial_pose.constraints.get(
+        rail_constraint_name(dial.control_uuid)
     )
-    assert rotation_limit is not None
-    dial_pose.rotation_mode = "XYZ"
-    dial_pose.rotation_euler.z = -math.pi * 0.5
+    assert rail is not None and rail.type == "SHRINKWRAP"
+    rest_x, rest_y = dial_point(
+        dial.radius,
+        dial_rest_angle(dial.angle_min, dial.angle_max),
+    )
+    minimum_x, minimum_y = dial_point(dial.radius, dial.angle_min)
+    dial_pose.location.x = minimum_x - rest_x
+    dial_pose.location.y = minimum_y - rest_y
     update_scene()
     assert abs(keys["Dial"].value - 0.0) < 1e-5, keys["Dial"].value
-    dial_pose.rotation_euler.z = math.pi * 0.5
+    maximum_x, maximum_y = dial_point(dial.radius, dial.angle_max)
+    dial_pose.location.x = maximum_x - rest_x
+    dial_pose.location.y = maximum_y - rest_y
     update_scene()
     assert abs(keys["Dial"].value - 1.0) < 1e-5, keys["Dial"].value
 
