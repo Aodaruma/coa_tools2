@@ -34,11 +34,11 @@ Animator Input
 
 最初の実装対象は、既存のIK機能と現行Rig Control基盤を再利用でき、キャラクター全身の操作性へ直結する次の5種類とする。
 
-1. `ROOT_2D`
-2. `FK_CHAIN_2D`
-3. `LIMB_IK_2D`
-4. `IK_FK_MIX_2D`とSnap
-5. `SPINE_FK_2D`
+1. `ROOT`
+2. `FK_CHAIN`
+3. `LIMB_IK`
+4. `IK_FK_MIX`とSnap
+5. `SPINE_FK`
 
 肩・顔・口は重要だが、骨格だけで完結させず、上記ComponentとState Controlを合成するプリセットとして第2段階で実装する。
 
@@ -213,6 +213,48 @@ Rig Control Transform / Property
 
 循環を防ぐため、DEF BoneまたはArt OutputをControl入力へ戻さない。自動補正の入力としてBone Transformを読む場合も、補正結果が同じBoneの解法へ戻らないようValidationする。
 
+### 5.4 見た目基準のControl Frame
+
+キャラクターポージング用Controlはカメラ平面へ固定せず、パーツごとに次の右手系局所座標を持つ。
+
+```text
+local X = U = 絵の横方向
+local Y = V = 絵の縦方向、またはBoneの長さ方向
+local Z = N = 絵の法線、見た目上の奥行き方向
+```
+
+例えば手のControl Frameを手のひらと平行に置くと、local Z移動は手のひら法線方向の移動になる。足、肩、頭、胴体も同じ考え方で、見た目に合う局所3軸TransformをDriverやStateDataの入力として利用できる。
+
+Frameの設定方式:
+
+| Mode | 基準 |
+| --- | --- |
+| `WORLD_VIEW` | Armature X-Zを絵の面、Yを奥行きとする |
+| `SOURCE_BONE` | 指定BoneのRest MatrixとRollを使用する |
+| `CUSTOM` | SourceまたはWorld FrameへEuler Offsetを加える |
+
+Boneのlocal Yは必ずBoneの長さ方向になるため、local Zを法線として使うにはBone Rollを含む完全なFrameが必要になる。生成Controlでは非表示の`MCH_<component>_FRAME`を作り、Controlの移動軸、Widget表示、Limitの共通基準にする。Source Bone自身を操作するIn-Place FKでは、現在のRest OrientationをそのままFrameとみなす。
+
+参考:
+
+- [Rigify: Limbs](https://docs.blender.org/manual/en/latest/addons/rigging/rigify/rig_types/limbs.html)
+- [Cascadeur: Rigging Tools / Custom rotation](https://cascadeur.com/help/rig/rig_mode/rigging_tools)
+- [Blender: Bone Roll](https://docs.blender.org/manual/en/latest/animation/armatures/bones/editing/bone_roll.html)
+
+### 5.5 奥行き移動
+
+奥行きはWorld Yへ固定せず、Control Frameのlocal Zとして扱う。
+
+| Mode | 挙動 | 推奨対象 |
+| --- | --- | --- |
+| `LOCKED` | local Zを0へ固定 | 従来型2D操作 |
+| `LIMITED` | `depth_min..depth_max`のSlab内だけ移動 | 手、足、肩、頭、IK Target |
+| `FREE` | 3D移動を制限しない | Root、特殊Control |
+
+既定値は`LIMITED`とする。カメラ正面からドラッグして無制限に奥へ移動しないよう、local ZだけをLocal SpaceのLimit Locationで制限し、X/Y移動と3軸回転は許可する。Depth範囲は前後で別値にできる。
+
+将来はlocal Z値を`-1..1`へ正規化し、実際の奥行き移動に加えてShape Key、Scale、Sprite State等へBindingする`PARAMETER_ONLY` Modeを検討する。実座標と疑似遠近は別Bindingにし、カメラ方向へ依存するConstraintは使用しない。
+
 ## 6. `RigComponent`データモデル
 
 初期SchemaはGeneric Node Graphにせず、型付きPresetを保存する。
@@ -228,6 +270,8 @@ RigComponentSpec
 ├─ enabled
 ├─ source_bones[]
 ├─ control_uuids[]
+├─ orientation_mode / reference / offset
+├─ depth_mode / depth_min / depth_max
 ├─ settings
 └─ generated_artifacts[]
 ```
@@ -264,16 +308,16 @@ ArtifactRef
 
 ## 7. 推奨Component
 
-### 7.1 `ROOT_2D`
+### 7.1 `ROOT`
 
 キャラクター全体または局所グループの親となるControl。
 
 標準操作:
 
-- 画面平面X-Zの移動
-- 画面垂直軸Y回りの回転
+- 3軸移動
+- 3軸回転
 - 一様Scale
-- Depth Yは既定でLock
+- 見た目の法線方向だけ任意に奥行き制限
 
 標準構造:
 
@@ -291,13 +335,13 @@ Widget:
 
 `GLOBAL_CTRL`は非空間Propertyの保持先として残し、キャラクターを動かすRoot Controlとは分ける。これにより、Root ScaleやTransformの影響を受けずにIK/FK、Space等の値を保持できる。
 
-### 7.2 `FK_CHAIN_2D`
+### 7.2 `FK_CHAIN`
 
 選択した既存DEF Chainを直接回転操作する最小のポージングComponent。
 
 標準操作:
 
-- 各関節の画面垂直軸Y回転
+- 各関節の3軸回転
 - 必要な関節だけLimit Rotation
 - Root Boneのみ任意で移動を許可
 
@@ -316,7 +360,7 @@ Widget:
 - IK/FKの二重Chainを採用する
 - Export用Bone構成を固定したい
 
-### 7.3 `LIMB_IK_2D`
+### 7.3 `LIMB_IK`
 
 腕または脚の2-Bone Chainを手先・足先から操作する。
 
@@ -336,7 +380,7 @@ optional CTRL_bend
 
 - Chain Length: 2
 - Stretch: OFF
-- 2D平面外のIK自由度をLock
+- FKは全軸回転を許可し、IKの曲げ軸だけをRest Poseまたは明示設定から決定
 - End Rotation Follow: 任意
 - Bend方向: Rest Poseから決定
 - Pole Target: 通常は非表示
@@ -352,9 +396,9 @@ optional CTRL_bend
 - Snap
 - Export Bake Test
 
-2DではPoleを常時表示すると操作量が増えるため、標準は固定Bend方向とし、必要な場合だけ小さな菱形Controlを表示する。
+カットアウトではPoleを常時表示すると操作量が増えるため、標準はRest PoseのBend方向とし、空間的な曲げ方向を明示したい場合だけ小さな菱形Controlを表示する。
 
-### 7.4 `IK_FK_MIX_2D`
+### 7.4 `IK_FK_MIX`
 
 初期実装は、同じDEF/FK Chainへ置いたIK ConstraintのInfluenceを0〜1で制御する。
 
@@ -387,7 +431,7 @@ Snapは、表示上のPoseを維持したまま操作方式を切り替える。
 - Bake前後のPose一致を保証できない
 - 複雑なStretch、Twist、Spaceを同時使用する
 
-### 7.5 `SPINE_FK_2D`
+### 7.5 `SPINE_FK`
 
 人型の腰、腹、胸、首を2〜4 BoneのFK Chainとして構成する。
 
@@ -403,14 +447,14 @@ CTRL_cog
 
 標準操作:
 
-- COGのX-Z移動とY回転
-- 腰、腹、胸の局所Y回転
-- 必要なら胸の小さなX-Z移動
+- COGの3軸移動と3軸回転
+- 腰、腹、胸の局所3軸回転
+- 必要なら胸の小さな3軸移動
 - Scaleは既定で禁止
 
 B-Boneは滑らかな胴体変形に有効だが、Segment増加による評価コストとExport差を持つため、初期Presetでは任意設定にする。通常のカットアウトでは2〜3本のDEF BoneとShape Key補正を先に試す。
 
-### 7.6 `CLAVICLE_SHOULDER_2D`
+### 7.6 `CLAVICLE_SHOULDER`
 
 肩は骨格の回転だけでは絵の輪郭を保ちにくいため、Pose ComponentとState Controlを合成する。
 
@@ -440,7 +484,7 @@ upper_arm angle
 
 Slotと描画順はRender安定性を確認した後に有効化する。
 
-### 7.7 `HEAD_FACE_2D`
+### 7.7 `HEAD_FACE`
 
 頭の画面内回転と、顔が上下左右を向く表現を分離する。
 
@@ -456,7 +500,7 @@ CTRL_face_direction -> State Matrix X/Y
 
 これにより、頭を傾けたまま顔だけ横へ向ける等、Bone PoseとArt Stateを独立にKeyframeできる。
 
-### 7.8 `MOUTH_2D`
+### 7.8 `MOUTH`
 
 口は骨格Componentとして独立させず、State Control Presetを中心にする。
 
@@ -470,7 +514,7 @@ Optional: Viseme Slot
 
 参考: [Blender: Action Constraint](https://docs.blender.org/manual/en/latest/animation/constraints/relationship/action.html)
 
-### 7.9 `SPACE_SWITCH_2D`
+### 7.9 `SPACE_SWITCH`
 
 手、足、頭、小道具等の親空間を切り替える。
 
@@ -486,7 +530,7 @@ Child Of Constraintを複数置き、Influenceを相互排他的に切り替え�
 
 Spaceは離散的な意味を持つため、画面上のSliderよりDropdownまたはButtonが適切である。必要ならPropertyをName Control近傍へ表示する。
 
-### 7.10 `CONTACT_2D`
+### 7.10 `CONTACT`
 
 接地と接触は対象形状によって方式を分ける。
 
@@ -500,7 +544,7 @@ Spaceは離散的な意味を持つため、画面上のSliderよりDropdownま�
 
 通常のIK Targetや2D SliderにはShrinkwrapを使わない。Target MeshのTopologyやProjection方向へUI挙動が依存し、リグ編集時の予測性が下がるためである。
 
-### 7.11 `FLEXIBLE_CHAIN_2D`
+### 7.11 `FLEXIBLE_CHAIN`
 
 髪、尾、布、触手等は、複雑さに応じて段階的に提供する。
 
@@ -733,16 +777,16 @@ Acceptance:
 
 ### Phase 6B: 基本ポージング
 
-- `ROOT_2D`
-- `FK_CHAIN_2D`
-- `LIMB_IK_2D`
+- `ROOT`
+- `FK_CHAIN`
+- `LIMB_IK`
 - 既存IK OperatorのComponent化
 - Root、FK、IK Widget
 - Name表示とControl選択同期
 
 Acceptance:
 
-- 2D平面外へ意図せず回転・移動しない。
+- Control Frameに沿って3軸操作でき、設定したDepth Modeだけが局所法線移動を制限する。
 - 腕・脚の2-Bone ChainをIK Targetから安定して操作できる。
 - 既存FK Keyframeを維持したままComponentを追加できる。
 
@@ -763,8 +807,8 @@ Acceptance:
 
 ### Phase 6D: 胴体と補正
 
-- `SPINE_FK_2D`
-- `CLAVICLE_SHOULDER_2D`
+- `SPINE_FK`
+- `CLAVICLE_SHOULDER`
 - Head Rotation + Face State Matrix Preset
 - Bone Transform Binding
 - 自動Corrective + Manual Override

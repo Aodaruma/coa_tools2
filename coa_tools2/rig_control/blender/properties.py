@@ -9,6 +9,7 @@ import traceback
 import bpy
 from bpy.props import (
     BoolProperty,
+    BoolVectorProperty,
     CollectionProperty,
     EnumProperty,
     FloatProperty,
@@ -18,6 +19,7 @@ from bpy.props import (
     StringProperty,
 )
 
+from ..component_schema import RIG_COMPONENT_SCHEMA_VERSION, RigComponentSpec
 from ..schema import SCHEMA_VERSION
 
 
@@ -100,6 +102,13 @@ def _mark_control_dirty(self, _context):
     self.needs_rebuild = True
     self.auto_rebuild_error = ""
     _schedule_auto_rebuild(self)
+
+
+def _mark_component_dirty(self, _context):
+    """Structural component changes are intentionally applied manually."""
+
+    self.needs_rebuild = True
+    self.last_error = ""
 
 
 def _update_live_preview(self, _context):
@@ -247,6 +256,203 @@ class COATOOLS2_PG_RigStateCell(bpy.types.PropertyGroup):
         description="Allow free bilinear mixing inside this four-point cell",
         default=True,
     )
+
+
+class COATOOLS2_PG_RigComponentBoneRef(bpy.types.PropertyGroup):
+    bone_name: StringProperty()
+
+
+class COATOOLS2_PG_RigComponentArtifact(bpy.types.PropertyGroup):
+    artifact_uuid: StringProperty()
+    role: StringProperty()
+    data_type: StringProperty()
+    object_name: StringProperty()
+    bone_name: StringProperty()
+    constraint_name: StringProperty()
+    owned: BoolProperty(default=True)
+
+
+class COATOOLS2_PG_RigComponent(bpy.types.PropertyGroup):
+    schema_version: IntProperty(default=RIG_COMPONENT_SCHEMA_VERSION)
+    component_uuid: StringProperty()
+    semantic_id: StringProperty()
+    label: StringProperty(default="Pose Component", update=_mark_component_dirty)
+    component_type: EnumProperty(
+        items=(
+            ("ROOT", "Root", "Root or center-of-gravity posing control"),
+            ("FK_CHAIN", "FK Chain", "Directly pose one or more source bones"),
+            ("LIMB_IK", "Limb IK", "Three-bone limb with an oriented IK target"),
+            ("SPINE_FK", "Spine FK", "Multi-bone FK spine component"),
+        ),
+        default="LIMB_IK",
+        update=_mark_component_dirty,
+    )
+    side: EnumProperty(
+        items=(
+            ("CENTER", "Center", "Center component"),
+            ("LEFT", "Left", "Left-side component"),
+            ("RIGHT", "Right", "Right-side component"),
+        ),
+        default="CENTER",
+        update=_mark_component_dirty,
+    )
+    source_bones: CollectionProperty(type=COATOOLS2_PG_RigComponentBoneRef)
+    source_bones_index: IntProperty(default=0, min=0)
+    build_mode: EnumProperty(
+        items=(
+            (
+                "IN_PLACE",
+                "In Place",
+                "Use existing source bones without replacing their animation paths",
+            ),
+            (
+                "GENERATED",
+                "Generated Control",
+                "Generate separate control and mechanism bones",
+            ),
+        ),
+        default="IN_PLACE",
+        update=_mark_component_dirty,
+    )
+    orientation_mode: EnumProperty(
+        items=(
+            (
+                "WORLD_VIEW",
+                "World View Plane",
+                "Use armature X/Z as the art plane and Y as depth",
+            ),
+            (
+                "SOURCE_BONE",
+                "Source Bone",
+                "Copy the visual axes from the orientation reference bone",
+            ),
+            (
+                "CUSTOM",
+                "Custom Offset",
+                "Apply a custom rotation offset to the reference frame",
+            ),
+        ),
+        default="SOURCE_BONE",
+        update=_mark_component_dirty,
+    )
+    orientation_reference: StringProperty(update=_mark_component_dirty)
+    orientation_euler: FloatVectorProperty(
+        name="Orientation Offset",
+        size=3,
+        subtype="EULER",
+        update=_mark_component_dirty,
+    )
+    depth_mode: EnumProperty(
+        items=(
+            (
+                "LOCKED",
+                "Plane",
+                "Keep control-local Z fixed to the artwork plane",
+            ),
+            (
+                "LIMITED",
+                "Limited Depth",
+                "Allow control-local Z only inside a bounded slab",
+            ),
+            ("FREE", "Free 3D", "Do not constrain control-local depth"),
+        ),
+        default="LIMITED",
+        update=_mark_component_dirty,
+    )
+    depth_min: FloatProperty(
+        name="Depth Back",
+        default=-0.25,
+        update=_mark_component_dirty,
+    )
+    depth_max: FloatProperty(
+        name="Depth Front",
+        default=0.25,
+        update=_mark_component_dirty,
+    )
+    allow_translation: BoolVectorProperty(
+        name="Translation Axes",
+        size=3,
+        subtype="XYZ",
+        default=(True, True, True),
+        update=_mark_component_dirty,
+    )
+    allow_rotation: BoolVectorProperty(
+        name="Rotation Axes",
+        size=3,
+        subtype="XYZ",
+        default=(True, True, True),
+        update=_mark_component_dirty,
+    )
+    widget: EnumProperty(
+        items=(
+            ("ROOT", "Root", "Three-dimensional root control"),
+            ("FK", "FK", "All-axis FK rotation control"),
+            ("HAND", "Hand", "Palm-oriented hand IK control"),
+            ("FOOT", "Foot", "Sole-oriented foot IK control"),
+            ("SQUARE", "Square", "Neutral oriented IK control"),
+        ),
+        default="SQUARE",
+        update=_mark_component_dirty,
+    )
+    widget_size: FloatProperty(
+        default=1.0,
+        min=0.01,
+        update=_mark_component_dirty,
+    )
+    ik_chain_length: IntProperty(
+        default=2,
+        min=1,
+        max=32,
+        update=_mark_component_dirty,
+    )
+    ik_solver_mode: EnumProperty(
+        items=(
+            (
+                "SPATIAL",
+                "Spatial",
+                "Allow the limb to solve in three dimensions",
+            ),
+            (
+                "PLANAR",
+                "Planar",
+                "Keep the limb on an explicit local bend plane",
+            ),
+        ),
+        default="SPATIAL",
+        update=_mark_component_dirty,
+    )
+    bend_axis: EnumProperty(
+        items=(
+            ("AUTO", "Automatic", "Infer the bend direction from the rest pose"),
+            ("X", "Local X", "Use local X as the bend axis"),
+            ("Z", "Local Z", "Use local Z as the bend axis"),
+        ),
+        default="AUTO",
+        update=_mark_component_dirty,
+    )
+    use_stretch: BoolProperty(default=False, update=_mark_component_dirty)
+    end_rotation_mode: EnumProperty(
+        items=(
+            ("COPY_WORLD", "Follow Target", "End bone follows target rotation"),
+            (
+                "COPY_LOCAL",
+                "Follow Target Local",
+                "End bone follows target in local space",
+            ),
+            ("NONE", "Position Only", "Do not copy target rotation to the end bone"),
+        ),
+        default="COPY_WORLD",
+        update=_mark_component_dirty,
+    )
+    frame_bone: StringProperty()
+    control_bone: StringProperty()
+    constraint_bone: StringProperty()
+    constraint_name: StringProperty()
+    artifacts: CollectionProperty(type=COATOOLS2_PG_RigComponentArtifact)
+    artifacts_index: IntProperty(default=0, min=0)
+    enabled: BoolProperty(default=True, update=_mark_component_dirty)
+    needs_rebuild: BoolProperty(default=False)
+    last_error: StringProperty()
 
 
 class COATOOLS2_PG_RigControl(bpy.types.PropertyGroup):
@@ -414,6 +620,8 @@ class COATOOLS2_PG_RigObjectProperties(bpy.types.PropertyGroup):
     rig_instance_id: StringProperty()
     rig_controls: CollectionProperty(type=COATOOLS2_PG_RigControl)
     rig_controls_index: IntProperty(default=0, min=0)
+    rig_components: CollectionProperty(type=COATOOLS2_PG_RigComponent)
+    rig_components_index: IntProperty(default=0, min=0)
     rig_validation_issues: CollectionProperty(type=COATOOLS2_PG_RigValidationIssue)
     rig_validation_issues_index: IntProperty(default=0, min=0)
     legacy_migration_checked: BoolProperty(default=False, options={"HIDDEN"})
@@ -612,11 +820,43 @@ def get_rig_data(obj):
     return rig_data
 
 
+def component_to_spec(component) -> RigComponentSpec:
+    """Convert a persisted Blender component into the pure validated schema."""
+
+    return RigComponentSpec.from_dict(
+        {
+            "schema_version": component.schema_version,
+            "component_uuid": component.component_uuid,
+            "semantic_id": component.semantic_id,
+            "display_name": component.label,
+            "component_type": component.component_type,
+            "source_bones": tuple(ref.bone_name for ref in component.source_bones),
+            "side": component.side,
+            "orientation_mode": component.orientation_mode,
+            "orientation_reference": component.orientation_reference,
+            "orientation_euler": tuple(component.orientation_euler),
+            "depth_mode": component.depth_mode,
+            "depth_min": component.depth_min,
+            "depth_max": component.depth_max,
+            "allow_translation": tuple(component.allow_translation),
+            "allow_rotation": tuple(component.allow_rotation),
+            "widget": component.widget,
+            "widget_size": component.widget_size,
+            "ik_chain_length": component.ik_chain_length,
+            "use_stretch": component.use_stretch,
+            "enabled": component.enabled,
+        }
+    )
+
+
 CLASSES = (
     COATOOLS2_PG_RigBinding,
     COATOOLS2_PG_RigValidationIssue,
     COATOOLS2_PG_RigStatePoint,
     COATOOLS2_PG_RigStateCell,
+    COATOOLS2_PG_RigComponentBoneRef,
+    COATOOLS2_PG_RigComponentArtifact,
+    COATOOLS2_PG_RigComponent,
     COATOOLS2_PG_RigControl,
     COATOOLS2_PG_RigObjectProperties,
 )

@@ -108,7 +108,13 @@ def _verify_object_properties():
     probe = bpy.data.objects.new("COA_RigPropertyProbe", None)
     try:
         properties = probe.coa_tools2_rig
-        required = ("rig_controls", "rig_controls_index", "rig_validation_issues")
+        required = (
+            "rig_controls",
+            "rig_controls_index",
+            "rig_components",
+            "rig_components_index",
+            "rig_validation_issues",
+        )
         missing = [name for name in required if not hasattr(properties, name)]
         if missing:
             raise RuntimeError(

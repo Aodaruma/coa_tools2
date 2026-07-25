@@ -29,6 +29,15 @@ from rig_control.schema import (  # noqa: E402
     validate_state_cells,
     validate_state_points,
 )
+from rig_control.component_schema import (  # noqa: E402
+    RigComponentSide,
+    RigComponentSpec,
+    RigComponentType,
+    RigComponentWidget,
+    RigDepthMode,
+    RigOrientationMode,
+)
+from rig_control.component_validation import validate_component_spec  # noqa: E402
 from rig_control.validation import (  # noqa: E402
     find_duplicate_ids,
     validate_binding_spec,
@@ -82,6 +91,47 @@ class RigControlSchemaTests(unittest.TestCase):
             target_name="Smile",
         )
         self.assertEqual(spec, BindingSpec.from_dict(spec.to_dict()))
+
+    def test_rig_component_round_trip_preserves_visual_axes(self):
+        spec = RigComponentSpec(
+            component_uuid="component-arm-l",
+            semantic_id="limb.arm.l",
+            display_name="Arm.L",
+            component_type=RigComponentType.LIMB_IK,
+            source_bones=("upper_arm.L", "forearm.L", "hand.L"),
+            side=RigComponentSide.LEFT,
+            orientation_mode=RigOrientationMode.SOURCE_BONE,
+            orientation_reference="hand.L",
+            depth_mode=RigDepthMode.LIMITED,
+            depth_min=-0.5,
+            depth_max=0.75,
+            widget=RigComponentWidget.HAND,
+        )
+        self.assertEqual(spec, RigComponentSpec.from_dict(spec.to_dict()))
+        self.assertFalse(validate_component_spec(spec))
+
+    def test_rig_component_validation_rejects_bad_limb_and_depth(self):
+        spec = RigComponentSpec(
+            component_uuid="component-bad",
+            semantic_id="limb.bad",
+            display_name="Bad Limb",
+            component_type=RigComponentType.LIMB_IK,
+            source_bones=("upper", "upper"),
+            orientation_mode=RigOrientationMode.SOURCE_BONE,
+            orientation_reference="missing",
+            depth_mode=RigDepthMode.LIMITED,
+            depth_min=1.0,
+            depth_max=-1.0,
+            widget_size=0.0,
+            ik_chain_length=2,
+        )
+        codes = {issue.code for issue in validate_component_spec(spec)}
+        self.assertIn("component.duplicate_source_bone", codes)
+        self.assertIn("component.insufficient_source_bones", codes)
+        self.assertIn("component.invalid_orientation_reference", codes)
+        self.assertIn("component.invalid_depth_range", codes)
+        self.assertIn("component.invalid_widget_size", codes)
+        self.assertIn("component.ik_chain_exceeds_sources", codes)
 
     def test_state_data_round_trip_and_matrix_weights(self):
         points = tuple(

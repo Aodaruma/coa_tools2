@@ -20,13 +20,29 @@ from .schema import (
     WidgetLayout,
     WidgetSpec,
 )
+from .component_schema import (
+    RIG_COMPONENT_SCHEMA_VERSION,
+    RigComponentSide,
+    RigComponentSpec,
+    RigComponentType,
+    RigComponentWidget,
+    RigDepthMode,
+    RigOrientationMode,
+)
 
 __all__ = [
     "SCHEMA_VERSION",
+    "RIG_COMPONENT_SCHEMA_VERSION",
     "BindingSpec",
     "ControlAxis",
     "ControlSpec",
     "ControlType",
+    "RigComponentSide",
+    "RigComponentSpec",
+    "RigComponentType",
+    "RigComponentWidget",
+    "RigDepthMode",
+    "RigOrientationMode",
     "StateDataSpec",
     "StateCellSpec",
     "StateMixPolicy",
