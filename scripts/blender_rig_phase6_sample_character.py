@@ -7,6 +7,7 @@ import math
 import os
 from pathlib import Path
 import sys
+import uuid
 
 import addon_utils
 import bpy
@@ -31,6 +32,7 @@ def _select_chain(armature, names, active_name):
 
 
 def _add_component(**properties):
+    properties.setdefault("deformation_mode", "PARAMETRIC")
     result = bpy.ops.coa_tools2.add_rig_component("EXEC_DEFAULT", **properties)
     assert result == {"FINISHED"}, result
 
@@ -177,6 +179,112 @@ def _key_transform(pose_bone, frame, *, location=None, rotation=None):
     if rotation is not None:
         pose_bone.rotation_euler = tuple(math.radians(value) for value in rotation)
         pose_bone.keyframe_insert("rotation_euler", frame=frame)
+
+
+def _matrix_delta(left, right):
+    return max(
+        abs(left[row][column] - right[row][column])
+        for row in range(4)
+        for column in range(4)
+    )
+
+
+def _add_planar_pose_keys(obj):
+    obj.shape_key_add(name="Basis")
+    coordinates = tuple(vertex.co.copy() for vertex in obj.data.vertices)
+    span_x = max(max(abs(point.x) for point in coordinates), 0.01)
+    span_z = max(max(abs(point.z) for point in coordinates), 0.01)
+    transforms = {
+        "DepthFront": lambda point: (
+            point.x * 0.68,
+            point.z + point.x / span_x * span_z * 0.18,
+        ),
+        "DepthBack": lambda point: (
+            point.x * 0.78,
+            point.z - point.x / span_x * span_z * 0.12,
+        ),
+        "TiltXPos": lambda point: (
+            point.x,
+            point.z + point.x / span_x * span_z * 0.30,
+        ),
+        "TiltXNeg": lambda point: (
+            point.x,
+            point.z - point.x / span_x * span_z * 0.30,
+        ),
+        "TurnYPos": lambda point: (
+            point.x * 0.62 + point.z / span_z * span_x * 0.12,
+            point.z,
+        ),
+        "TurnYNeg": lambda point: (
+            point.x * 0.62 - point.z / span_z * span_x * 0.12,
+            point.z,
+        ),
+        "RollZPos": lambda point: (
+            point.x + point.z / span_z * span_x * 0.22,
+            point.z,
+        ),
+        "RollZNeg": lambda point: (
+            point.x - point.z / span_z * span_x * 0.22,
+            point.z,
+        ),
+    }
+    for name, transform in transforms.items():
+        key = obj.shape_key_add(name=name)
+        for key_point, basis_point in zip(key.data, coordinates):
+            x, z = transform(basis_point)
+            key_point.co = (x, basis_point.y, z)
+
+
+def _add_binding(
+    component,
+    target,
+    target_name,
+    source_component,
+    input_min,
+    input_max,
+    output_min,
+    output_max,
+):
+    binding = component.bindings.add()
+    binding.binding_uuid = str(uuid.uuid4())
+    binding.control_uuid = component.component_uuid
+    binding.source_component = source_component
+    binding.target_kind = "SHAPE_KEY_VALUE"
+    binding.target_object = target
+    binding.target_name = target_name
+    binding.input_min = input_min
+    binding.input_max = input_max
+    binding.output_min = output_min
+    binding.output_max = output_max
+    binding.clamp = True
+
+
+def _bind_planar_pose(component, target):
+    _add_planar_pose_keys(target)
+    depth_min = min(component.depth_min, -0.01)
+    depth_max = max(component.depth_max, 0.01)
+    mappings = (
+        ("DepthFront", "LOC_Z", 0.0, depth_max, 0.0, 1.0),
+        ("DepthBack", "LOC_Z", depth_min, 0.0, 1.0, 0.0),
+        ("TiltXPos", "ROT_X", 0.0, math.pi * 0.5, 0.0, 1.0),
+        ("TiltXNeg", "ROT_X", -math.pi * 0.5, 0.0, 1.0, 0.0),
+        ("TurnYPos", "ROT_Y", 0.0, math.pi * 0.5, 0.0, 1.0),
+        ("TurnYNeg", "ROT_Y", -math.pi * 0.5, 0.0, 1.0, 0.0),
+        ("RollZPos", "ROT_Z", 0.0, math.pi * 0.5, 0.0, 1.0),
+        ("RollZNeg", "ROT_Z", -math.pi * 0.5, 0.0, 1.0, 0.0),
+    )
+    for mapping in mappings:
+        _add_binding(component, target, *mapping)
+
+
+def _evaluated_world_y(obj):
+    depsgraph = bpy.context.evaluated_depsgraph_get()
+    evaluated = obj.evaluated_get(depsgraph)
+    mesh = evaluated.to_mesh()
+    try:
+        return tuple((evaluated.matrix_world @ vertex.co).y for vertex in mesh.vertices)
+    finally:
+        evaluated.to_mesh_clear()
 
 
 def _render_preview(scene, output_directory, frame):
@@ -403,12 +511,41 @@ def main():
     trousers = _material("Sample Trousers", (0.18, 0.22, 0.34))
     accent = _material("Sample Accent", (0.94, 0.32, 0.30))
 
-    _add_bone_rectangle(art_collection, armature, "hips", 1.45, trousers, layer_y=0.10)
-    _add_bone_rectangle(art_collection, armature, "spine", 1.70, shirt, layer_y=0.08)
-    _add_bone_rectangle(art_collection, armature, "chest", 2.10, shirt, layer_y=0.06)
-    _add_bone_disc(art_collection, armature, "head", 0.78, skin, layer_y=-0.04)
+    art_by_bone = {}
+    art_by_bone["hips"] = _add_bone_rectangle(
+        art_collection,
+        armature,
+        "hips",
+        1.45,
+        trousers,
+        layer_y=0.10,
+    )
+    art_by_bone["spine"] = _add_bone_rectangle(
+        art_collection,
+        armature,
+        "spine",
+        1.70,
+        shirt,
+        layer_y=0.08,
+    )
+    art_by_bone["chest"] = _add_bone_rectangle(
+        art_collection,
+        armature,
+        "chest",
+        2.10,
+        shirt,
+        layer_y=0.06,
+    )
+    art_by_bone["head"] = _add_bone_disc(
+        art_collection,
+        armature,
+        "head",
+        0.78,
+        skin,
+        layer_y=-0.04,
+    )
     for name in ("upper_arm.L", "forearm.L", "upper_arm.R", "forearm.R"):
-        _add_bone_rectangle(
+        art_by_bone[name] = _add_bone_rectangle(
             art_collection,
             armature,
             name,
@@ -417,7 +554,7 @@ def main():
             layer_y=0.02 if name.endswith(".L") else 0.04,
         )
     for name in ("hand.L", "hand.R"):
-        _add_bone_disc(
+        art_by_bone[name] = _add_bone_disc(
             art_collection,
             armature,
             name,
@@ -426,7 +563,7 @@ def main():
             layer_y=-0.06,
         )
     for name in ("thigh.L", "shin.L", "thigh.R", "shin.R"):
-        _add_bone_rectangle(
+        art_by_bone[name] = _add_bone_rectangle(
             art_collection,
             armature,
             name,
@@ -435,7 +572,7 @@ def main():
             layer_y=0.12,
         )
     for name in ("foot.L", "foot.R"):
-        _add_bone_rectangle(
+        art_by_bone[name] = _add_bone_rectangle(
             art_collection,
             armature,
             name,
@@ -452,36 +589,71 @@ def main():
     }
     assert len(components) == 6
     assert all(component.control_bone for component in components)
+    assert all(
+        component.deformation_mode == "PARAMETRIC"
+        for component in components
+    )
     limb_components = [
         component
         for component in components
         if component.component_type == "LIMB_IK"
     ]
     assert len(limb_components) == 4
-    assert all(
-        component.pole_bone and component.pole_angle_valid
-        for component in limb_components
-    )
+    assert all(not component.pole_bone for component in limb_components)
     assert all(
         controls[component.label].custom_shape is not None
         for component in components
     )
 
+    component_art = {
+        "Body Root": ("hips",),
+        "Body FK": ("spine", "chest", "head"),
+        "Arm IK.L": ("upper_arm.L", "forearm.L", "hand.L"),
+        "Arm IK.R": ("upper_arm.R", "forearm.R", "hand.R"),
+        "Leg IK.L": ("thigh.L", "shin.L", "foot.L"),
+        "Leg IK.R": ("thigh.R", "shin.R", "foot.R"),
+    }
+    from coa_tools2.rig_control.blender.component_compiler import compile_component
+
+    for component in components:
+        for bone_name in component_art[component.label]:
+            _bind_planar_pose(component, art_by_bone[bone_name])
+        compile_component(armature, component)
+
+    source_names = tuple(
+        dict.fromkeys(
+            reference.bone_name
+            for component in components
+            for reference in component.source_bones
+        )
+    )
+    source_matrices = {
+        name: armature.pose.bones[name].matrix.copy()
+        for name in source_names
+    }
+    for name in source_names:
+        pose_bone = armature.pose.bones[name]
+        assert pose_bone.custom_shape is None
+        assert not any(
+            constraint.type in {"IK", "COPY_ROTATION"}
+            for constraint in pose_bone.constraints
+        )
+    art_objects = tuple(art_by_bone.values())
+    baseline_y = {
+        obj.name: _evaluated_world_y(obj)
+        for obj in art_objects
+    }
+
     frames = (1, 13, 25)
     root_pose = controls["Body Root"]
-    spine_pose = armature.pose.bones["spine"]
-    chest_pose = armature.pose.bones["chest"]
-    head_pose = armature.pose.bones["head"]
+    body_pose = controls["Body FK"]
     arm_l = controls["Arm IK.L"]
     arm_r = controls["Arm IK.R"]
     leg_l = controls["Leg IK.L"]
     leg_r = controls["Leg IK.R"]
 
     _key_transform(root_pose, 1, location=(0.0, 0.0, 0.0), rotation=(0, 0, -2))
-    _key_transform(spine_pose, 1, rotation=(0, 0, 0))
-    _key_transform(chest_pose, 1, rotation=(0, 0, 0))
-    _key_transform(head_pose, 1, rotation=(0, 0, 0))
-    for control in (arm_l, arm_r, leg_l, leg_r):
+    for control in (body_pose, arm_l, arm_r, leg_l, leg_r):
         _key_transform(control, 1, location=(0, 0, 0), rotation=(0, 0, 0))
 
     _key_transform(
@@ -490,9 +662,7 @@ def main():
         location=(0.15, 0.05, 0.28),
         rotation=(8, -9, 4),
     )
-    _key_transform(spine_pose, 13, rotation=(10, -7, 8))
-    _key_transform(chest_pose, 13, rotation=(-6, 12, -8))
-    _key_transform(head_pose, 13, rotation=(12, -10, 10))
+    _key_transform(body_pose, 13, location=(0.08, 0.0, 0.18), rotation=(12, -10, 10))
     _key_transform(arm_l, 13, location=(0.20, 1.05, 0.38), rotation=(22, -18, 30))
     _key_transform(arm_r, 13, location=(-0.18, -0.72, -0.25), rotation=(-16, 14, -24))
     _key_transform(leg_l, 13, location=(-0.10, 0.22, 0.18), rotation=(8, -8, 6))
@@ -504,9 +674,7 @@ def main():
         location=(-0.12, -0.06, -0.22),
         rotation=(-6, 11, -5),
     )
-    _key_transform(spine_pose, 25, rotation=(-8, 8, -7))
-    _key_transform(chest_pose, 25, rotation=(7, -11, 9))
-    _key_transform(head_pose, 25, rotation=(-10, 12, -12))
+    _key_transform(body_pose, 25, location=(-0.06, 0.0, -0.15), rotation=(-10, 12, -12))
     _key_transform(arm_l, 25, location=(-0.12, -0.68, -0.22), rotation=(-18, 20, -28))
     _key_transform(arm_r, 25, location=(0.16, 1.00, 0.34), rotation=(20, -16, 26))
     _key_transform(leg_l, 25, location=(0.15, -0.10, -0.12), rotation=(-7, 6, -5))
@@ -536,9 +704,15 @@ def main():
     start_hand = armature.pose.bones["hand.L"].tail.copy()
     scene.frame_set(13)
     middle_hand = armature.pose.bones["hand.L"].tail.copy()
-    assert (middle_hand - start_hand).length > 0.25
+    assert (middle_hand - start_hand).length < 1e-6
     assert math.isclose(root_pose.location.z, 0.28, abs_tol=1e-5)
     assert abs(arm_l.location.z) <= 0.45
+    assert (
+        art_by_bone["hand.L"]
+        .data.shape_keys.key_blocks["DepthFront"]
+        .value
+        > 0.5
+    )
     assert armature.animation_data is not None
     assert armature.animation_data.action is not None
     from coa_tools2.functions import iter_action_fcurves
@@ -551,6 +725,20 @@ def main():
     assert set(frames).issubset(keyed_frames)
 
     for frame in frames:
+        scene.frame_set(frame)
+        bpy.context.view_layer.update()
+        for name, matrix in source_matrices.items():
+            assert (
+                _matrix_delta(armature.pose.bones[name].matrix, matrix) < 1e-6
+            ), (frame, name)
+        for obj in art_objects:
+            current_y = _evaluated_world_y(obj)
+            expected_y = baseline_y[obj.name]
+            assert len(current_y) == len(expected_y)
+            assert max(
+                abs(current - expected)
+                for current, expected in zip(current_y, expected_y)
+            ) < 1e-5, (frame, obj.name)
         _render_preview(scene, output_directory, frame)
 
     scene.frame_set(1)
