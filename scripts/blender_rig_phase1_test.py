@@ -218,14 +218,15 @@ def main():
     from coa_tools2.rig_control.blender.ui import (
         sync_control_index_from_active_bone,
     )
+    from coa_tools2.rig_control.blender.selection import select_pose_bone
 
-    armature.data.bones.active = armature.data.bones[control.display_bone]
+    select_pose_bone(armature, control.display_bone)
     assert sync_control_index_from_active_bone(
         armature,
         armature.coa_tools2_rig,
     )
     assert armature.coa_tools2_rig.rig_controls_index == 0
-    armature.data.bones.active = armature.data.bones[vertical.control_bone]
+    select_pose_bone(armature, vertical.control_bone)
     assert sync_control_index_from_active_bone(
         armature,
         armature.coa_tools2_rig,

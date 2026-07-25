@@ -609,19 +609,29 @@ def action_has_fcurves(action):
     if action == None:
         return False
 
+    return next(iter_action_fcurves(action), None) is not None
+
+
+def iter_action_fcurves(action):
+    """Yield curves from legacy and layered/slotted Blender Actions."""
+
+    if action is None:
+        return
     if hasattr(action, "fcurves"):
-        return len(action.fcurves) > 0
-
+        yield from action.fcurves
+        return
     if not hasattr(action, "layers"):
-        return False
-
+        return
     for layer in action.layers:
         for strip in layer.strips:
+            if hasattr(strip, "channelbags"):
+                for channelbag in strip.channelbags:
+                    yield from channelbag.fcurves
+                continue
             for slot in action.slots:
                 channelbag = strip.channelbag(slot)
-                if channelbag != None and len(channelbag.fcurves) > 0:
-                    return True
-    return False
+                if channelbag is not None:
+                    yield from channelbag.fcurves
 
 
 def register_unassigned_action_collection_keyframes(context, sprite_object, item):
@@ -869,7 +879,8 @@ def set_bone_group(
     if b_version_smaller_than((4, 0, 0)):
         if group not in armature.pose.bone_groups:
             new_group = armature.pose.bone_groups.new(name=group)
-            new_group.color_set = theme
+            if theme:
+                new_group.color_set = theme
         else:
             new_group = armature.pose.bone_groups[group]
         pose_bone.bone_group = new_group
@@ -888,7 +899,7 @@ def set_bone_group(
                         existing_collection.unassign(pose_bone.bone)
         new_collection.assign(pose_bone.bone)
         bone_color = getattr(pose_bone.bone, "color", None)
-        if bone_color and hasattr(bone_color, "palette"):
+        if theme and bone_color and hasattr(bone_color, "palette"):
             bone_color.palette = theme
         new_collection.is_visible = visible
 

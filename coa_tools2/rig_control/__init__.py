@@ -26,8 +26,11 @@ from .component_schema import (
     RigComponentSpec,
     RigComponentType,
     RigComponentWidget,
+    RigBendAxis,
     RigDepthMode,
+    RigEndRotationMode,
     RigOrientationMode,
+    RigSolverMode,
 )
 
 __all__ = [
@@ -41,8 +44,11 @@ __all__ = [
     "RigComponentSpec",
     "RigComponentType",
     "RigComponentWidget",
+    "RigBendAxis",
     "RigDepthMode",
+    "RigEndRotationMode",
     "RigOrientationMode",
+    "RigSolverMode",
     "StateDataSpec",
     "StateCellSpec",
     "StateMixPolicy",

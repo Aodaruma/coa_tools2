@@ -147,7 +147,9 @@ def _poll_active_rig_bone():
     if armature is None or armature.type != "ARMATURE":
         _LAST_ACTIVE_RIG_BONE = None
         return 0.15
-    active_bone = armature.data.bones.active
+    from .selection import active_data_bone
+
+    active_bone = active_data_bone(armature)
     if active_bone is None:
         _LAST_ACTIVE_RIG_BONE = None
         return 0.15
@@ -156,9 +158,14 @@ def _poll_active_rig_bone():
         return 0.15
     _LAST_ACTIVE_RIG_BONE = token
 
+    from .component_ui import sync_component_index_from_active_bone
     from .ui import sync_control_index_from_active_bone
 
     sync_control_index_from_active_bone(
+        armature,
+        getattr(armature, "coa_tools2_rig", None),
+    )
+    sync_component_index_from_active_bone(
         armature,
         getattr(armature, "coa_tools2_rig", None),
     )
@@ -425,9 +432,23 @@ class COATOOLS2_PG_RigComponent(bpy.types.PropertyGroup):
         items=(
             ("AUTO", "Automatic", "Infer the bend direction from the rest pose"),
             ("X", "Local X", "Use local X as the bend axis"),
+            ("Y", "Local Y", "Use local Y as the bend axis"),
             ("Z", "Local Z", "Use local Z as the bend axis"),
         ),
         default="AUTO",
+        update=_mark_component_dirty,
+    )
+    use_bend_hint: BoolProperty(
+        name="Bend Hint",
+        description="Generate a pole control that stabilizes spatial IK bending",
+        default=True,
+        update=_mark_component_dirty,
+    )
+    pole_distance: FloatProperty(
+        name="Bend Distance",
+        description="Distance of the bend hint relative to the limb length",
+        default=1.0,
+        min=0.05,
         update=_mark_component_dirty,
     )
     use_stretch: BoolProperty(default=False, update=_mark_component_dirty)
@@ -446,6 +467,9 @@ class COATOOLS2_PG_RigComponent(bpy.types.PropertyGroup):
     )
     frame_bone: StringProperty()
     control_bone: StringProperty()
+    pole_bone: StringProperty()
+    pole_angle: FloatProperty(subtype="ANGLE")
+    pole_angle_valid: BoolProperty(default=False)
     constraint_bone: StringProperty()
     constraint_name: StringProperty()
     artifacts: CollectionProperty(type=COATOOLS2_PG_RigComponentArtifact)
@@ -843,7 +867,12 @@ def component_to_spec(component) -> RigComponentSpec:
             "widget": component.widget,
             "widget_size": component.widget_size,
             "ik_chain_length": component.ik_chain_length,
+            "solver_mode": component.ik_solver_mode,
+            "bend_axis": component.bend_axis,
+            "use_bend_hint": component.use_bend_hint,
+            "pole_distance": component.pole_distance,
             "use_stretch": component.use_stretch,
+            "end_rotation_mode": component.end_rotation_mode,
             "enabled": component.enabled,
         }
     )

@@ -34,8 +34,11 @@ from rig_control.component_schema import (  # noqa: E402
     RigComponentSpec,
     RigComponentType,
     RigComponentWidget,
+    RigBendAxis,
     RigDepthMode,
+    RigEndRotationMode,
     RigOrientationMode,
+    RigSolverMode,
 )
 from rig_control.component_validation import validate_component_spec  # noqa: E402
 from rig_control.validation import (  # noqa: E402
@@ -106,6 +109,11 @@ class RigControlSchemaTests(unittest.TestCase):
             depth_min=-0.5,
             depth_max=0.75,
             widget=RigComponentWidget.HAND,
+            solver_mode=RigSolverMode.PLANAR,
+            bend_axis=RigBendAxis.Y,
+            use_bend_hint=True,
+            pole_distance=1.25,
+            end_rotation_mode=RigEndRotationMode.COPY_LOCAL,
         )
         self.assertEqual(spec, RigComponentSpec.from_dict(spec.to_dict()))
         self.assertFalse(validate_component_spec(spec))

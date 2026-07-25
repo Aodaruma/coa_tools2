@@ -50,6 +50,24 @@ class RigComponentWidget(StringEnum):
     SQUARE = "SQUARE"
 
 
+class RigSolverMode(StringEnum):
+    SPATIAL = "SPATIAL"
+    PLANAR = "PLANAR"
+
+
+class RigBendAxis(StringEnum):
+    AUTO = "AUTO"
+    X = "X"
+    Y = "Y"
+    Z = "Z"
+
+
+class RigEndRotationMode(StringEnum):
+    COPY_WORLD = "COPY_WORLD"
+    COPY_LOCAL = "COPY_LOCAL"
+    NONE = "NONE"
+
+
 @dataclass(frozen=True)
 class RigComponentSpec:
     """Blender-independent definition of a character posing component.
@@ -77,7 +95,12 @@ class RigComponentSpec:
     widget: RigComponentWidget = RigComponentWidget.SQUARE
     widget_size: float = 1.0
     ik_chain_length: int = 2
+    solver_mode: RigSolverMode = RigSolverMode.SPATIAL
+    bend_axis: RigBendAxis = RigBendAxis.AUTO
+    use_bend_hint: bool = True
+    pole_distance: float = 1.0
     use_stretch: bool = False
+    end_rotation_mode: RigEndRotationMode = RigEndRotationMode.COPY_WORLD
     enabled: bool = True
     schema_version: int = RIG_COMPONENT_SCHEMA_VERSION
 
@@ -88,6 +111,9 @@ class RigComponentSpec:
         data["orientation_mode"] = self.orientation_mode.value
         data["depth_mode"] = self.depth_mode.value
         data["widget"] = self.widget.value
+        data["solver_mode"] = self.solver_mode.value
+        data["bend_axis"] = self.bend_axis.value
+        data["end_rotation_mode"] = self.end_rotation_mode.value
         return data
 
     @classmethod
@@ -100,6 +126,11 @@ class RigComponentSpec:
         )
         values["depth_mode"] = RigDepthMode(values.get("depth_mode", "LIMITED"))
         values["widget"] = RigComponentWidget(values.get("widget", "SQUARE"))
+        values["solver_mode"] = RigSolverMode(values.get("solver_mode", "SPATIAL"))
+        values["bend_axis"] = RigBendAxis(values.get("bend_axis", "AUTO"))
+        values["end_rotation_mode"] = RigEndRotationMode(
+            values.get("end_rotation_mode", "COPY_WORLD")
+        )
         values["source_bones"] = tuple(values.get("source_bones", ()))
         values["orientation_euler"] = tuple(
             values.get("orientation_euler", (0.0, 0.0, 0.0))

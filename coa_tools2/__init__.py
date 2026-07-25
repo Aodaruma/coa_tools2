@@ -85,6 +85,8 @@ from .operators.exporter import export_creature
 from .rig_control.blender import operators as rig_control_operators
 from .rig_control.blender import properties as rig_control_properties
 from .rig_control.blender import ui as rig_control_ui
+from .rig_control.blender import component_operators as rig_component_operators
+from .rig_control.blender import component_ui as rig_component_ui
 
 # register
 ##################################
@@ -323,6 +325,10 @@ classes = (
     rig_control_ui.COATOOLS2_UL_RigStatePoints,
     rig_control_ui.COATOOLS2_UL_RigStateCells,
     rig_control_ui.COATOOLS2_PT_RigControls,
+    rig_component_operators.COATOOLS2_OT_AddRigComponent,
+    rig_component_operators.COATOOLS2_OT_UpdateRigComponent,
+    rig_component_ui.COATOOLS2_UL_RigComponents,
+    rig_component_ui.COATOOLS2_PT_RigComponents,
     # exporter
     export_dragonbones.COATOOLS2_OT_DragonBonesExport,
     export_dragonbones.COATOOLS2_PT_ExportPanel,
@@ -620,7 +626,7 @@ def check_for_old_coatools(dummy):
             return
 
     for action in bpy.data.actions:
-        for fcurve in action.fcurves:
+        for fcurve in iter_action_fcurves(action):
             if data_path_has_old_coatools(fcurve.data_path):
                 bpy.context.scene.coa_tools2.old_coatools_found = True
                 return

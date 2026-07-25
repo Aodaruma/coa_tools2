@@ -6,6 +6,7 @@ import bpy
 
 from ... import functions
 from .properties import get_rig_data
+from .selection import active_data_bone
 
 
 def sync_control_index_from_active_bone(armature, rig_data):
@@ -13,7 +14,7 @@ def sync_control_index_from_active_bone(armature, rig_data):
 
     if rig_data is None:
         return False
-    active_bone = armature.data.bones.active
+    active_bone = active_data_bone(armature)
     if active_bone is None:
         return False
     if active_bone.get("coa_rig_artifact_role") not in {

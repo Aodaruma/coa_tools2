@@ -788,7 +788,7 @@ Acceptance:
 
 - Control Frameに沿って3軸操作でき、設定したDepth Modeだけが局所法線移動を制限する。
 - 腕・脚の2-Bone ChainをIK Targetから安定して操作できる。
-- 既存FK Keyframeを維持したままComponentを追加できる。
+- 現在のFK Poseを維持して追加でき、既存FK ActionはPhase 6Cの変換なしに上書きしない。
 
 ### Phase 6C: IK/FK
 
@@ -833,6 +833,44 @@ Acceptance:
 - Hair / Tail / Cloth Chain
 - Pose Asset作成・適用補助
 - 明示的なStretch Toggle
+
+### 14.1 現在の実装範囲
+
+Phase 6AとPhase 6Bの最初のVertical Sliceとして、次を実装した。
+
+- `ROOT`、`FK_CHAIN`、`SPINE_FK`の既存Boneを維持するIn-place Control
+- `LIMB_IK`の非Deform `MCH Frame`、IK Target、任意のBend Control
+- `SOURCE_BONE`、`WORLD_VIEW`、`CUSTOM`による見た目基準の局所座標
+- 局所X/Yを絵の面、局所Zを法線・奥行きとして扱う`Plane / Limited Depth / Free 3D`
+- 全軸回転と、`Spatial / Planar` IK
+- Root、FK、Hand、Foot、Square、Bend用の無着色Wire Widget
+- 空間IK追加時に現在姿勢を維持するPole角の自動校正と永続化
+- Component、Bone、Constraint、Widgetの所有タグと冪等Update
+- 現在のFK Poseを維持するIK追加、失敗時Rollback、Armature複製時のInstance分離
+- 別ClipやNLAを含む既存Limb FK Actionの検出と、Phase 6C変換前の安全な拒否
+- Active BoneからComponent UIを選択する同期
+
+次は未実装であり、Phase 6C以降で扱う。
+
+- IK/FK Mixと双方向Snap
+- 既存Limb FK ActionからIK Control Actionへの変換・Bake
+- 左右対称生成
+- Clavicle / Shoulder、Foot Roll、Space Switch
+- Bone TransformからState Matrix、Shape Key、Slot等への補正Binding
+- Component用Name Label、Pose Asset、Export Bake
+
+### 14.2 実装サンプル
+
+`scripts/blender_rig_phase6_sample_character.py`は、平面メッシュで構成した簡易キャラクターへ次を適用する。
+
+- Root × 1
+- Spine FK × 1
+- Spatial Arm IK × 2
+- Spatial Leg IK × 2
+- 正面姿勢と、奥行き移動・3軸回転を含む左右2姿勢
+- Frame 1、13、25のAction Key
+
+スクリプトは各Componentの生成、Action作成、IKによる手先移動、Depth Limitを検証し、`%TEMP%\coa_tools2-validation`へ`.blend`と3枚のPNGを出力する。生成物は検証用でありRepositoryへCommitしない。
 
 ## 15. 最初のVertical Slice
 

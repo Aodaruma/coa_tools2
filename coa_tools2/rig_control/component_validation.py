@@ -113,4 +113,13 @@ def validate_component_spec(spec: RigComponentSpec) -> list[ValidationIssue]:
                     spec.component_uuid,
                 )
             )
+        if spec.use_bend_hint and spec.pole_distance <= 0.0:
+            issues.append(
+                ValidationIssue(
+                    IssueSeverity.ERROR,
+                    "component.invalid_pole_distance",
+                    "Bend hint distance must be greater than zero.",
+                    spec.component_uuid,
+                )
+            )
     return issues

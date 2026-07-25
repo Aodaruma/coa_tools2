@@ -25,6 +25,7 @@ from .drivers import (
     remove_binding_driver,
 )
 from .properties import get_rig_data
+from .selection import select_pose_bone
 from .states import (
     ensure_state_cells,
     ensure_state_driver,
@@ -476,10 +477,7 @@ class COATOOLS2_OT_AddRigControl(bpy.types.Operator):
             bpy.context.view_layer.objects.active = armature
             armature.select_set(True)
             bpy.ops.object.mode_set(mode="POSE")
-        for pose_bone in armature.pose.bones:
-            if hasattr(pose_bone.bone, "select"):
-                pose_bone.bone.select = pose_bone.name == result["control_bone"]
-        armature.data.bones.active = armature.data.bones[result["control_bone"]]
+        select_pose_bone(armature, result["control_bone"], exclusive=True)
         self.report({"INFO"}, f"Created rig control: {self.label}")
         return {"FINISHED"}
 

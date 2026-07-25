@@ -659,6 +659,8 @@ State Graphとは別に、Root、FK、IK、IK/FK切替、Spine等の骨格ポー
 
 最初のVertical Sliceは、選択した2-Bone Chainから管理された2D Limb IKを生成し、単一ChainのIK/FK Mix、両方向Snap、Validate / Repair、Export Bakeまでを成立させる。
 
+現在はPhase 6AとPhase 6B前半まで実装済みである。Root、FK、Spine FK、見た目方向へ合わせた3D Limb IK、制限付き奥行き、Bend Control、所有管理、Rollback、複製分離、Save / Reloadを利用できる。IK/FK Mix、Snap、補正Binding、Export Bakeは後続Phaseで追加する。
+
 詳細は[Phase 6: Character Posing Rig Components 設計案](rig_control_phase6_character_posing.md)を参照する。
 
 ### Phase 7以降: 別Epic
