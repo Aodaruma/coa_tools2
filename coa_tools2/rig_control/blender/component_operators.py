@@ -17,8 +17,13 @@ from bpy.props import (
 
 from ... import functions
 from .component_compiler import RigComponentCompileError, compile_component
+from .component_outputs import (
+    remove_component_binding,
+)
+from .drivers import binding_target_key
 from .properties import get_rig_data
 from .selection import select_pose_bone
+from .states import state_target_key
 
 
 def _armature(context):
@@ -73,21 +78,143 @@ def _side_from_name(name):
     return "CENTER"
 
 
+def _component_binding_source_items(_self, _context):
+    return (
+        ("LOC_X", "Move X", "Control-local X translation"),
+        ("LOC_Y", "Move Y", "Control-local Y translation"),
+        ("LOC_Z", "Depth Z", "Control-local visual depth"),
+        ("ROT_X", "Rotate X", "Control-local X rotation"),
+        ("ROT_Y", "Rotate Y", "Control-local Y rotation"),
+        ("ROT_Z", "Rotate Z", "Control-local Z rotation"),
+    )
+
+
+def _component_binding_target_items(self, _context):
+    target = bpy.data.objects.get(self.target_object_name)
+    if target is None:
+        return [("", "Missing Target", "Select a target object")]
+    if self.target_kind == "SHAPE_KEY_VALUE":
+        shape_keys = getattr(getattr(target, "data", None), "shape_keys", None)
+        if shape_keys is None:
+            return [("", "No Shape Keys", "Target has no Shape Keys")]
+        items = [
+            (key.name, key.name, f"Drive {key.name}")
+            for key in shape_keys.key_blocks
+            if key.name != "Basis"
+        ]
+        return items or [("", "No Shape Keys", "No non-Basis Shape Keys")]
+    if target.type != "ARMATURE":
+        return [("", "Not an Armature", "Select an Armature")]
+    pose_bone = target.pose.bones.get(self.target_bone)
+    if pose_bone is None:
+        return [("", "Choose Bone", "Select a pose bone")]
+    items = [
+        (constraint.name, constraint.name, constraint.name)
+        for constraint in pose_bone.constraints
+    ]
+    return items or [("", "No Constraints", "Bone has no constraints")]
+
+
+def _component_target_bone_items(self, _context):
+    target = bpy.data.objects.get(self.target_object_name)
+    if target is None or target.type != "ARMATURE":
+        return [("", "No Bones", "Select an Armature target")]
+    return [(bone.name, bone.name, bone.name) for bone in target.pose.bones]
+
+
+def _belongs_to_armature(obj, armature):
+    current = obj
+    while current is not None:
+        if current == armature:
+            return True
+        current = current.parent
+    return obj.find_armature() == armature if obj.type == "MESH" else False
+
+
+def _default_component_target(context, armature):
+    active = context.active_object
+    if active is not None and active.type == "MESH" and active.data.shape_keys:
+        return active
+    selected = next(
+        (
+            obj
+            for obj in context.selected_objects
+            if obj.type == "MESH" and obj.data.shape_keys is not None
+        ),
+        None,
+    )
+    if selected is not None:
+        return selected
+    return next(
+        (
+            obj
+            for obj in context.scene.objects
+            if obj.type == "MESH"
+            and obj.data.shape_keys is not None
+            and _belongs_to_armature(obj, armature)
+        ),
+        None,
+    )
+
+
+def _all_output_target_keys(armature):
+    rig_data = get_rig_data(armature)
+    for control in rig_data.rig_controls:
+        for binding in control.bindings:
+            if binding.enabled:
+                yield binding_target_key(binding)
+        for point in control.state_points:
+            if point.enabled and not point.is_empty:
+                yield state_target_key(point)
+    for component in rig_data.rig_components:
+        for binding in component.bindings:
+            if binding.enabled:
+                yield binding_target_key(binding)
+
+
+def _component_input_range(component, source_component):
+    if source_component == "LOC_Z" and component.depth_mode == "LIMITED":
+        return component.depth_min, component.depth_max
+    if source_component.startswith("ROT_"):
+        return -1.5707963267948966, 1.5707963267948966
+    return -1.0, 1.0
+
+
 class COATOOLS2_OT_AddRigComponent(bpy.types.Operator):
     bl_idname = "coa_tools2.add_rig_component"
     bl_label = "Add Pose Rig Component"
-    bl_description = "Build a managed 3D posing component from selected bones"
+    bl_description = "Build a managed parametric pose input from selected bones"
     bl_options = {"REGISTER", "UNDO"}
 
     label: StringProperty(default="Pose Component")
     component_type: EnumProperty(
         items=(
-            ("ROOT", "Root", "Use the active root bone as a 3D posing control"),
-            ("FK_CHAIN", "FK Chain", "Use the selected bones as all-axis FK controls"),
-            ("LIMB_IK", "Limb IK", "Create an oriented 3D IK target"),
-            ("SPINE_FK", "Spine FK", "Use the selected spine as FK controls"),
+            ("ROOT", "Root / Body", "Create a root or body parameter control"),
+            ("FK_CHAIN", "Part Rotation", "Create a part-oriented parameter control"),
+            (
+                "LIMB_IK",
+                "Limb Target / IK",
+                "Create a parametric limb target or legacy direct IK",
+            ),
+            ("SPINE_FK", "Spine / Body", "Create a body-oriented parameter control"),
         ),
         default="LIMB_IK",
+    )
+    deformation_mode: EnumProperty(
+        name="Artwork Deformation",
+        items=(
+            (
+                "PARAMETRIC",
+                "Parametric (Shape Keys)",
+                "Use the 3D control as parameter input without rotating source bones",
+            ),
+            (
+                "DIRECT_BONES",
+                "Direct Bones (Legacy)",
+                "Pose source bones directly with FK or IK",
+            ),
+        ),
+        default="PARAMETRIC",
     )
     orientation_mode: EnumProperty(
         items=(
@@ -192,7 +319,25 @@ class COATOOLS2_OT_AddRigComponent(bpy.types.Operator):
         layout = self.layout
         layout.prop(self, "label")
         layout.prop(self, "component_type")
-        if self.component_type == "LIMB_IK":
+        layout.prop(self, "deformation_mode")
+        if self.deformation_mode == "PARAMETRIC":
+            info = layout.box()
+            info.label(text="Source bones stay unchanged.", icon="SHAPEKEY_DATA")
+            info.label(text="Add Shape Key outputs after creation.")
+            orientation = layout.box()
+            orientation.label(text="Visual Control Frame", icon="ORIENTATION_LOCAL")
+            orientation.prop(self, "orientation_mode")
+            if self.orientation_mode == "CUSTOM":
+                orientation.prop(self, "orientation_euler")
+            orientation.label(text="Local X/Y: artwork axes")
+            orientation.label(text="Local Z: visual depth")
+            depth = layout.box()
+            depth.prop(self, "depth_mode")
+            if self.depth_mode == "LIMITED":
+                row = depth.row(align=True)
+                row.prop(self, "depth_min")
+                row.prop(self, "depth_max")
+        elif self.component_type == "LIMB_IK":
             orientation = layout.box()
             orientation.label(text="Visual Control Frame", icon="ORIENTATION_LOCAL")
             orientation.prop(self, "orientation_mode")
@@ -255,8 +400,14 @@ class COATOOLS2_OT_AddRigComponent(bpy.types.Operator):
         component.label = self.label
         component.component_type = self.component_type
         component.side = _side_from_name(chain[-1])
+        component.deformation_mode = self.deformation_mode
         component.build_mode = (
-            "GENERATED" if self.component_type == "LIMB_IK" else "IN_PLACE"
+            "GENERATED"
+            if (
+                self.deformation_mode == "PARAMETRIC"
+                or self.component_type == "LIMB_IK"
+            )
+            else "IN_PLACE"
         )
         component.orientation_mode = self.orientation_mode
         component.orientation_reference = chain[-1]
@@ -266,7 +417,10 @@ class COATOOLS2_OT_AddRigComponent(bpy.types.Operator):
         component.depth_max = self.depth_max
         component.allow_translation = (
             (True, True, True)
-            if self.component_type in {"ROOT", "LIMB_IK"}
+            if (
+                self.deformation_mode == "PARAMETRIC"
+                or self.component_type in {"ROOT", "LIMB_IK"}
+            )
             else (False, False, False)
         )
         component.allow_rotation = (True, True, True)
@@ -333,7 +487,158 @@ class COATOOLS2_OT_UpdateRigComponent(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class COATOOLS2_OT_AddComponentBinding(bpy.types.Operator):
+    bl_idname = "coa_tools2.add_component_binding"
+    bl_label = "Add Pose Output"
+    bl_description = "Map a pose-control transform channel to a Shape Key or constraint"
+    bl_options = {"REGISTER", "UNDO"}
+
+    source_component: EnumProperty(items=_component_binding_source_items)
+    target_kind: EnumProperty(
+        items=(
+            ("SHAPE_KEY_VALUE", "Shape Key", "Drive a Shape Key value"),
+            (
+                "CONSTRAINT_INFLUENCE",
+                "Constraint Influence",
+                "Drive a pose-bone constraint influence",
+            ),
+        ),
+        default="SHAPE_KEY_VALUE",
+    )
+    target_object_name: StringProperty()
+    target_bone: EnumProperty(items=_component_target_bone_items)
+    target_name: EnumProperty(items=_component_binding_target_items)
+    input_min: FloatProperty(default=-1.0)
+    input_max: FloatProperty(default=1.0)
+    output_min: FloatProperty(default=0.0)
+    output_max: FloatProperty(default=1.0)
+    clamp: BoolProperty(default=True)
+
+    @classmethod
+    def poll(cls, context):
+        _armature_object, component = _active_component(context)
+        return (
+            component is not None
+            and component.deformation_mode == "PARAMETRIC"
+            and bool(component.control_bone)
+        )
+
+    def invoke(self, context, _event):
+        armature, component = _active_component(context)
+        self.source_component = "ROT_Z"
+        self.input_min, self.input_max = _component_input_range(
+            component,
+            self.source_component,
+        )
+        target = _default_component_target(context, armature)
+        self.target_object_name = target.name if target else ""
+        if target is not None:
+            items = _component_binding_target_items(self, context)
+            if items and items[0][0]:
+                self.target_name = items[0][0]
+        return context.window_manager.invoke_props_dialog(self, width=470)
+
+    def draw(self, _context):
+        layout = self.layout
+        layout.prop(self, "source_component", text="Input Channel")
+        row = layout.row(align=True)
+        row.prop(self, "input_min")
+        row.prop(self, "input_max")
+        layout.prop(self, "target_kind", text="Target Type")
+        layout.prop_search(
+            self,
+            "target_object_name",
+            bpy.data,
+            "objects",
+            text="Target Object",
+        )
+        if self.target_kind == "CONSTRAINT_INFLUENCE":
+            layout.prop(self, "target_bone", text="Target Bone")
+            layout.prop(self, "target_name", text="Constraint")
+        else:
+            layout.prop(self, "target_name", text="Shape Key")
+        row = layout.row(align=True)
+        row.prop(self, "output_min")
+        row.prop(self, "output_max")
+        layout.prop(self, "clamp")
+
+    def execute(self, context):
+        armature, component = _active_component(context)
+        target = bpy.data.objects.get(self.target_object_name)
+        if armature is None or component is None or target is None:
+            self.report({"ERROR"}, "Component and target object are required.")
+            return {"CANCELLED"}
+        target_key = (
+            self.target_kind,
+            target.name,
+            (
+                self.target_bone
+                if self.target_kind == "CONSTRAINT_INFLUENCE"
+                else ""
+            ),
+            self.target_name,
+        )
+        if target_key in set(_all_output_target_keys(armature)):
+            self.report({"ERROR"}, "This target already has a rig output.")
+            return {"CANCELLED"}
+
+        binding = component.bindings.add()
+        binding.binding_uuid = str(uuid.uuid4())
+        binding.control_uuid = component.component_uuid
+        binding.source_component = self.source_component
+        binding.target_kind = self.target_kind
+        binding.target_object = target
+        binding.target_bone = target_key[2]
+        binding.target_name = self.target_name
+        binding.input_min = self.input_min
+        binding.input_max = self.input_max
+        binding.output_min = self.output_min
+        binding.output_max = self.output_max
+        binding.clamp = self.clamp
+        try:
+            compile_component(armature, component)
+        except Exception as exc:
+            traceback.print_exc()
+            component.bindings.remove(len(component.bindings) - 1)
+            self.report({"ERROR"}, str(exc))
+            return {"CANCELLED"}
+        component.bindings_index = len(component.bindings) - 1
+        self.report({"INFO"}, "Pose output added.")
+        return {"FINISHED"}
+
+
+class COATOOLS2_OT_RemoveComponentBinding(bpy.types.Operator):
+    bl_idname = "coa_tools2.remove_component_binding"
+    bl_label = "Remove Pose Output"
+    bl_description = "Remove the selected output and its strictly-owned driver"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        _armature_object, component = _active_component(context)
+        return component is not None and bool(component.bindings)
+
+    def execute(self, context):
+        armature, component = _active_component(context)
+        index = min(component.bindings_index, len(component.bindings) - 1)
+        binding = component.bindings[index]
+        try:
+            remove_component_binding(armature, component, binding)
+        except Exception as exc:
+            traceback.print_exc()
+            self.report({"ERROR"}, f"Pose output removal failed: {exc}")
+            return {"CANCELLED"}
+        component.bindings.remove(index)
+        component.bindings_index = max(
+            0,
+            min(index, len(component.bindings) - 1),
+        )
+        return {"FINISHED"}
+
+
 CLASSES = (
     COATOOLS2_OT_AddRigComponent,
     COATOOLS2_OT_UpdateRigComponent,
+    COATOOLS2_OT_AddComponentBinding,
+    COATOOLS2_OT_RemoveComponentBinding,
 )

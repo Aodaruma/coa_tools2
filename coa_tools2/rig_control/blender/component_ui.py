@@ -83,7 +83,20 @@ class COATOOLS2_PT_RigComponents(bpy.types.Panel):
         box = layout.box()
         box.prop(component, "label")
         box.label(text=f"Type: {component.component_type}")
+        mode_row = box.row()
+        mode_row.enabled = not (
+            component.compiled_deformation_mode or component.artifacts
+        )
+        mode_row.prop(component, "deformation_mode")
         box.label(text=f"Build: {component.build_mode}")
+        if component.deformation_mode == "PARAMETRIC":
+            info = box.box()
+            info.label(text="Control Transform → Outputs", icon="SHAPEKEY_DATA")
+            info.label(text="Source bones and flat artwork stay unchanged.")
+        else:
+            warning = box.box()
+            warning.label(text="Legacy direct bone deformation", icon="ERROR")
+            warning.label(text="Artwork rotates with source bones.")
 
         sources_header, sources_body = box.panel(
             "coa_tools2_component_sources",
@@ -94,7 +107,10 @@ class COATOOLS2_PT_RigComponents(bpy.types.Panel):
             for source in component.source_bones:
                 sources_body.label(text=source.bone_name)
 
-        if component.component_type == "LIMB_IK":
+        if (
+            component.deformation_mode == "PARAMETRIC"
+            or component.component_type == "LIMB_IK"
+        ):
             orientation = box.box()
             orientation.label(text="Visual Control Frame", icon="ORIENTATION_LOCAL")
             orientation.prop(component, "orientation_mode")
@@ -110,6 +126,10 @@ class COATOOLS2_PT_RigComponents(bpy.types.Panel):
             orientation.label(text="Local X/Y = art plane")
             orientation.label(text="Local Z = visual depth")
 
+        if (
+            component.deformation_mode == "DIRECT_BONES"
+            and component.component_type == "LIMB_IK"
+        ):
             solver = box.box()
             solver.label(text="IK")
             solver.prop(component, "ik_solver_mode")
@@ -122,7 +142,10 @@ class COATOOLS2_PT_RigComponents(bpy.types.Panel):
             solver.prop(component, "end_rotation_mode")
             solver.prop(component, "use_stretch")
 
-        if component.component_type in {"ROOT", "LIMB_IK"}:
+        if (
+            component.deformation_mode == "PARAMETRIC"
+            or component.component_type in {"ROOT", "LIMB_IK"}
+        ):
             depth = box.box()
             depth.label(text="Movement")
             depth.prop(component, "allow_translation")
@@ -158,9 +181,62 @@ class COATOOLS2_PT_RigComponents(bpy.types.Panel):
                 icon="FILE_REFRESH",
             )
 
+        if component.deformation_mode == "PARAMETRIC":
+            outputs = layout.box()
+            outputs.label(text="Shape Key & Property Outputs", icon="DRIVER")
+            if not component.bindings:
+                outputs.label(
+                    text="The control is ready; add outputs when artwork is prepared.",
+                    icon="INFO",
+                )
+            row = outputs.row()
+            row.template_list(
+                "COATOOLS2_UL_RigBindings",
+                "",
+                component,
+                "bindings",
+                component,
+                "bindings_index",
+                rows=min(5, max(2, len(component.bindings))),
+            )
+            column = row.column(align=True)
+            column.operator(
+                "coa_tools2.add_component_binding",
+                text="",
+                icon="ADD",
+            )
+            column.operator(
+                "coa_tools2.remove_component_binding",
+                text="",
+                icon="REMOVE",
+            )
+            if component.bindings:
+                binding = component.bindings[
+                    min(component.bindings_index, len(component.bindings) - 1)
+                ]
+                details = outputs.box()
+                details.label(text=f"Input: {binding.source_component}")
+                details.label(
+                    text=(
+                        f"Range: {binding.input_min:.3f} … "
+                        f"{binding.input_max:.3f}"
+                    )
+                )
+                details.label(
+                    text=(
+                        f"Output: {binding.output_min:.3f} … "
+                        f"{binding.output_max:.3f}"
+                    )
+                )
+
         export = layout.box()
-        export.label(text="3D depth/tilt is Blender posing data.", icon="INFO")
-        export.label(text="2D exporters may project it to the art plane.")
+        if component.deformation_mode == "PARAMETRIC":
+            export.label(
+                text="3D depth/tilt is parameter input, not mesh rotation.",
+                icon="INFO",
+            )
+        else:
+            export.label(text="3D depth/tilt poses source bones.", icon="INFO")
 
 
 CLASSES = (

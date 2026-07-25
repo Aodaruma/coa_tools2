@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .component_schema import (
+    RigDeformationMode,
     RigComponentSpec,
     RigComponentType,
     RigDepthMode,
@@ -91,6 +92,57 @@ def validate_component_spec(spec: RigComponentSpec) -> list[ValidationIssue]:
                 IssueSeverity.ERROR,
                 "component.invalid_widget_size",
                 "Component widget size must be greater than zero.",
+                spec.component_uuid,
+            )
+        )
+    binding_ids = set()
+    for binding in spec.bindings:
+        if not binding.binding_uuid.strip():
+            issues.append(
+                ValidationIssue(
+                    IssueSeverity.ERROR,
+                    "component.binding_missing_uuid",
+                    "Pose output binding UUID is required.",
+                    spec.component_uuid,
+                )
+            )
+        elif binding.binding_uuid in binding_ids:
+            issues.append(
+                ValidationIssue(
+                    IssueSeverity.ERROR,
+                    "component.binding_duplicate_uuid",
+                    f"Duplicate pose output UUID: {binding.binding_uuid}",
+                    spec.component_uuid,
+                )
+            )
+        binding_ids.add(binding.binding_uuid)
+        if binding.input_min >= binding.input_max:
+            issues.append(
+                ValidationIssue(
+                    IssueSeverity.ERROR,
+                    "component.binding_invalid_input_range",
+                    "Pose output input minimum must be less than its maximum.",
+                    binding.binding_uuid,
+                )
+            )
+        if (
+            not binding.target_object_name.strip()
+            or not binding.target_name.strip()
+        ):
+            issues.append(
+                ValidationIssue(
+                    IssueSeverity.ERROR,
+                    "component.binding_missing_target",
+                    "Pose output target object and target name are required.",
+                    binding.binding_uuid,
+                )
+            )
+    if spec.bindings and spec.deformation_mode != RigDeformationMode.PARAMETRIC:
+        issues.append(
+            ValidationIssue(
+                IssueSeverity.ERROR,
+                "component.outputs_require_parametric_mode",
+                "Pose outputs require Parametric deformation mode.",
                 spec.component_uuid,
             )
         )

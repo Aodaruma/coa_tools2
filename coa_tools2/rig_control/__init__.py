@@ -22,6 +22,8 @@ from .schema import (
 )
 from .component_schema import (
     RIG_COMPONENT_SCHEMA_VERSION,
+    RigComponentOutputSpec,
+    RigDeformationMode,
     RigComponentSide,
     RigComponentSpec,
     RigComponentType,
@@ -30,6 +32,7 @@ from .component_schema import (
     RigDepthMode,
     RigEndRotationMode,
     RigOrientationMode,
+    RigParameterChannel,
     RigSolverMode,
 )
 
@@ -40,6 +43,8 @@ __all__ = [
     "ControlAxis",
     "ControlSpec",
     "ControlType",
+    "RigComponentOutputSpec",
+    "RigDeformationMode",
     "RigComponentSide",
     "RigComponentSpec",
     "RigComponentType",
@@ -48,6 +53,7 @@ __all__ = [
     "RigDepthMode",
     "RigEndRotationMode",
     "RigOrientationMode",
+    "RigParameterChannel",
     "RigSolverMode",
     "StateDataSpec",
     "StateCellSpec",

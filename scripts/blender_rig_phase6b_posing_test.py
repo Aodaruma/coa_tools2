@@ -32,6 +32,7 @@ def _select_pose_bones(armature, names, active_name):
 
 
 def _add_component(**properties):
+    properties.setdefault("deformation_mode", "DIRECT_BONES")
     result = bpy.ops.coa_tools2.add_rig_component("EXEC_DEFAULT", **properties)
     assert result == {"FINISHED"}, result
 
@@ -245,6 +246,29 @@ def main():
     assert pole_pose.custom_shape is not None
     assert tuple(pole_pose.lock_location) == (False, False, False)
     assert tuple(pole_pose.lock_rotation) == (True, True, True)
+    bend_center = next(
+        bone
+        for bone in armature.data.bones
+        if bone.get("coa_rig_component_uuid")
+        == limb_component.component_uuid
+        and bone.get("coa_rig_component_role") == "bend_center"
+    )
+    bend_center_pose = armature.pose.bones[bend_center.name]
+    bend_distance = pole_pose.constraints.get(
+        f"COA_COMP_{limb_component.component_uuid[:8]}_BendDistance"
+    )
+    assert bend_distance is not None
+    assert bend_distance.type == "LIMIT_DISTANCE"
+    assert bend_distance.target == armature
+    assert bend_distance.subtarget == bend_center.name
+    assert bend_distance.limit_mode == "LIMITDIST_ONSURFACE"
+    assert bend_distance.use_transform_limit
+    assert math.isclose(
+        bend_distance.distance,
+        (pole_pose.head - bend_center_pose.head).length,
+        abs_tol=1e-5,
+    )
+    bend_radius = bend_distance.distance
 
     owner = armature.pose.bones["forearm.L"]
     ik = owner.constraints.get(limb_component.constraint_name)
@@ -282,6 +306,24 @@ def main():
         assert not pose_bone.lock_ik_y
         assert not pose_bone.lock_ik_z
         assert math.isclose(pose_bone.ik_stretch, 0.0, abs_tol=1e-6)
+
+    # The Pole can orbit the rest knee/elbow center but cannot drift toward
+    # infinity. The center is a stable MCH bone outside the solved IK chain.
+    original_pole_location = pole_pose.location.copy()
+    pole_pose.location.x += bend_radius * 3.0
+    bpy.context.view_layer.update()
+    evaluated_armature = armature.evaluated_get(
+        bpy.context.evaluated_depsgraph_get()
+    )
+    evaluated_pole = evaluated_armature.pose.bones[pole_pose.name]
+    evaluated_center = evaluated_armature.pose.bones[bend_center.name]
+    assert math.isclose(
+        (evaluated_pole.head - evaluated_center.head).length,
+        bend_radius,
+        abs_tol=1e-4,
+    )
+    pole_pose.location = original_pole_location
+    bpy.context.view_layer.update()
 
     end_rotation = armature.pose.bones["hand.L"].constraints.get(
         f"COA_COMP_{limb_component.component_uuid[:8]}_EndRotation"
@@ -397,6 +439,10 @@ def main():
     previous_pole_widget = armature.pose.bones[
         previous_pole_name
     ].custom_shape
+    previous_bend_center_name = bend_center.name
+    previous_bend_center_matrix = armature.data.bones[
+        previous_bend_center_name
+    ].matrix_local.copy()
     previous_ik = armature.pose.bones["forearm.L"].constraints[
         limb_component.constraint_name
     ]
@@ -426,6 +472,17 @@ def main():
         armature.pose.bones[previous_pole_name].custom_shape
         == previous_pole_widget
     )
+    assert previous_bend_center_name in armature.data.bones
+    assert _matrix_delta(
+        armature.data.bones[previous_bend_center_name].matrix_local,
+        previous_bend_center_matrix,
+    ) < 1e-6
+    restored_bend_distance = armature.pose.bones[
+        previous_pole_name
+    ].constraints[
+        f"COA_COMP_{limb_component.component_uuid[:8]}_BendDistance"
+    ]
+    assert restored_bend_distance.subtarget == previous_bend_center_name
     restored_ik = armature.pose.bones["forearm.L"].constraints[
         limb_component.constraint_name
     ]
@@ -455,7 +512,14 @@ def main():
     assert limb_component.pole_bone == ""
     assert not any(
         artifact.role
-        in {"depth_constraint", "end_rotation_constraint", "bend_control", "bend_widget"}
+        in {
+            "depth_constraint",
+            "end_rotation_constraint",
+            "bend_control",
+            "bend_center",
+            "bend_distance_constraint",
+            "bend_widget",
+        }
         for artifact in limb_component.artifacts
     )
     for name in ("upper_arm.L", "forearm.L"):
@@ -587,6 +651,7 @@ def main():
             "EXEC_DEFAULT",
             label="Animated Limb",
             component_type="LIMB_IK",
+            deformation_mode="DIRECT_BONES",
         )
     except RuntimeError as exc:
         assert "already has FK animation" in str(exc)
@@ -604,6 +669,7 @@ def main():
             "EXEC_DEFAULT",
             label="Limited Limb",
             component_type="LIMB_IK",
+            deformation_mode="DIRECT_BONES",
         )
     except RuntimeError as exc:
         assert "unmanaged IK channel settings" in str(exc)

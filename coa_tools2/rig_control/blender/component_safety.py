@@ -124,7 +124,10 @@ def preflight_component_artifacts(armature, component):
             raise ComponentPreflightError(
                 f"Source bone '{name}' belongs to another Armature instance."
             )
-        if component.component_type in {"ROOT", "FK_CHAIN", "SPINE_FK"}:
+        if (
+            component.deformation_mode == "DIRECT_BONES"
+            and component.component_type in {"ROOT", "FK_CHAIN", "SPINE_FK"}
+        ):
             shape = pose_bone.custom_shape
             if shape is not None and not _managed_shape(
                 shape,
@@ -136,7 +139,9 @@ def preflight_component_artifacts(armature, component):
                 )
 
     depth_owner = None
-    if component.component_type == "ROOT" and source_names:
+    if component.deformation_mode == "PARAMETRIC" and component.control_bone:
+        depth_owner = armature.pose.bones.get(component.control_bone)
+    elif component.component_type == "ROOT" and source_names:
         depth_owner = armature.pose.bones.get(source_names[0])
     elif component.component_type == "LIMB_IK" and component.control_bone:
         depth_owner = armature.pose.bones.get(component.control_bone)
@@ -152,18 +157,29 @@ def preflight_component_artifacts(armature, component):
                 f"Constraint '{depth_name}' is unmanaged."
             )
 
-    if component.component_type != "LIMB_IK":
-        return
-
     slug = slugify(component.semantic_id or component.label)
-    expected_bones = (
-        (component.frame_bone or f"MCH_{slug}_FRAME", "control_frame"),
-        (component.control_bone or f"CTRL_{slug}", "control_bone"),
-    )
-    if component.use_bend_hint and component.ik_solver_mode == "SPATIAL":
-        expected_bones += (
-            (component.pole_bone or f"CTRL_{slug}_BEND", "bend_control"),
+    expected_bones = ()
+    if (
+        component.deformation_mode == "PARAMETRIC"
+        or component.component_type == "LIMB_IK"
+    ):
+        expected_bones = (
+            (component.frame_bone or f"MCH_{slug}_FRAME", "control_frame"),
+            (component.control_bone or f"CTRL_{slug}", "control_bone"),
         )
+        if (
+            component.deformation_mode == "DIRECT_BONES"
+            and component.component_type == "LIMB_IK"
+            and component.use_bend_hint
+            and component.ik_solver_mode == "SPATIAL"
+        ):
+            expected_bones += (
+                (component.pole_bone or f"CTRL_{slug}_BEND", "bend_control"),
+                (
+                    f"MCH_{slug}_BEND_CENTER",
+                    "bend_center",
+                ),
+            )
     for bone_name, role in expected_bones:
         existing = armature.data.bones.get(bone_name)
         if existing is None:
@@ -176,6 +192,12 @@ def preflight_component_artifacts(armature, component):
             raise ComponentPreflightError(
                 f"Bone '{bone_name}' already exists and is unmanaged."
             )
+
+    if (
+        component.deformation_mode != "DIRECT_BONES"
+        or component.component_type != "LIMB_IK"
+    ):
+        return
 
     owner = armature.pose.bones.get(source_names[-2])
     end = armature.pose.bones.get(source_names[-1])
@@ -191,6 +213,31 @@ def preflight_component_artifacts(armature, component):
         ):
             raise ComponentPreflightError(
                 f"Bone '{owner.name}' already has an unmanaged IK constraint."
+            )
+    if (
+        component.use_bend_hint
+        and component.ik_solver_mode == "SPATIAL"
+    ):
+        pole_name = component.pole_bone or f"CTRL_{slug}_BEND"
+        pole = armature.pose.bones.get(pole_name)
+        bend_distance_name = (
+            f"COA_COMP_{component.component_uuid[:8]}_BendDistance"
+        )
+        bend_distance = (
+            pole.constraints.get(bend_distance_name)
+            if pole is not None
+            else None
+        )
+        if (
+            bend_distance is not None
+            and not _component_owns_constraint(
+                component,
+                pole.name,
+                bend_distance_name,
+            )
+        ):
+            raise ComponentPreflightError(
+                f"Constraint '{bend_distance_name}' is unmanaged."
             )
     rotation_name = f"COA_COMP_{component.component_uuid[:8]}_EndRotation"
     for constraint in end.constraints:
@@ -263,6 +310,8 @@ def _constraint_snapshot(constraint, index):
         "pole_angle",
         "chain_count",
         "use_stretch",
+        "distance",
+        "limit_mode",
     )
     values = {}
     for name in attributes:
@@ -403,6 +452,8 @@ def capture_component_build_state(armature, component):
                 "object_name": artifact.object_name,
                 "bone_name": artifact.bone_name,
                 "constraint_name": artifact.constraint_name,
+                "data_path": artifact.data_path,
+                "binding_uuid": artifact.binding_uuid,
                 "owned": artifact.owned,
             }
             for artifact in component.artifacts
@@ -417,6 +468,7 @@ def capture_component_build_state(armature, component):
                 "pole_angle_valid",
                 "constraint_bone",
                 "constraint_name",
+                "compiled_deformation_mode",
                 "needs_rebuild",
                 "last_error",
             )
@@ -514,6 +566,7 @@ def rollback_component_build(armature, component, snapshot):
         f"{constraint_prefix}Depth",
         f"{constraint_prefix}IK",
         f"{constraint_prefix}EndRotation",
+        f"{constraint_prefix}BendDistance",
     }
 
     # Detach all component-owned constraints before restoring or recreating

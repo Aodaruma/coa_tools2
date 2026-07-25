@@ -5,10 +5,10 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any, Mapping
 
-from .schema import StringEnum
+from .schema import StringEnum, TargetKind
 
 
-RIG_COMPONENT_SCHEMA_VERSION = 1
+RIG_COMPONENT_SCHEMA_VERSION = 2
 
 
 class RigComponentType(StringEnum):
@@ -24,6 +24,55 @@ class RigComponentSide(StringEnum):
     CENTER = "CENTER"
     LEFT = "LEFT"
     RIGHT = "RIGHT"
+
+
+class RigDeformationMode(StringEnum):
+    """How a posing control affects the artwork."""
+
+    PARAMETRIC = "PARAMETRIC"
+    DIRECT_BONES = "DIRECT_BONES"
+
+
+class RigParameterChannel(StringEnum):
+    """Generated pose-control transform channels available to outputs."""
+
+    LOC_X = "LOC_X"
+    LOC_Y = "LOC_Y"
+    LOC_Z = "LOC_Z"
+    ROT_X = "ROT_X"
+    ROT_Y = "ROT_Y"
+    ROT_Z = "ROT_Z"
+
+
+@dataclass(frozen=True)
+class RigComponentOutputSpec:
+    binding_uuid: str
+    source_component: RigParameterChannel
+    target_kind: TargetKind
+    target_object_name: str
+    target_name: str
+    target_bone: str = ""
+    input_min: float = -1.0
+    input_max: float = 1.0
+    output_min: float = 0.0
+    output_max: float = 1.0
+    clamp: bool = True
+    enabled: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        data["source_component"] = self.source_component.value
+        data["target_kind"] = self.target_kind.value
+        return data
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "RigComponentOutputSpec":
+        values = dict(data)
+        values["source_component"] = RigParameterChannel(
+            values["source_component"]
+        )
+        values["target_kind"] = TargetKind(values["target_kind"])
+        return cls(**values)
 
 
 class RigOrientationMode(StringEnum):
@@ -84,6 +133,7 @@ class RigComponentSpec:
     component_type: RigComponentType
     source_bones: tuple[str, ...]
     side: RigComponentSide = RigComponentSide.CENTER
+    deformation_mode: RigDeformationMode = RigDeformationMode.PARAMETRIC
     orientation_mode: RigOrientationMode = RigOrientationMode.SOURCE_BONE
     orientation_reference: str = ""
     orientation_euler: tuple[float, float, float] = (0.0, 0.0, 0.0)
@@ -101,6 +151,7 @@ class RigComponentSpec:
     pole_distance: float = 1.0
     use_stretch: bool = False
     end_rotation_mode: RigEndRotationMode = RigEndRotationMode.COPY_WORLD
+    bindings: tuple[RigComponentOutputSpec, ...] = ()
     enabled: bool = True
     schema_version: int = RIG_COMPONENT_SCHEMA_VERSION
 
@@ -108,19 +159,32 @@ class RigComponentSpec:
         data = asdict(self)
         data["component_type"] = self.component_type.value
         data["side"] = self.side.value
+        data["deformation_mode"] = self.deformation_mode.value
         data["orientation_mode"] = self.orientation_mode.value
         data["depth_mode"] = self.depth_mode.value
         data["widget"] = self.widget.value
         data["solver_mode"] = self.solver_mode.value
         data["bend_axis"] = self.bend_axis.value
         data["end_rotation_mode"] = self.end_rotation_mode.value
+        data["bindings"] = [binding.to_dict() for binding in self.bindings]
         return data
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "RigComponentSpec":
         values = dict(data)
+        schema_version = values.get("schema_version", 1)
         values["component_type"] = RigComponentType(values["component_type"])
         values["side"] = RigComponentSide(values.get("side", "CENTER"))
+        values["deformation_mode"] = RigDeformationMode(
+            values.get(
+                "deformation_mode",
+                (
+                    RigDeformationMode.DIRECT_BONES.value
+                    if schema_version < 2
+                    else RigDeformationMode.PARAMETRIC.value
+                ),
+            )
+        )
         values["orientation_mode"] = RigOrientationMode(
             values.get("orientation_mode", "SOURCE_BONE")
         )
@@ -140,5 +204,9 @@ class RigComponentSpec:
         )
         values["allow_rotation"] = tuple(
             values.get("allow_rotation", (True, True, True))
+        )
+        values["bindings"] = tuple(
+            RigComponentOutputSpec.from_dict(binding)
+            for binding in values.get("bindings", ())
         )
         return cls(**values)

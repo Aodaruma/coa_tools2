@@ -64,6 +64,8 @@ def _record_artifact(
     object_name: str = "",
     bone_name: str = "",
     constraint_name: str = "",
+    data_path: str = "",
+    binding_uuid: str = "",
     owned: bool = True,
 ):
     artifact = next(
@@ -75,6 +77,8 @@ def _record_artifact(
             and item.object_name == object_name
             and item.bone_name == bone_name
             and item.constraint_name == constraint_name
+            and item.data_path == data_path
+            and item.binding_uuid == binding_uuid
         ),
         None,
     )
@@ -86,6 +90,8 @@ def _record_artifact(
     artifact.object_name = object_name
     artifact.bone_name = bone_name
     artifact.constraint_name = constraint_name
+    artifact.data_path = data_path
+    artifact.binding_uuid = binding_uuid
     artifact.owned = owned
     return artifact
 
@@ -535,7 +541,12 @@ def _bend_hint_position(upper, lower, frame_matrix, pole_distance):
     return joint + bend_direction.normalized() * distance
 
 
-def ensure_limb_control_bones(armature, component):
+def ensure_limb_control_bones(
+    armature,
+    component,
+    *,
+    needs_pole_override=None,
+):
     reference_name = component.orientation_reference or component.source_bones[-1].bone_name
     existing_frame = find_component_bone(
         armature,
@@ -552,10 +563,22 @@ def ensure_limb_control_bones(armature, component):
         component.component_uuid,
         "bend_control",
     )
+    existing_bend_center = find_component_bone(
+        armature,
+        component.component_uuid,
+        "bend_center",
+    )
     frame_name = existing_frame.name if existing_frame else component.frame_bone
     control_name = existing_control.name if existing_control else component.control_bone
     pole_name = existing_pole.name if existing_pole else component.pole_bone
-    needs_pole = component.use_bend_hint and component.ik_solver_mode == "SPATIAL"
+    bend_center_name = (
+        existing_bend_center.name if existing_bend_center else ""
+    )
+    needs_pole = (
+        component.use_bend_hint and component.ik_solver_mode == "SPATIAL"
+        if needs_pole_override is None
+        else bool(needs_pole_override)
+    )
 
     # Detach managed references before deleting their target EditBone.  Blender
     # 5.x otherwise rebuilds the dependency graph against a missing pose
@@ -601,6 +624,7 @@ def ensure_limb_control_bones(armature, component):
     frame_name = frame_name or f"MCH_{slug}_FRAME"
     control_name = control_name or f"CTRL_{slug}"
     pole_name = pole_name or f"CTRL_{slug}_BEND"
+    bend_center_name = bend_center_name or f"MCH_{slug}_BEND_CENTER"
     frame = armature.data.edit_bones.get(frame_name)
     if frame is not None and existing_frame is None:
         bpy.ops.object.mode_set(mode="POSE")
@@ -630,6 +654,28 @@ def ensure_limb_control_bones(armature, component):
         pole = None
     elif not needs_pole:
         pole = None
+    bend_center = armature.data.edit_bones.get(bend_center_name)
+    if (
+        needs_pole
+        and bend_center is not None
+        and existing_bend_center is None
+    ):
+        bpy.ops.object.mode_set(mode="POSE")
+        raise ComponentArtifactConflict(
+            f"Bone '{bend_center_name}' already exists and is not owned by "
+            "this component."
+        )
+    if needs_pole and bend_center is None:
+        bend_center = armature.data.edit_bones.new(bend_center_name)
+    if (
+        not needs_pole
+        and bend_center is not None
+        and existing_bend_center is not None
+    ):
+        armature.data.edit_bones.remove(bend_center)
+        bend_center = None
+    elif not needs_pole:
+        bend_center = None
 
     matrix = _orientation_matrix(reference, component)
     length = max(reference.length, component.widget_size, 0.1)
@@ -656,6 +702,15 @@ def ensure_limb_control_bones(armature, component):
             pole_matrix,
             max(component.widget_size * 0.6, 0.1),
         )
+        center_matrix = matrix.copy()
+        center_matrix.translation = lower.head
+        bend_center.parent = source_root.parent
+        bend_center.use_connect = False
+        _set_edit_bone_matrix(
+            bend_center,
+            center_matrix,
+            max(component.widget_size * 0.25, 0.05),
+        )
     frame.use_deform = False
     control.use_deform = False
     _tag_owned_bone(armature, frame, component, "control_frame")
@@ -663,14 +718,22 @@ def ensure_limb_control_bones(armature, component):
     if pole is not None:
         pole.use_deform = False
         _tag_owned_bone(armature, pole, component, "bend_control")
+        bend_center.use_deform = False
+        _tag_owned_bone(armature, bend_center, component, "bend_center")
 
     frame_name = frame.name
     control_name = control.name
     pole_name = pole.name if pole is not None else ""
+    bend_center_name = bend_center.name if bend_center is not None else ""
     bpy.ops.object.mode_set(mode="POSE")
     frame_pose = armature.pose.bones[frame_name]
     control_pose = armature.pose.bones[control_name]
     pole_pose = armature.pose.bones.get(pole_name) if pole_name else None
+    bend_center_pose = (
+        armature.pose.bones.get(bend_center_name)
+        if bend_center_name
+        else None
+    )
     _tag_owned_bone(armature, frame_pose.bone, component, "control_frame")
     _tag_owned_bone(armature, control_pose.bone, component, "control_bone")
     _record_artifact(
@@ -694,10 +757,28 @@ def ensure_limb_control_bones(armature, component):
             bone_name=pole_name,
             owned=True,
         )
+        _tag_owned_bone(
+            armature,
+            bend_center_pose.bone,
+            component,
+            "bend_center",
+        )
+        _record_artifact(
+            component,
+            "bend_center",
+            "BONE",
+            bone_name=bend_center_name,
+            owned=True,
+        )
     else:
         _remove_artifacts(
             component,
             role="bend_control",
+            data_type="BONE",
+        )
+        _remove_artifacts(
+            component,
+            role="bend_center",
             data_type="BONE",
         )
     _record_artifact(
@@ -735,7 +816,18 @@ def ensure_limb_control_bones(armature, component):
             visible=True,
             exclusive=True,
         )
+        functions.set_bone_group(
+            None,
+            armature,
+            bend_center_pose,
+            group=COMPONENT_MECHANISM_COLLECTION,
+            theme=None,
+            visible=False,
+            exclusive=True,
+        )
     frame_pose.bone.hide_select = True
+    if bend_center_pose is not None:
+        bend_center_pose.bone.hide_select = True
     component.frame_bone = frame_name
     component.control_bone = control_name
     component.pole_bone = pole_name
@@ -852,6 +944,65 @@ def _fit_pole_angle(armature, owner, ik, expected_joint, initial_angle):
     return best_angle
 
 
+def ensure_bend_distance_constraint(armature, component, pole_pose):
+    """Keep a spatial IK pole on a stable orbit around the rest bend point.
+
+    Targeting the evaluated IK joint would form a dependency cycle: the pole
+    determines the joint while its Limit Distance would also read that joint.
+    The generated mechanism bone instead follows the component hierarchy but
+    remains outside the IK chain.
+    """
+
+    name = f"COA_COMP_{component.component_uuid[:8]}_BendDistance"
+    if pole_pose is None:
+        _remove_artifacts(
+            component,
+            role="bend_distance_constraint",
+            data_type="CONSTRAINT",
+            constraint_name=name,
+        )
+        return None
+
+    center_bone = find_component_bone(
+        armature,
+        component.component_uuid,
+        "bend_center",
+    )
+    center_pose = (
+        armature.pose.bones.get(center_bone.name)
+        if center_bone is not None
+        else None
+    )
+    if center_pose is None:
+        raise ComponentArtifactConflict(
+            "The generated bend-center mechanism bone is missing."
+        )
+
+    constraint = _managed_constraint(
+        pole_pose,
+        component,
+        name,
+        "LIMIT_DISTANCE",
+    )
+    constraint.target = armature
+    constraint.subtarget = center_pose.name
+    constraint.distance = max(
+        (pole_pose.head - center_pose.head).length,
+        0.001,
+    )
+    constraint.limit_mode = "LIMITDIST_ONSURFACE"
+    constraint.use_transform_limit = True
+    _record_artifact(
+        component,
+        "bend_distance_constraint",
+        "CONSTRAINT",
+        bone_name=pole_pose.name,
+        constraint_name=name,
+        owned=True,
+    )
+    return constraint
+
+
 def ensure_limb_constraints(armature, component, control_pose, pole_pose=None):
     owner = armature.pose.bones.get(component.source_bones[-2].bone_name)
     end = armature.pose.bones.get(component.source_bones[-1].bone_name)
@@ -894,6 +1045,7 @@ def ensure_limb_constraints(armature, component, control_pose, pole_pose=None):
         ik.pole_target = None
         ik.pole_subtarget = ""
         ik.pole_angle = 0.0
+    ensure_bend_distance_constraint(armature, component, pole_pose)
     component.constraint_bone = owner.name
     component.constraint_name = name
     _record_artifact(
@@ -970,6 +1122,123 @@ def ensure_limb_constraints(armature, component, control_pose, pole_pose=None):
             owned=True,
         )
     return ik
+
+
+def _remove_owned_direct_constraints(armature, component):
+    had_owned_ik = any(
+        artifact.role == "ik_constraint"
+        and artifact.data_type == "CONSTRAINT"
+        and artifact.owned
+        for artifact in component.artifacts
+    )
+    removable_roles = {
+        "ik_constraint",
+        "end_rotation_constraint",
+        "bend_distance_constraint",
+    }
+    for index in range(len(component.artifacts) - 1, -1, -1):
+        artifact = component.artifacts[index]
+        if (
+            artifact.data_type != "CONSTRAINT"
+            or artifact.role not in removable_roles
+            or not artifact.owned
+        ):
+            continue
+        pose_bone = armature.pose.bones.get(artifact.bone_name)
+        constraint = (
+            pose_bone.constraints.get(artifact.constraint_name)
+            if pose_bone is not None
+            else None
+        )
+        if constraint is not None:
+            pose_bone.constraints.remove(constraint)
+        component.artifacts.remove(index)
+
+    if had_owned_ik:
+        source_names = [
+            reference.bone_name for reference in component.source_bones
+        ]
+        for name in source_names[-1 - component.ik_chain_length : -1]:
+            pose_bone = armature.pose.bones.get(name)
+            if pose_bone is None:
+                continue
+            pose_bone.lock_ik_x = False
+            pose_bone.lock_ik_y = False
+            pose_bone.lock_ik_z = False
+            pose_bone.ik_stretch = 0.0
+    component.constraint_bone = ""
+    component.constraint_name = ""
+    component.pole_bone = ""
+    component.pole_angle = 0.0
+    component.pole_angle_valid = False
+
+
+def ensure_parameter_component(armature, component):
+    """Build a transform input that never poses the source/deform bones."""
+
+    _frame_pose, control_pose, _pole_pose = ensure_limb_control_bones(
+        armature,
+        component,
+        needs_pole_override=False,
+    )
+    _remove_owned_direct_constraints(armature, component)
+    widget = ensure_component_widget(armature, component)
+    control_pose.custom_shape = widget
+    control_pose.rotation_mode = "XYZ"
+    control_pose.use_custom_shape_bone_size = False
+    if hasattr(control_pose, "custom_shape_wire_width"):
+        control_pose.custom_shape_wire_width = 1.5
+    apply_component_channels(
+        control_pose,
+        component,
+        translation=any(component.allow_translation),
+    )
+    ensure_depth_constraint(control_pose, component)
+    for index, reference in enumerate(component.source_bones):
+        data_bone = armature.data.bones.get(reference.bone_name)
+        pose_bone = armature.pose.bones.get(reference.bone_name)
+        if data_bone is None or pose_bone is None:
+            raise ComponentArtifactConflict(
+                f"Source bone '{reference.bone_name}' is missing."
+            )
+        source_shape = pose_bone.custom_shape
+        if (
+            source_shape is not None
+            and source_shape.get("coa_rig_component_uuid")
+            == component.component_uuid
+            and source_shape.get("coa_rig_instance_id")
+            == ensure_rig_instance_id(armature)
+        ):
+            pose_bone.custom_shape = None
+        _ensure_source_is_available(
+            armature,
+            data_bone,
+            component,
+            f"source_bone_{index}",
+        )
+        functions.set_bone_group(
+            None,
+            armature,
+            pose_bone,
+            group=COMPONENT_DEFORM_COLLECTION,
+            theme=None,
+            visible=True,
+            exclusive=False,
+        )
+
+    bend_widget = find_component_object(
+        armature,
+        component.component_uuid,
+        "bend_widget",
+    )
+    if bend_widget is not None:
+        bpy.data.objects.remove(bend_widget, do_unlink=True)
+    _remove_artifacts(
+        component,
+        role="bend_widget",
+        data_type="OBJECT",
+    )
+    return control_pose
 
 
 def ensure_limb_component(armature, component):

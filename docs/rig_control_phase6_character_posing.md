@@ -8,8 +8,9 @@ COA Tools 2のキャラクターポージング機能は、既存のState Graph�
    - Shape Key、Sprite Slot、描画順、表情、顔向き等の「絵の状態」を連続・離散制御する。
    - 現在のSlider、Dial、Rectangle、State Matrix、Binding、StateDataを使用する。
 2. **Pose Rig Component**
-   - FK、IK、IK/FK切替、接地、Space Switch等の「骨格の解法と操作構造」を生成・管理する。
-   - Bone、Constraint、Custom Property、Driver、Widgetを所有する宣言的なComponentとして追加する。
+   - 既定の`PARAMETRIC`では、3D Control Transformを「絵の状態を選ぶ入力」として管理する。
+   - Source / DEF BoneへIKや回転を伝えず、BindingからShape Key等を駆動する。
+   - 旧方式が必要な場合だけ`DIRECT_BONES`を明示的に選ぶ。
 
 両者の役割は異なるが、アニメーターからは一つのリグに見えるようにする。
 
@@ -21,16 +22,31 @@ Animator Input
 │  ├─ Shoulder Corrective
 │  └─ Sprite / Z / Shape Key
 └─ Pose Rig Component
-   ├─ Root / COG
-   ├─ FK Chain
-   ├─ Limb IK
-   ├─ IK/FK Mix
-   ├─ Spine
-   └─ Space / Contact
+   ├─ Root / Part / Limb / Spine Control
+   ├─ Local Move X/Y/Z
+   ├─ Local Rotate X/Y/Z
+   └─ Output Bindings
           │
           ▼
-     DEF Bones + Art State
+     Shape Keys + Art State
 ```
+
+### 1.1 重要な実装方針
+
+COAの平面メッシュへBlenderの3D回転をそのまま適用すると、絵が紙の板のように傾く。これは本機能の既定動作にしない。
+
+```text
+PARAMETRIC（既定）
+CTRL Transform ──Driver──> Shape Key / Constraint Influence
+Source Bone     ─────────> 変更しない
+
+DIRECT_BONES（互換用）
+CTRL Transform ──IK/FK──> Source / DEF Bone
+```
+
+`PARAMETRIC`のControlは、見た目基準の局所座標を持つ非Deform Boneである。移動・回転はControl自身にKeyframeするが、Source BoneのPose Matrix、平面メッシュの奥行き座標、Bone Parent Transformは変化させない。各軸へ何を割り当てるかは、リグ外郭を生成した後に`Shape Key & Property Outputs`から追加できる。
+
+既存Schema v1のComponentは互換性のため`DIRECT_BONES`として読み込む。新規Componentだけを`PARAMETRIC`既定とし、旧リグを暗黙変換しない。
 
 最初の実装対象は、既存のIK機能と現行Rig Control基盤を再利用でき、キャラクター全身の操作性へ直結する次の5種類とする。
 
@@ -155,7 +171,7 @@ COA Tools 2では次へ対応させる。
 | Keyform | StateData / Shape Key / Slot |
 | Deformer hierarchy | CTRL / MCH / DEF + Art hierarchy |
 
-大きな回転をShape Keyの線形補間だけで表現すると、輪郭の縮みや潰れが起きやすい。したがって、画面内の純粋な回転はBone、見かけの奥行き回転はState Control、関節周辺の絵の補正はShape Keyと分担する。
+大きな回転を単一Shape Keyの線形補間だけで表現すると、輪郭の縮みや潰れが起きやすい。そのため見かけの3D回転は、正負方向のDirect Bindingまたは複数点のState Matrixへ分割する。画面内を含めSource Boneの回転を使うかは`DIRECT_BONES`を明示的に選んだ場合だけとする。
 
 参考:
 
@@ -233,7 +249,7 @@ Frameの設定方式:
 | `SOURCE_BONE` | 指定BoneのRest MatrixとRollを使用する |
 | `CUSTOM` | SourceまたはWorld FrameへEuler Offsetを加える |
 
-Boneのlocal Yは必ずBoneの長さ方向になるため、local Zを法線として使うにはBone Rollを含む完全なFrameが必要になる。生成Controlでは非表示の`MCH_<component>_FRAME`を作り、Controlの移動軸、Widget表示、Limitの共通基準にする。Source Bone自身を操作するIn-Place FKでは、現在のRest OrientationをそのままFrameとみなす。
+Boneのlocal Yは必ずBoneの長さ方向になるため、local Zを法線として使うにはBone Rollを含む完全なFrameが必要になる。生成Controlでは非表示の`MCH_<component>_FRAME`を作り、Controlの移動軸、Widget表示、Limitの共通基準にする。Source Bone自身を操作するIn-Place FKは`DIRECT_BONES`互換モードに限定する。
 
 参考:
 
@@ -253,7 +269,7 @@ Boneのlocal Yは必ずBoneの長さ方向になるため、local Zを法線と�
 
 既定値は`LIMITED`とする。カメラ正面からドラッグして無制限に奥へ移動しないよう、local ZだけをLocal SpaceのLimit Locationで制限し、X/Y移動と3軸回転は許可する。Depth範囲は前後で別値にできる。
 
-将来はlocal Z値を`-1..1`へ正規化し、実際の奥行き移動に加えてShape Key、Scale、Sprite State等へBindingする`PARAMETER_ONLY` Modeを検討する。実座標と疑似遠近は別Bindingにし、カメラ方向へ依存するConstraintは使用しない。
+`PARAMETRIC`ではlocal Zを実奥行き移動へ伝えず、入力範囲を正規化してShape Key等へBindingする。実座標による奥行き移動は`DIRECT_BONES`と分離し、カメラ方向へ依存するConstraintは使用しない。
 
 ## 6. `RigComponent`データモデル
 
@@ -374,6 +390,7 @@ upper_DEF
 CTRL_ik_end
 MCH_ik_target
 optional CTRL_bend
+optional MCH_bend_center
 ```
 
 標準設定:
@@ -384,6 +401,8 @@ optional CTRL_bend
 - End Rotation Follow: 任意
 - Bend方向: Rest Poseから決定
 - Pole Target: 通常は非表示
+- Spatial IKでPoleを表示する場合、レスト時の膝／肘位置に置いた
+  `MCH_bend_center`をTargetとする`Limit Distance / On Surface`で軌道を制限する
 
 現行`Set IK` Operatorの処理をComponent Compilerへ移し、次を追加する。
 
@@ -396,7 +415,7 @@ optional CTRL_bend
 - Snap
 - Export Bake Test
 
-カットアウトではPoleを常時表示すると操作量が増えるため、標準はRest PoseのBend方向とし、空間的な曲げ方向を明示したい場合だけ小さな菱形Controlを表示する。
+カットアウトではPoleを常時表示すると操作量が増えるため、標準はRest PoseのBend方向とし、空間的な曲げ方向を明示したい場合だけ小さな菱形Controlを表示する。Pole自身がIK解を決めるため、距離制限のTargetに評価後の膝／肘Boneを直接使わない。IK Chain外の非変形`MCH_bend_center`を使うことで依存循環を避ける。
 
 ### 7.4 `IK_FK_MIX`
 
@@ -775,7 +794,7 @@ Acceptance:
 - 未所有Bone、Constraint、Actionを変更しない。
 - Save / Reload後にComponentとArtifactを解決できる。
 
-### Phase 6B: 基本ポージング
+### Phase 6B: Direct Bone Prototype（互換用）
 
 - `ROOT`
 - `FK_CHAIN`
@@ -788,9 +807,31 @@ Acceptance:
 
 - Control Frameに沿って3軸操作でき、設定したDepth Modeだけが局所法線移動を制限する。
 - 腕・脚の2-Bone ChainをIK Targetから安定して操作できる。
-- 現在のFK Poseを維持して追加でき、既存FK ActionはPhase 6Cの変換なしに上書きしない。
+- Spatial IKのPoleがレスト膝／肘を中心とする一定半径上を移動し、遠方へ発散しない。
+- 現在のFK Poseを維持して追加でき、変換なしに既存FK Actionを上書きしない。
 
-### Phase 6C: IK/FK
+この方式はSchema v1の互換用`DIRECT_BONES`として維持し、新規Componentの既定にはしない。
+
+### Phase 6C: Parametric Pose Output
+
+- 全Component用の独立した非Deform Control / Frame
+- `PARAMETRIC`を新規作成時の既定値にする
+- Source BoneへConstraint、Custom Shape、Channel Lockを追加しない
+- `LOC_X / LOC_Y / LOC_Z`
+- `ROT_X / ROT_Y / ROT_Z`
+- Shape Key / Constraint Influence Binding
+- Driver UUID所有識別、Target Preflight、Rollback、Orphan回収
+- 平面維持とSave / Reloadの検証
+
+Acceptance:
+
+- Controlを3D移動・回転してもSource BoneのPose Matrixが変化しない。
+- 評価後メッシュの奥行き座標が基準平面から変化しない。
+- 指定したShape Keyだけが入力範囲に従って変化する。
+- Bindingを後から追加・削除でき、UpdateでDriverが増殖・残留しない。
+- 構築後の`PARAMETRIC` / `DIRECT_BONES`変更は直接許可せず、専用変換処理までComponentを作り直す。
+
+### Phase 6D: Direct Bone IK/FK（任意機能）
 
 - Constraint Influenceによる単一Chain Mix
 - 1D Slider / Global Property
@@ -805,7 +846,7 @@ Acceptance:
 - 0、0.5、1のMixでNaN、Flip、極端なScaleがない。
 - 切替後も既存Actionへ正しくKeyframeできる。
 
-### Phase 6D: 胴体と補正
+### Phase 6E: 胴体と補正Preset
 
 - `SPINE_FK`
 - `CLAVICLE_SHOULDER`
@@ -818,7 +859,7 @@ Acceptance:
 - Bone PoseとShape Key補正を独立・合成してKeyframeできる。
 - Corrective BindingからConstraint解法へ循環しない。
 
-### Phase 6E: Spaceと接触
+### Phase 6F: Spaceと接触
 
 - Space Switch
 - Switch and Snap
@@ -827,7 +868,7 @@ Acceptance:
 - Foot Roll
 - 必要箇所だけShrinkwrap
 
-### Phase 6F: 柔軟ChainとPose Library
+### Phase 6G: 柔軟ChainとPose Library
 
 - FK / B-Bone / Spline IK Preset
 - Hair / Tail / Cloth Chain
@@ -836,27 +877,27 @@ Acceptance:
 
 ### 14.1 現在の実装範囲
 
-Phase 6AとPhase 6Bの最初のVertical Sliceとして、次を実装した。
+Phase 6A〜6Cとして、次を実装した。
 
-- `ROOT`、`FK_CHAIN`、`SPINE_FK`の既存Boneを維持するIn-place Control
-- `LIMB_IK`の非Deform `MCH Frame`、IK Target、任意のBend Control
+- 新規Componentの既定を`PARAMETRIC`、Schema v1互換を`DIRECT_BONES`として分離
+- `ROOT`、`FK_CHAIN`、`SPINE_FK`、`LIMB_IK`すべてに独立した非Deform Controlを生成
+- `LIMB_IK`はParametric時にはTarget入力として扱い、Blender IK Constraintを生成しない
 - `SOURCE_BONE`、`WORLD_VIEW`、`CUSTOM`による見た目基準の局所座標
 - 局所X/Yを絵の面、局所Zを法線・奥行きとして扱う`Plane / Limited Depth / Free 3D`
-- 全軸回転と、`Spatial / Planar` IK
-- Root、FK、Hand、Foot、Square、Bend用の無着色Wire Widget
-- 空間IK追加時に現在姿勢を維持するPole角の自動校正と永続化
-- Component、Bone、Constraint、Widgetの所有タグと冪等Update
-- 現在のFK Poseを維持するIK追加、失敗時Rollback、Armature複製時のInstance分離
-- 別ClipやNLAを含む既存Limb FK Actionの検出と、Phase 6C変換前の安全な拒否
+- ローカル移動3軸・回転3軸からShape Key / Constraint Influenceへの後付けBinding
+- Binding UUIDによるDriver所有識別、Target重複Preflight、Rollback、Rename後を含むOrphan回収
+- Component、Bone、Driver、Widgetの所有タグと冪等Update
+- Direct Bone互換モードのIK、Pole校正、膝／肘中心のPole距離制限、既存Action保護
 - Active BoneからComponent UIを選択する同期
 
-次は未実装であり、Phase 6C以降で扱う。
+次は未実装であり、後続Phaseで扱う。
 
 - IK/FK Mixと双方向Snap
 - 既存Limb FK ActionからIK Control Actionへの変換・Bake
 - 左右対称生成
 - Clavicle / Shoulder、Foot Roll、Space Switch
-- Bone TransformからState Matrix、Shape Key、Slot等への補正Binding
+- Component Transformを入力とする複数点State Matrix
+- Sprite Slot、Z、任意Property等の追加Output
 - Component用Name Label、Pose Asset、Export Bake
 
 ### 14.2 実装サンプル
@@ -864,19 +905,18 @@ Phase 6AとPhase 6Bの最初のVertical Sliceとして、次を実装した。
 `scripts/blender_rig_phase6_sample_character.py`は、平面メッシュで構成した簡易キャラクターへ次を適用する。
 
 - Root × 1
-- Spine FK × 1
-- Spatial Arm IK × 2
-- Spatial Leg IK × 2
+- Body Parameter × 1
+- Parametric Limb Target × 4
 - 正面姿勢と、奥行き移動・3軸回転を含む左右2姿勢
 - Frame 1、13、25のAction Key
 
-スクリプトは各Componentの生成、Action作成、IKによる手先移動、Depth Limitを検証し、`%TEMP%\coa_tools2-validation`へ`.blend`と3枚のPNGを出力する。生成物は検証用でありRepositoryへCommitしない。
+スクリプトはControlだけにActionを作成し、Source Bone不変、IK / Copy Rotation不在、Shape Key値の変化、評価後メッシュの平面維持を検証する。`%TEMP%\coa_tools2-validation`へ`.blend`と3枚のPNGを出力する。生成物は検証用でありRepositoryへCommitしない。
 
 ## 15. 最初のVertical Slice
 
 最初の実コード成果物は、次へ限定する。
 
-> 選択した上腕・前腕・手、または大腿・脛・足のChainから、管理された2D Limb Componentを作成する。既存Boneを維持し、IK Target、任意のBend Control、IK/FK Sliderを生成する。IK/FK両方向のSnap、所有タグ、Validate / Repair、Save / Reload、Export Bakeを備え、同じ定義の再Compileで生成物を増殖させない。
+> 選択した上腕・前腕・手、または大腿・脛・足のChainから、管理されたParametric Limb Targetを作成する。Source Boneを変更せず、Controlのローカル移動・回転からShape Key等へ後付けBindingできる。同じ定義の再CompileでBone、Driver、Widgetを増殖させず、Save / Reload後も出力を復元できる。
 
 このVertical Sliceは、次を一度に検証できる。
 

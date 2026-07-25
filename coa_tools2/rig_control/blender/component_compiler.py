@@ -10,6 +10,15 @@ from .component_artifacts import (
     ComponentArtifactConflict,
     ensure_in_place_component,
     ensure_limb_component,
+    ensure_parameter_component,
+    find_component_bone,
+)
+from .component_outputs import (
+    ComponentOutputError,
+    capture_component_output_state,
+    preflight_component_outputs,
+    reconcile_component_outputs,
+    restore_component_output_state,
 )
 from .component_safety import (
     ComponentPreflightError,
@@ -50,7 +59,11 @@ def _validate_blender_sources(armature, component):
 def _validate_limb_animation_conversion(armature, component):
     """Do not silently override existing FK animation before Phase 6C."""
 
-    if component.component_type != "LIMB_IK" or component.artifacts:
+    if (
+        component.deformation_mode != "DIRECT_BONES"
+        or component.component_type != "LIMB_IK"
+        or component.artifacts
+    ):
         return
     animation_data = armature.animation_data
     if animation_data is None:
@@ -95,9 +108,57 @@ def _validate_limb_animation_conversion(armature, component):
     ):
         raise RigComponentCompileError(
             "The selected limb already has FK animation. "
-            "IK/FK conversion and baking are planned for Phase 6C; "
+            "Direct Bone IK/FK conversion and baking are not implemented; "
             "the source animation was left unchanged."
         )
+
+
+def _built_deformation_mode(component):
+    if component.compiled_deformation_mode:
+        return component.compiled_deformation_mode
+    if not component.artifacts:
+        return ""
+    if any(
+        artifact.role == "ik_constraint"
+        for artifact in component.artifacts
+    ):
+        return "DIRECT_BONES"
+    if any(
+        artifact.role == "control_frame"
+        for artifact in component.artifacts
+    ):
+        return "PARAMETRIC"
+    return "DIRECT_BONES"
+
+
+def _validate_deformation_mode_transition(component):
+    built_mode = _built_deformation_mode(component)
+    if built_mode and built_mode != component.deformation_mode:
+        raise RigComponentCompileError(
+            "Changing Artwork Deformation after a component is built is not "
+            "supported. Revert the mode or create a new component; a "
+            "transactional conversion operator is planned for a later phase."
+        )
+
+
+def _resolve_generated_bone_names(armature, component):
+    for role, field_name in (
+        ("control_frame", "frame_bone"),
+        ("control_bone", "control_bone"),
+        ("bend_control", "pole_bone"),
+    ):
+        bone = find_component_bone(
+            armature,
+            component.component_uuid,
+            role,
+        )
+        if bone is not None:
+            previous_name = getattr(component, field_name)
+            if previous_name and previous_name != bone.name:
+                for artifact in component.artifacts:
+                    if artifact.bone_name == previous_name:
+                        artifact.bone_name = bone.name
+            setattr(component, field_name, bone.name)
 
 
 def compile_component(armature, component):
@@ -105,11 +166,17 @@ def compile_component(armature, component):
         raise RigComponentCompileError(
             "Character posing components require an Armature SpriteObject."
         )
+    _validate_deformation_mode_transition(component)
+    _resolve_generated_bone_names(armature, component)
     issues = validate_component_spec(component_to_spec(component))
     if issues:
         raise RigComponentCompileError("; ".join(issue.message for issue in issues))
     _validate_blender_sources(armature, component)
     _validate_limb_animation_conversion(armature, component)
+    try:
+        preflight_component_outputs(armature, component)
+    except ComponentOutputError as exc:
+        raise RigComponentCompileError(str(exc)) from exc
     with preserve_component_context(armature):
         try:
             preflight_component_artifacts(armature, component)
@@ -122,8 +189,11 @@ def compile_component(armature, component):
             raise RigComponentCompileError(str(exc)) from exc
 
         snapshot = capture_component_build_state(armature, component)
+        output_snapshot = capture_component_output_state(armature, component)
         try:
-            if component.component_type in {"ROOT", "FK_CHAIN", "SPINE_FK"}:
+            if component.deformation_mode == "PARAMETRIC":
+                primary = ensure_parameter_component(armature, component)
+            elif component.component_type in {"ROOT", "FK_CHAIN", "SPINE_FK"}:
                 if component.build_mode != "IN_PLACE":
                     raise RigComponentCompileError(
                         "Generated Root/FK chains are not available in this phase."
@@ -136,23 +206,47 @@ def compile_component(armature, component):
                 raise RigComponentCompileError(
                     f"Unsupported pose component: {component.component_type}."
                 )
+            reconcile_component_outputs(armature, component)
         except Exception as exc:
+            structural_rollback_error = None
             try:
                 rollback_component_build(armature, component, snapshot)
             except Exception as rollback_error:
+                structural_rollback_error = rollback_error
+            output_rollback_error = None
+            try:
+                # Restore generated bones/constraints first. Some output
+                # FCurves target a component-owned constraint data path that
+                # does not exist until the structural rollback is complete.
+                restore_component_output_state(
+                    armature,
+                    component,
+                    output_snapshot,
+                )
+            except Exception as rollback_error:
+                output_rollback_error = rollback_error
+            if structural_rollback_error is not None:
                 raise RigComponentCompileError(
-                    f"{exc}; rollback also failed: {rollback_error}"
+                    f"{exc}; rollback also failed: "
+                    f"{structural_rollback_error}"
+                ) from exc
+            if output_rollback_error is not None:
+                raise RigComponentCompileError(
+                    f"{exc}; output rollback also failed: "
+                    f"{output_rollback_error}"
                 ) from exc
             if isinstance(exc, RigComponentCompileError):
                 raise
-            if isinstance(exc, ComponentArtifactConflict):
+            if isinstance(exc, (ComponentArtifactConflict, ComponentOutputError)):
                 raise RigComponentCompileError(str(exc)) from exc
             raise
     component.needs_rebuild = False
     component.last_error = ""
+    component.compiled_deformation_mode = component.deformation_mode
     return {
         "component_uuid": component.component_uuid,
         "primary_control_bone": primary.name,
         "frame_bone": component.frame_bone,
         "artifacts": len(component.artifacts),
+        "bindings": len(component.bindings),
     }

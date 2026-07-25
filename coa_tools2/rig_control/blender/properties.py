@@ -193,7 +193,13 @@ class COATOOLS2_PG_RigBinding(bpy.types.PropertyGroup):
         items=(
             ("X", "X", "Control local X"),
             ("Y", "Y", "Control local Y"),
-            ("ROTATION", "Rotation", "Control local rotation"),
+            ("ROTATION", "Rotation Z (Legacy)", "Control local Z rotation"),
+            ("LOC_X", "Location X", "Control local X location"),
+            ("LOC_Y", "Location Y", "Control local Y location"),
+            ("LOC_Z", "Location Z", "Control local Z / visual depth"),
+            ("ROT_X", "Rotation X", "Control local X rotation"),
+            ("ROT_Y", "Rotation Y", "Control local Y rotation"),
+            ("ROT_Z", "Rotation Z", "Control local Z rotation"),
         ),
         default="X",
     )
@@ -276,6 +282,8 @@ class COATOOLS2_PG_RigComponentArtifact(bpy.types.PropertyGroup):
     object_name: StringProperty()
     bone_name: StringProperty()
     constraint_name: StringProperty()
+    data_path: StringProperty()
+    binding_uuid: StringProperty()
     owned: BoolProperty(default=True)
 
 
@@ -286,10 +294,14 @@ class COATOOLS2_PG_RigComponent(bpy.types.PropertyGroup):
     label: StringProperty(default="Pose Component", update=_mark_component_dirty)
     component_type: EnumProperty(
         items=(
-            ("ROOT", "Root", "Root or center-of-gravity posing control"),
-            ("FK_CHAIN", "FK Chain", "Directly pose one or more source bones"),
-            ("LIMB_IK", "Limb IK", "Three-bone limb with an oriented IK target"),
-            ("SPINE_FK", "Spine FK", "Multi-bone FK spine component"),
+            ("ROOT", "Root / Body", "Root or body parameter control"),
+            ("FK_CHAIN", "Part Rotation", "Part-oriented parameter or direct FK control"),
+            (
+                "LIMB_IK",
+                "Limb Target / IK",
+                "Parametric limb target or legacy three-bone direct IK",
+            ),
+            ("SPINE_FK", "Spine / Body", "Body parameter or direct FK component"),
         ),
         default="LIMB_IK",
         update=_mark_component_dirty,
@@ -302,6 +314,32 @@ class COATOOLS2_PG_RigComponent(bpy.types.PropertyGroup):
         ),
         default="CENTER",
         update=_mark_component_dirty,
+    )
+    deformation_mode: EnumProperty(
+        name="Artwork Deformation",
+        items=(
+            (
+                "PARAMETRIC",
+                "Parametric (Shape Keys)",
+                "Use generated controls only as parameter inputs; keep source bones unchanged",
+            ),
+            (
+                "DIRECT_BONES",
+                "Direct Bones (Legacy)",
+                "Apply FK or IK directly to source bones and their artwork",
+            ),
+        ),
+        # Version 1 files did not store this field and used direct deformation.
+        # New components explicitly opt into PARAMETRIC in the Add operator.
+        default="DIRECT_BONES",
+        update=_mark_component_dirty,
+    )
+    compiled_deformation_mode: StringProperty(
+        description=(
+            "Internal record used to prevent unsafe in-place conversion "
+            "between parameter and direct-bone rigs"
+        ),
+        options={"HIDDEN"},
     )
     source_bones: CollectionProperty(type=COATOOLS2_PG_RigComponentBoneRef)
     source_bones_index: IntProperty(default=0, min=0)
@@ -472,6 +510,8 @@ class COATOOLS2_PG_RigComponent(bpy.types.PropertyGroup):
     pole_angle_valid: BoolProperty(default=False)
     constraint_bone: StringProperty()
     constraint_name: StringProperty()
+    bindings: CollectionProperty(type=COATOOLS2_PG_RigBinding)
+    bindings_index: IntProperty(default=0, min=0)
     artifacts: CollectionProperty(type=COATOOLS2_PG_RigComponentArtifact)
     artifacts_index: IntProperty(default=0, min=0)
     enabled: BoolProperty(default=True, update=_mark_component_dirty)
@@ -856,6 +896,7 @@ def component_to_spec(component) -> RigComponentSpec:
             "component_type": component.component_type,
             "source_bones": tuple(ref.bone_name for ref in component.source_bones),
             "side": component.side,
+            "deformation_mode": component.deformation_mode,
             "orientation_mode": component.orientation_mode,
             "orientation_reference": component.orientation_reference,
             "orientation_euler": tuple(component.orientation_euler),
@@ -873,6 +914,27 @@ def component_to_spec(component) -> RigComponentSpec:
             "pole_distance": component.pole_distance,
             "use_stretch": component.use_stretch,
             "end_rotation_mode": component.end_rotation_mode,
+            "bindings": tuple(
+                {
+                    "binding_uuid": binding.binding_uuid,
+                    "source_component": binding.source_component,
+                    "target_kind": binding.target_kind,
+                    "target_object_name": (
+                        binding.target_object.name
+                        if binding.target_object is not None
+                        else ""
+                    ),
+                    "target_bone": binding.target_bone,
+                    "target_name": binding.target_name,
+                    "input_min": binding.input_min,
+                    "input_max": binding.input_max,
+                    "output_min": binding.output_min,
+                    "output_max": binding.output_max,
+                    "clamp": binding.clamp,
+                    "enabled": binding.enabled,
+                }
+                for binding in component.bindings
+            ),
             "enabled": component.enabled,
         }
     )

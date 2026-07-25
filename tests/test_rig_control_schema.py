@@ -30,6 +30,8 @@ from rig_control.schema import (  # noqa: E402
     validate_state_points,
 )
 from rig_control.component_schema import (  # noqa: E402
+    RigComponentOutputSpec,
+    RigDeformationMode,
     RigComponentSide,
     RigComponentSpec,
     RigComponentType,
@@ -38,6 +40,7 @@ from rig_control.component_schema import (  # noqa: E402
     RigDepthMode,
     RigEndRotationMode,
     RigOrientationMode,
+    RigParameterChannel,
     RigSolverMode,
 )
 from rig_control.component_validation import validate_component_spec  # noqa: E402
@@ -96,6 +99,15 @@ class RigControlSchemaTests(unittest.TestCase):
         self.assertEqual(spec, BindingSpec.from_dict(spec.to_dict()))
 
     def test_rig_component_round_trip_preserves_visual_axes(self):
+        output = RigComponentOutputSpec(
+            binding_uuid="component-output-1",
+            source_component=RigParameterChannel.ROT_Y,
+            target_kind=TargetKind.SHAPE_KEY_VALUE,
+            target_object_name="HandArt",
+            target_name="TurnY",
+            input_min=-0.75,
+            input_max=0.75,
+        )
         spec = RigComponentSpec(
             component_uuid="component-arm-l",
             semantic_id="limb.arm.l",
@@ -103,6 +115,7 @@ class RigControlSchemaTests(unittest.TestCase):
             component_type=RigComponentType.LIMB_IK,
             source_bones=("upper_arm.L", "forearm.L", "hand.L"),
             side=RigComponentSide.LEFT,
+            deformation_mode=RigDeformationMode.PARAMETRIC,
             orientation_mode=RigOrientationMode.SOURCE_BONE,
             orientation_reference="hand.L",
             depth_mode=RigDepthMode.LIMITED,
@@ -114,9 +127,22 @@ class RigControlSchemaTests(unittest.TestCase):
             use_bend_hint=True,
             pole_distance=1.25,
             end_rotation_mode=RigEndRotationMode.COPY_LOCAL,
+            bindings=(output,),
         )
         self.assertEqual(spec, RigComponentSpec.from_dict(spec.to_dict()))
         self.assertFalse(validate_component_spec(spec))
+
+    def test_version_one_component_defaults_to_legacy_direct_deformation(self):
+        data = {
+            "schema_version": 1,
+            "component_uuid": "legacy-component",
+            "semantic_id": "legacy.root",
+            "display_name": "Legacy Root",
+            "component_type": "ROOT",
+            "source_bones": ("root",),
+        }
+        spec = RigComponentSpec.from_dict(data)
+        self.assertEqual(RigDeformationMode.DIRECT_BONES, spec.deformation_mode)
 
     def test_rig_component_validation_rejects_bad_limb_and_depth(self):
         spec = RigComponentSpec(

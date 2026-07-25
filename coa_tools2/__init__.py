@@ -327,6 +327,8 @@ classes = (
     rig_control_ui.COATOOLS2_PT_RigControls,
     rig_component_operators.COATOOLS2_OT_AddRigComponent,
     rig_component_operators.COATOOLS2_OT_UpdateRigComponent,
+    rig_component_operators.COATOOLS2_OT_AddComponentBinding,
+    rig_component_operators.COATOOLS2_OT_RemoveComponentBinding,
     rig_component_ui.COATOOLS2_UL_RigComponents,
     rig_component_ui.COATOOLS2_PT_RigComponents,
     # exporter
