@@ -653,7 +653,15 @@ Rectangle系はAdd Rig上で一つにまとめるが、内部評価は分離す�
 
 この時点で、Node、Port、Connection、Registry、Cycle Validation、Canonical JSONの必要範囲を決める。既存のPublic Control ABIとAnimationは維持する。
 
-### Phase 6以降: 別Epic
+### Phase 6: Character Posing Rig Components
+
+State Graphとは別に、Root、FK、IK、IK/FK切替、Spine等の骨格ポージング構造を、型付き`RigComponent`として導入する。`RigControl`、Widget、Binding、所有タグは共有するが、骨格構造をState Pointへ埋め込まない。
+
+最初のVertical Sliceは、選択した2-Bone Chainから管理された2D Limb IKを生成し、単一ChainのIK/FK Mix、両方向Snap、Validate / Repair、Export Bakeまでを成立させる。
+
+詳細は[Phase 6: Character Posing Rig Components 設計案](rig_control_phase6_character_posing.md)を参照する。
+
+### Phase 7以降: 別Epic
 
 - Rig Variant / Atlas構成
 - Generic Node Editor
@@ -806,6 +814,7 @@ Forward Rigの意味的Controlが安定し、評価関数をBlenderなしでも�
 
 - [2Dリグコントローラー調査・設計案](rig_control_design.md)
 - [Phase 5: Matrix DomainとRig Name表示](rig_control_phase5_matrix_domain.md)
+- [Phase 6: Character Posing Rig Components 設計案](rig_control_phase6_character_posing.md)
 - [Issue #47: Add Sliders for Shapekeys and Advanced 2D Rigging Features](https://github.com/Aodaruma/coa_tools2/issues/47)
 - [Issue #62: Slot index causes Blender to crash during rendering](https://github.com/Aodaruma/coa_tools2/issues/62)
 - [Issue #66: StateData for smooth transition animation](https://github.com/Aodaruma/coa_tools2/issues/66)

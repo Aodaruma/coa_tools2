@@ -623,3 +623,5 @@ Slot Indexは[#62](https://github.com/Aodaruma/coa_tools2/issues/62)のRender Cr
 > 同一SpriteObject内に `GLOBAL_CTRL`、1D SliderのHandle/Track Bone、円Tipと両端円+矩形バーを合成する共有Geometry Nodes Widgetを生成し、Local Limit Location付きHandleから、一つのShape KeyまたはConstraint Influenceへ再生成可能なDriver Bindingを作る。
 
 この最小成果物で、パラメトリックな見た目、操作感、Driver安定性、保存、複製、Render、Export Bakeの全経路を検証できる。その後に2D、Dial、任意サイズのState Matrixを追加する。
+
+骨格ポージング用のRoot、FK、IK、IK/FK切替、Spine等は、State Graphへ直接追加せず、同じControl / Widget / Binding基盤を共有する`RigComponent`として扱う。詳細は[Phase 6: Character Posing Rig Components 設計案](rig_control_phase6_character_posing.md)を参照する。
