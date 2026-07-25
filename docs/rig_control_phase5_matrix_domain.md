@@ -83,13 +83,13 @@ Follow PathとClamp Toは単一Curve上の1次元位置には適するが、分�
 
 ## 5. UI
 
-State Matrixの`Continuous States`内へ次を表示する。
+State Matrixの`Behavior & Outputs > State Targets`内へ次を表示する。
 
 - `Full`: 全Cellを一括有効化
 - `Grid Only`: 全Cellを一括無効化
 - Cell Grid Button: 各4点区間を個別切替
 
-Cell Buttonは上段から表示するが、保存順は下段からのrow-majorとする。Button操作時にWidget、Domain Target、Constraintを即時再Compileする。
+Cell Buttonは上段から表示するが、保存順は下段からのrow-majorとする。Button操作後のWidget、Domain Target、Constraint更新は`Live Preview`の設定に従う。
 
 Add Rigの`State Matrix`では作成時に`Full`または`Grid Only`を選べる。従来の`Grid Rails`は後方互換の通常2D Controlとして残し、State Matrix側では任意行列のno-mixを同じMatrix Domainで作成できる。
 
@@ -100,7 +100,7 @@ Add Rigの`State Matrix`では作成時に`Full`または`Grid Only`を選べる
 - `NAME_<semantic_id>`: `GLOBAL_CTRL`配下の非Deform Name Bone
 - `TXT_<semantic_id>`: Name BoneへBone ParentしたFONT Object
 
-TextはControlの下部中央へ配置し、Renderには含めない。`label`、`show_name`、`name_size`、`name_offset`をUpdate Rig ControlとRepairで同期する。
+TextはControlの下部中央へ配置し、Renderには含めない。`label`、`show_name`、`name_size`、`name_offset`をLive Preview、Apply Changes、Repairで同期する。既定の`name_offset`は0.75とし、Widget外郭から十分に離して表示する。
 
 配置基準はControl種別ごとの表示下端とする。
 
@@ -111,13 +111,37 @@ TextはControlの下部中央へ配置し、Renderには含めない。`label`�
 
 Name BoneとTextにも`control_uuid`とArtifact Roleを保存し、Validationで欠損・親子関係・表示文字列を確認する。
 
-## 7. 既知の操作特性
+## 7. 編集・反映フロー
+
+Tip、Base、Name Boneのいずれかを選択すると、Nパネルの対応するRig Controlを自動選択する。
+
+`Live Preview`はControl単位で保存する。
+
+- ON: Definition変更から短い遅延の後に自動Compileする。連続した数値編集は最後の変更へまとめる。
+- OFF: Definitionだけを変更し、生成済みBone、Widget、Constraint、Driverには触れない。`Apply Changes`を押した時だけCompileする。
+- 自動Compileに失敗した場合: エラーを表示し、`Rebuild Now`で再試行できる。
+
+サイズと表示設定は折り畳み可能な`Size & Display`へまとめる。MatrixのWidth / Heightは同じ幅の入力欄で並べるが、長方形Matrixを維持するため値自体は独立とする。
+
+`Behavior & Outputs`は、移動領域と出力先を同じ作業順で確認できるよう一つのUIセクションへまとめる。ただしデータの役割は分離する。
+
+- `Mix Domain`: Tipが移動可能な領域と、4点Mixを許可するCellを定義する。
+- `State Targets`: 各State PointをShape Keyへ割り当て、Matrix Weightで連続補間する。
+- `Direct Bindings`: X / Y / Angleの一つのSource Channelを、Shape KeyまたはConstraint Influenceへ直接写像する。
+- `Target Object`: Shape KeyまたはConstraintを所有するObject。
+- `Target Bone`: Constraint BindingでConstraintを所有するPose Bone。
+- `Shape Key / Constraint`: `Target Object`または`Target Bone`内の最終的なプロパティ名。内部データ名は互換性維持のため`target_name`とする。
+- `Output Range`: Control入力域を出力最小・最大へ写像し、Clampが有効なら範囲外を切り詰める。
+
+Mix Domainは「どこへ動けるか」、Binding / State Targetsは「動いた結果をどこへ出すか」であり、永続データとして統合しない。UI上では同じ`Behavior & Outputs`内に配置し、混同を避ける。
+
+## 8. 既知の操作特性
 
 ShrinkwrapにはLimit Locationの`Affect Transform`に相当するRaw Transform補正がない。禁止Cell内部でBoneを大きくドラッグした場合、保存されたLocationと評価後の見た目が一時的に異なることがある。また禁止Cellの等距離線では最寄Railが切り替わる。
 
 標準ConstraintでMatrix Domainを一般化する初期実装として許容し、触感上の問題が大きい場合は、将来の専用Gizmoで直前Railを保持するHysteresisを検討する。
 
-## 8. 検証条件
+## 9. 検証条件
 
 - 2×2 `NO_MIX`: Cell内部入力がRail中心へ投影され、非0 Weightが最大2
 - 2×3 `PARTIAL`: 下Cell内部は4点Mix、上Cell内部はRail上2点Mix
@@ -127,9 +151,11 @@ ShrinkwrapにはLimit Locationの`Affect Transform`に相当するRaw Transform�
 - Resizeで重なるCell Maskを維持
 - Update / Repairを繰り返してBone、Text、Widget、Targetが増殖しない
 - Save / Reload後にCell Mask、Driver、Name Textを維持
+- Live Preview ONでは遅延自動反映、OFFではApply Changesまで生成物を維持
+- Tip / Base / Name Bone選択時に対応Controlを選択
 - Blender 4.5 / 5.0 / 5.1で同じ結果になる
 
-## 9. 参考
+## 10. 参考
 
 - [Blender: Shrinkwrap Constraint](https://docs.blender.org/manual/en/5.0/animation/constraints/relationship/shrinkwrap.html)
 - [Blender: Follow Path Constraint](https://docs.blender.org/manual/en/5.0/animation/constraints/relationship/follow_path.html)

@@ -56,6 +56,7 @@ def compile_control(armature, control, origin=None):
         ensure_binding_driver(armature, control, binding)
     state_driver_count = ensure_state_drivers(armature, control)
     control.needs_rebuild = False
+    control.auto_rebuild_error = ""
     return {
         "display_bone": display_pose.name,
         "control_bone": control_pose.name,

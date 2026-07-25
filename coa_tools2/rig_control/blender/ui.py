@@ -8,6 +8,28 @@ from ... import functions
 from .properties import get_rig_data
 
 
+def sync_control_index_from_active_bone(armature, rig_data):
+    """Select the Rig Control owned by the active Tip, Base, or Name bone."""
+
+    if rig_data is None:
+        return False
+    active_bone = armature.data.bones.active
+    if active_bone is None:
+        return False
+    if active_bone.get("coa_rig_artifact_role") not in {
+        "control_bone",
+        "display_bone",
+        "name_bone",
+    }:
+        return False
+    control_uuid = active_bone.get("coa_rig_control_uuid", "")
+    for index, control in enumerate(rig_data.rig_controls):
+        if control.control_uuid == control_uuid:
+            rig_data.rig_controls_index = index
+            return True
+    return False
+
+
 class COATOOLS2_UL_RigControls(bpy.types.UIList):
     def draw_item(
         self,
@@ -37,7 +59,10 @@ class COATOOLS2_UL_RigBindings(bpy.types.UIList):
     ):
         target = item.target_object.name if item.target_object else "Missing"
         suffix = item.target_name or "Missing"
-        layout.label(text=f"{target} / {suffix}", icon="DRIVER")
+        layout.label(
+            text=f"{item.source_component} → {target} / {suffix}",
+            icon="DRIVER",
+        )
 
 
 class COATOOLS2_UL_RigStatePoints(bpy.types.UIList):
@@ -134,54 +159,103 @@ class COATOOLS2_PT_RigControls(bpy.types.Panel):
         box.prop(control, "control_type")
         if control.control_type == "SLIDER_1D":
             box.prop(control, "axis")
-            box.prop(control, "width")
         elif control.control_type == "POINT_2D_RECT":
-            row = box.row(align=True)
-            row.prop(control, "width")
-            row.prop(control, "height")
             if control.state_mode == "MATRIX_2D":
                 box.label(text="Rectangle Mode: State Matrix", icon="MESH_GRID")
             else:
                 box.prop(control, "rectangle_mode")
-            if (
-                control.state_mode != "MATRIX_2D"
-                and control.rectangle_mode == "GRID"
-            ):
-                row = box.row(align=True)
-                row.prop(control, "grid_columns")
-                row.prop(control, "grid_rows")
-        elif control.control_type == "POINT_2D_CIRCLE":
-            box.prop(control, "radius")
         elif control.control_type == "DIAL":
-            box.prop(control, "radius")
             row = box.row(align=True)
             row.prop(control, "angle_min")
             row.prop(control, "angle_max")
-        widget_box = box.box()
-        widget_box.label(text="Widget Style")
-        row = widget_box.row(align=True)
-        row.prop(control, "tip_radius")
-        row.prop(control, "node_radius")
-        widget_box.prop(control, "bar_width")
-        widget_box.prop(control, "widget_backend")
-        name_box = box.box()
-        name_box.label(text="Rig Name")
-        name_box.prop(control, "show_name")
-        if control.show_name:
-            row = name_box.row(align=True)
-            row.prop(control, "name_size")
-            row.prop(control, "name_offset")
-        name_box.label(text=f"Name Bone: {control.name_bone or 'Pending'}")
-        box.label(text=f"Control Bone: {control.control_bone}")
-        box.operator("coa_tools2.update_rig_control", icon="FILE_REFRESH")
-        if control.needs_rebuild:
-            box.label(text="Definition changed; rebuild required.", icon="ERROR")
 
-        bindings_box = layout.box()
-        bindings_box.label(text="Bindings")
+        display_header, display_body = box.panel(
+            "coa_tools2_rig_control_size_display",
+            default_closed=True,
+        )
+        display_header.label(text="Size & Display", icon="PREFERENCES")
+        if display_body:
+            if control.control_type == "SLIDER_1D":
+                display_body.prop(control, "width")
+            elif control.control_type == "POINT_2D_RECT":
+                # Equal-width fields keep Matrix dimensions easy to compare,
+                # while still allowing the rectangular reference designs.
+                row = display_body.row(align=True)
+                row.prop(control, "width")
+                row.prop(control, "height")
+                if (
+                    control.state_mode != "MATRIX_2D"
+                    and control.rectangle_mode == "GRID"
+                ):
+                    row = display_body.row(align=True)
+                    row.prop(control, "grid_columns")
+                    row.prop(control, "grid_rows")
+            else:
+                display_body.prop(control, "radius")
+
+            display_body.label(text="Widget")
+            row = display_body.row(align=True)
+            row.prop(control, "tip_radius")
+            row.prop(control, "node_radius")
+            display_body.prop(control, "bar_width")
+            display_body.prop(control, "widget_backend")
+            display_body.separator()
+            display_body.prop(control, "show_name")
+            if control.show_name:
+                row = display_body.row(align=True)
+                row.prop(control, "name_size")
+                row.prop(control, "name_offset")
+
+        preview_row = box.row(align=True)
+        preview_row.prop(
+            control,
+            "live_preview",
+            text="Live Preview",
+            toggle=True,
+            icon="HIDE_OFF" if control.live_preview else "HIDE_ON",
+        )
+        if control.auto_rebuild_error:
+            box.label(text="Automatic update failed.", icon="ERROR")
+            box.label(text=control.auto_rebuild_error)
+            box.operator(
+                "coa_tools2.update_rig_control",
+                text="Rebuild Now",
+                icon="FILE_REFRESH",
+            )
+        elif control.needs_rebuild:
+            if control.live_preview:
+                box.label(text="Updating automatically…", icon="FILE_REFRESH")
+            else:
+                box.label(text="Changes pending.", icon="INFO")
+                box.operator(
+                    "coa_tools2.update_rig_control",
+                    text="Apply Changes",
+                    icon="CHECKMARK",
+                )
+
+        advanced_header, advanced_body = box.panel(
+            "coa_tools2_rig_control_advanced",
+            default_closed=True,
+        )
+        advanced_header.label(text="Generated Rig", icon="BONE_DATA")
+        if advanced_body:
+            advanced_body.label(text=f"Control Bone: {control.control_bone}")
+            advanced_body.label(text=f"Base Bone: {control.display_bone}")
+            advanced_body.label(text=f"Name Bone: {control.name_bone or 'Pending'}")
+            advanced_body.operator(
+                "coa_tools2.update_rig_control",
+                text="Rebuild Now",
+                icon="FILE_REFRESH",
+            )
+
+        outputs_box = layout.box()
+        outputs_box.label(text="Behavior & Outputs", icon="DRIVER")
+        bindings_box = outputs_box.box()
+        bindings_box.label(text="Direct Bindings (Optional)")
+        bindings_box.label(text="Maps X / Y / Angle to one property.")
         if not control.bindings:
             bindings_box.label(
-                text="No bindings. Add targets with the + button.",
+                text="No direct outputs. Add one with the + button.",
                 icon="INFO",
             )
         row = bindings_box.row()
@@ -199,11 +273,15 @@ class COATOOLS2_PT_RigControls(bpy.types.Panel):
         column.operator("coa_tools2.remove_rig_binding", text="", icon="REMOVE")
 
         if control.control_type in {"SLIDER_1D", "POINT_2D_RECT"}:
-            states_box = layout.box()
-            states_box.label(text="Continuous States", icon="SHAPEKEY_DATA")
+            states_box = outputs_box.box()
+            states_box.label(text="State Targets", icon="SHAPEKEY_DATA")
             if control.state_mode == "NONE":
                 states_box.label(
-                    text="No state grid. Ordinary bindings still work.",
+                    text="Interpolates assigned Shape Keys.",
+                    icon="INFO",
+                )
+                states_box.label(
+                    text="Optional; Direct Bindings still work.",
                     icon="INFO",
                 )
                 states_box.operator(
@@ -239,6 +317,12 @@ class COATOOLS2_PT_RigControls(bpy.types.Panel):
                 if control.state_mode == "MATRIX_2D":
                     domain_box = states_box.box()
                     domain_box.label(text="Mix Domain", icon="MOD_SHRINKWRAP")
+                    domain_box.label(
+                        text="Controls where the handle may move."
+                    )
+                    domain_box.label(
+                        text="Shape Key targets are assigned below."
+                    )
                     preset_row = domain_box.row(align=True)
                     operator = preset_row.operator(
                         "coa_tools2.set_rig_state_mix_policy",

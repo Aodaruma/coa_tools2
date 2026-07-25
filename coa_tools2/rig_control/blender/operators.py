@@ -533,16 +533,32 @@ class COATOOLS2_OT_AddRigBinding(bpy.types.Operator):
 
     def draw(self, _context):
         layout = self.layout
-        layout.prop(self, "source_component", expand=True)
-        layout.prop(self, "target_kind")
-        layout.prop_search(self, "target_object_name", bpy.data, "objects", text="Target")
+        help_box = layout.box()
+        help_box.label(text="Source Channel is read from this control.")
+        help_box.label(text="Target is the property receiving the value.")
+        layout.prop(self, "source_component", text="Source Channel", expand=True)
+        layout.prop(self, "target_kind", text="Target Type")
+        layout.prop_search(
+            self,
+            "target_object_name",
+            bpy.data,
+            "objects",
+            text="Target Object",
+        )
         if self.target_kind == "CONSTRAINT_INFLUENCE":
-            layout.prop(self, "target_bone")
-        layout.prop(self, "target_name")
+            layout.prop(self, "target_bone", text="Target Bone")
+            layout.prop(self, "target_name", text="Constraint")
+        else:
+            layout.prop(self, "target_name", text="Shape Key")
+        layout.label(text="Output Range")
         row = layout.row(align=True)
         row.prop(self, "output_min")
         row.prop(self, "output_max")
-        layout.prop(self, "clamp")
+        layout.prop(
+            self,
+            "clamp",
+            text="Clamp result to the output range",
+        )
 
     def execute(self, context):
         armature, control = _active_control(context)

@@ -44,6 +44,8 @@ def main():
     assert len(armature.coa_tools2_rig.rig_controls) == 1
     control = armature.coa_tools2_rig.rig_controls[0]
     assert abs(control.tip_radius - control.node_radius * 2.0) < 1e-6
+    assert abs(control.name_offset - 0.75) < 1e-6
+    assert control.live_preview
     assert control.control_bone in armature.pose.bones
     assert control.display_bone in armature.pose.bones
     assert control.name_bone in armature.pose.bones
@@ -76,8 +78,12 @@ def main():
     assert not armature.data.bones[control.name_bone].use_deform
     assert armature.pose.bones[control.control_bone].custom_shape is not None
     assert armature.pose.bones[control.display_bone].custom_shape is not None
+    assert not armature.data.bones[control.display_bone].hide_select
 
     from coa_tools2.rig_control.blender.compiler import compile_control
+    from coa_tools2.rig_control.blender.properties import (
+        flush_auto_rebuilds_now,
+    )
 
     counts_before = (
         len(armature.data.bones),
@@ -91,6 +97,36 @@ def main():
         len(mesh_object.data.shape_keys.animation_data.drivers),
     )
     assert counts_after == counts_before
+
+    control.width = 5.0
+    assert control.needs_rebuild
+    flush_auto_rebuilds_now()
+    assert not control.needs_rebuild
+    assert not control.auto_rebuild_error
+    auto_limit = armature.pose.bones[control.control_bone].constraints.get(
+        f"COA_{control.control_uuid[:8]}_LimitLocation"
+    )
+    assert auto_limit is not None and auto_limit.max_x == 5.0
+    control.width = 4.0
+    flush_auto_rebuilds_now()
+    assert auto_limit.max_x == 4.0
+
+    control.live_preview = False
+    control.width = 5.5
+    assert control.needs_rebuild
+    flush_auto_rebuilds_now()
+    assert control.needs_rebuild
+    assert auto_limit.max_x == 4.0
+    assert bpy.ops.coa_tools2.update_rig_control() == {"FINISHED"}
+    assert not control.needs_rebuild
+    assert auto_limit.max_x == 5.5
+
+    control.width = 4.0
+    assert control.needs_rebuild
+    control.live_preview = True
+    flush_auto_rebuilds_now()
+    assert not control.needs_rebuild
+    assert auto_limit.max_x == 4.0
 
     for bone_name, palette in (
         (control.display_bone, "THEME03"),
@@ -179,6 +215,22 @@ def main():
     vertical_pose.location.y = vertical.width
     update_scene()
     assert abs(vertical_pose.location.y - vertical.width) < 1e-6
+    from coa_tools2.rig_control.blender.ui import (
+        sync_control_index_from_active_bone,
+    )
+
+    armature.data.bones.active = armature.data.bones[control.display_bone]
+    assert sync_control_index_from_active_bone(
+        armature,
+        armature.coa_tools2_rig,
+    )
+    assert armature.coa_tools2_rig.rig_controls_index == 0
+    armature.data.bones.active = armature.data.bones[vertical.control_bone]
+    assert sync_control_index_from_active_bone(
+        armature,
+        armature.coa_tools2_rig,
+    )
+    assert armature.coa_tools2_rig.rig_controls_index == 1
     bpy.context.scene.cursor.location = (0.0, 0.0, 0.0)
 
     with tempfile.TemporaryDirectory() as tempdir:

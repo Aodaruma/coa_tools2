@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import math
+import time
+import traceback
 
 import bpy
 from bpy.props import (
@@ -19,8 +21,152 @@ from bpy.props import (
 from ..schema import SCHEMA_VERSION
 
 
+AUTO_REBUILD_DELAY = 0.35
+_PENDING_REBUILDS: dict[tuple[str, str], float] = {}
+_AUTO_REBUILD_ACTIVE = False
+_LAST_ACTIVE_RIG_BONE: tuple[int, str] | None = None
+
+
+def _find_control(armature, control_uuid):
+    rig_data = getattr(armature, "coa_tools2_rig", None)
+    if rig_data is None:
+        return None
+    return next(
+        (
+            control
+            for control in rig_data.rig_controls
+            if control.control_uuid == control_uuid
+        ),
+        None,
+    )
+
+
+def _flush_auto_rebuilds():
+    global _AUTO_REBUILD_ACTIVE
+
+    now = time.monotonic()
+    due = [
+        key
+        for key, changed_at in _PENDING_REBUILDS.items()
+        if now - changed_at >= AUTO_REBUILD_DELAY
+    ]
+    if not due:
+        return 0.1 if _PENDING_REBUILDS else None
+
+    from .compiler import compile_control
+
+    for key in due:
+        _PENDING_REBUILDS.pop(key, None)
+        armature_name, control_uuid = key
+        armature = bpy.data.objects.get(armature_name)
+        if armature is None or armature.type != "ARMATURE":
+            continue
+        control = _find_control(armature, control_uuid)
+        if control is None or not control.needs_rebuild:
+            continue
+        try:
+            _AUTO_REBUILD_ACTIVE = True
+            compile_control(armature, control)
+        except Exception as exc:
+            traceback.print_exc()
+            control.auto_rebuild_error = str(exc)
+            control.needs_rebuild = True
+        finally:
+            _AUTO_REBUILD_ACTIVE = False
+    return 0.1 if _PENDING_REBUILDS else None
+
+
+def _schedule_auto_rebuild(control):
+    armature = getattr(control, "id_data", None)
+    if (
+        armature is None
+        or not isinstance(armature, bpy.types.Object)
+        or armature.type != "ARMATURE"
+        or not control.control_uuid
+        or not control.live_preview
+    ):
+        return
+    _PENDING_REBUILDS[(armature.name, control.control_uuid)] = time.monotonic()
+    if not bpy.app.timers.is_registered(_flush_auto_rebuilds):
+        bpy.app.timers.register(
+            _flush_auto_rebuilds,
+            first_interval=AUTO_REBUILD_DELAY,
+        )
+
+
 def _mark_control_dirty(self, _context):
+    if _AUTO_REBUILD_ACTIVE:
+        return
     self.needs_rebuild = True
+    self.auto_rebuild_error = ""
+    _schedule_auto_rebuild(self)
+
+
+def _update_live_preview(self, _context):
+    armature = getattr(self, "id_data", None)
+    key = (
+        (armature.name, self.control_uuid)
+        if isinstance(armature, bpy.types.Object) and self.control_uuid
+        else None
+    )
+    if not self.live_preview:
+        if key is not None:
+            _PENDING_REBUILDS.pop(key, None)
+        return
+    if self.needs_rebuild:
+        _schedule_auto_rebuild(self)
+
+
+def cancel_auto_rebuild():
+    _PENDING_REBUILDS.clear()
+    if bpy.app.timers.is_registered(_flush_auto_rebuilds):
+        bpy.app.timers.unregister(_flush_auto_rebuilds)
+
+
+def flush_auto_rebuilds_now():
+    """Compile pending definitions immediately; primarily useful for tests."""
+
+    for key in tuple(_PENDING_REBUILDS):
+        _PENDING_REBUILDS[key] = 0.0
+    return _flush_auto_rebuilds()
+
+
+def _poll_active_rig_bone():
+    global _LAST_ACTIVE_RIG_BONE
+
+    armature = bpy.context.active_object
+    if armature is None or armature.type != "ARMATURE":
+        _LAST_ACTIVE_RIG_BONE = None
+        return 0.15
+    active_bone = armature.data.bones.active
+    if active_bone is None:
+        _LAST_ACTIVE_RIG_BONE = None
+        return 0.15
+    token = (armature.as_pointer(), active_bone.name)
+    if token == _LAST_ACTIVE_RIG_BONE:
+        return 0.15
+    _LAST_ACTIVE_RIG_BONE = token
+
+    from .ui import sync_control_index_from_active_bone
+
+    sync_control_index_from_active_bone(
+        armature,
+        getattr(armature, "coa_tools2_rig", None),
+    )
+    return 0.15
+
+
+def start_selection_sync():
+    if not bpy.app.timers.is_registered(_poll_active_rig_bone):
+        bpy.app.timers.register(_poll_active_rig_bone, first_interval=0.15)
+
+
+def cancel_selection_sync():
+    global _LAST_ACTIVE_RIG_BONE
+
+    _LAST_ACTIVE_RIG_BONE = None
+    if bpy.app.timers.is_registered(_poll_active_rig_bone):
+        bpy.app.timers.unregister(_poll_active_rig_bone)
 
 
 class COATOOLS2_PG_RigBinding(bpy.types.PropertyGroup):
@@ -140,7 +286,7 @@ class COATOOLS2_PG_RigControl(bpy.types.PropertyGroup):
     name_offset: FloatProperty(
         name="Name Offset",
         description="Distance between the widget bottom and its name",
-        default=0.45,
+        default=0.75,
         min=0.0,
         update=_mark_control_dirty,
     )
@@ -210,6 +356,14 @@ class COATOOLS2_PG_RigControl(bpy.types.PropertyGroup):
         default="EVALUATED_MESH_CACHE",
         update=_mark_control_dirty,
     )
+    live_preview: BoolProperty(
+        name="Live Preview",
+        description=(
+            "Automatically rebuild shortly after a Rig Control parameter changes"
+        ),
+        default=True,
+        update=_update_live_preview,
+    )
     bindings: CollectionProperty(type=COATOOLS2_PG_RigBinding)
     bindings_index: IntProperty(default=0, min=0)
     state_mode: EnumProperty(
@@ -251,6 +405,7 @@ class COATOOLS2_PG_RigControl(bpy.types.PropertyGroup):
     state_cells_index: IntProperty(default=0, min=0)
     origin: FloatVectorProperty(size=3, subtype="XYZ")
     needs_rebuild: BoolProperty(default=False)
+    auto_rebuild_error: StringProperty()
 
 
 class COATOOLS2_PG_RigObjectProperties(bpy.types.PropertyGroup):
@@ -295,6 +450,7 @@ _CONTROL_FIELDS = (
     "input_min",
     "input_max",
     "widget_backend",
+    "live_preview",
     "bindings_index",
     "state_mode",
     "state_mix_policy",
@@ -304,6 +460,7 @@ _CONTROL_FIELDS = (
     "state_cells_index",
     "origin",
     "needs_rebuild",
+    "auto_rebuild_error",
 )
 _BINDING_FIELDS = (
     "schema_version",

@@ -210,7 +210,9 @@ def ensure_control_bones(
         data_bone["coa_rig_artifact_role"] = role
         data_bone.use_deform = False
 
-    display_pose.bone.hide_select = True
+    # Keep the base selectable so clicking either the Tip or Base can activate
+    # the owning Rig Control in the panel.
+    display_pose.bone.hide_select = False
     functions.set_bone_group(
         None,
         armature,

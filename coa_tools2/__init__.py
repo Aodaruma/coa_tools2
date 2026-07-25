@@ -510,6 +510,7 @@ def register():
 
     # register props and keymap
     props.register()
+    rig_control_properties.start_selection_sync()
     register_keymaps()
 
     # create handler
@@ -524,6 +525,8 @@ def register():
 
 
 def unregister():
+    rig_control_properties.cancel_auto_rebuild()
+    rig_control_properties.cancel_selection_sync()
     # Remove callbacks before unregistering the classes and properties they use.
     handlers = (
         (bpy.app.handlers.depsgraph_update_pre, outliner.create_outliner_items),
