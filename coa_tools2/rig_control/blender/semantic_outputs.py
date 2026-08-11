@@ -10,7 +10,12 @@ import bpy
 
 from .artifacts import ensure_rig_instance_id
 from .component_artifacts import _record_artifact
-from .semantic_runtime import clear_pose_field_cache, pose_field_driver_expression
+from .properties import get_rig_data
+from .semantic_runtime import (
+    clear_pose_field_cache,
+    evaluate_live_input_term,
+    pose_field_driver_expression,
+)
 
 
 class SemanticOutputError(RuntimeError):
@@ -25,8 +30,33 @@ class SemanticTarget:
 
 
 def _driver_token(output_uuid: str) -> str:
-    token = re.sub(r"[^0-9A-Za-z]", "", output_uuid or "")[:12]
+    token = re.sub(r"[^0-9A-Za-z]", "", output_uuid or "")[:16]
     return f"cs_{token or 'unknown'}_"
+
+
+def _driver_tokens(output_uuid: str) -> tuple[str, ...]:
+    """Return current and pre-16-character ownership prefixes."""
+
+    normalized = re.sub(r"[^0-9A-Za-z]", "", output_uuid or "")
+    return tuple(
+        dict.fromkeys(
+            f"cs_{normalized[:length] or 'unknown'}_" for length in (16, 12)
+        )
+    )
+
+
+def _normalized_array_index(value: int) -> int:
+    """Match Blender's scalar FCurve convention (reported as index zero)."""
+
+    return max(0, int(value))
+
+
+def _target_identity(target: SemanticTarget):
+    return (
+        target.id_data,
+        target.data_path,
+        _normalized_array_index(target.array_index),
+    )
 
 
 def _find_driver(target: SemanticTarget):
@@ -38,7 +68,7 @@ def _find_driver(target: SemanticTarget):
             curve
             for curve in animation_data.drivers
             if curve.data_path == target.data_path
-            and curve.array_index == max(0, target.array_index)
+            and curve.array_index == _normalized_array_index(target.array_index)
         ),
         None,
     )
@@ -47,11 +77,68 @@ def _find_driver(target: SemanticTarget):
 def _driver_uses_output(fcurve, armature, output_uuid: str) -> bool:
     if fcurve is None:
         return False
-    prefix = _driver_token(output_uuid)
+    prefixes = _driver_tokens(output_uuid)
     return any(
-        variable.name.startswith(prefix)
+        variable.name.startswith(prefixes)
+        and any(target.id == armature for target in variable.targets)
         for variable in fcurve.driver.variables
     )
+
+
+def _shape_key_value_path(name: str) -> str:
+    return f'key_blocks["{bpy.utils.escape_identifier(name)}"].value'
+
+
+def _migrate_renamed_shape_key_output(armature, component, output) -> bool:
+    """Follow a Blender-renamed KeyBlock using only strict managed identity.
+
+    A KeyBlock rename updates its FCurve path, but not the stored output name or
+    artifact string.  Do not infer from names alone: require one UUID-owned
+    driver and its one owned artifact in this exact ShapeKeys datablock.
+    """
+
+    if output.target_kind != "SHAPE_KEY" or output.target_object is None:
+        return False
+    target_object = output.target_object
+    if target_object.type != "MESH":
+        return False
+    shape_keys = getattr(target_object.data, "shape_keys", None)
+    if (
+        shape_keys is None
+        or shape_keys.key_blocks.get(output.target_name) is not None
+    ):
+        return False
+
+    stale_path = _shape_key_value_path(output.target_name)
+    artifacts = [
+        artifact
+        for artifact in component.artifacts
+        if artifact.data_type == "DRIVER"
+        and artifact.role.startswith("semantic_output:")
+        and artifact.binding_uuid == output.output_uuid
+    ]
+    locations = tuple(_owned_driver_locations(armature, output.output_uuid))
+    if len(artifacts) != 1 or len(locations) != 1:
+        return False
+    artifact = artifacts[0]
+    location = locations[0]
+    if (
+        not artifact.owned
+        or artifact.object_name != shape_keys.name
+        or artifact.data_path != stale_path
+        or location.id_data != shape_keys
+    ):
+        return False
+
+    renamed_keys = [
+        key_block
+        for key_block in shape_keys.key_blocks
+        if key_block.path_from_id("value") == location.data_path
+    ]
+    if len(renamed_keys) != 1:
+        return False
+    output.target_name = renamed_keys[0].name
+    return True
 
 
 def _driver_add(target: SemanticTarget):
@@ -61,6 +148,12 @@ def _driver_add(target: SemanticTarget):
 
 
 def _driver_remove(target: SemanticTarget) -> bool:
+    try:
+        value = target.id_data.path_resolve(target.data_path)
+    except (AttributeError, KeyError, ValueError):
+        value = None
+    if isinstance(value, (bool, int, float)):
+        return bool(target.id_data.driver_remove(target.data_path))
     if target.array_index >= 0:
         return bool(target.id_data.driver_remove(target.data_path, target.array_index))
     return bool(target.id_data.driver_remove(target.data_path))
@@ -131,36 +224,60 @@ def _target_value(target: SemanticTarget):
     return float(value)
 
 
+def _set_target_value(target: SemanticTarget, value: float) -> None:
+    """Assign a scalar RNA target without evaluating arbitrary Python text."""
+
+    scalar = float(value)
+    if target.array_index >= 0:
+        try:
+            sequence = target.id_data.path_resolve(target.data_path)
+            sequence[target.array_index] = scalar
+            return
+        except (AttributeError, IndexError, KeyError, TypeError, ValueError) as exc:
+            raise SemanticOutputError(
+                f"Cannot write output path: {target.data_path}[{target.array_index}]"
+            ) from exc
+
+    custom_match = re.match(r'^(.*?)\["((?:\\.|[^"\\])*)"\]$', target.data_path)
+    if custom_match is not None:
+        parent_path, escaped_name = custom_match.groups()
+        parent_path = parent_path.rstrip(".")
+        try:
+            owner = (
+                target.id_data.path_resolve(parent_path)
+                if parent_path
+                else target.id_data
+            )
+            owner[bpy.utils.unescape_identifier(escaped_name)] = scalar
+            return
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            raise SemanticOutputError(
+                f"Cannot write output path: {target.data_path}"
+            ) from exc
+
+    parent_path, separator, property_name = target.data_path.rpartition(".")
+    try:
+        owner = target.id_data.path_resolve(parent_path) if separator else target.id_data
+        setattr(owner, property_name, scalar)
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        raise SemanticOutputError(
+            f"Cannot write output path: {target.data_path}"
+        ) from exc
+
+
 def capture_semantic_output_value(armature, output) -> float:
     return _target_value(resolve_semantic_target(armature, output))
 
 
+def set_semantic_output_value(armature, output, value: float) -> None:
+    _set_target_value(resolve_semantic_target(armature, output), value)
+
+
 def _term_value(armature, term) -> float:
-    source = term.source_object or armature
-    if term.source_kind == "CUSTOM_PROPERTY":
-        if not term.data_path:
-            raise SemanticOutputError("Input property term needs a data path.")
-        value = source.path_resolve(term.data_path)
-        if term.array_index >= 0:
-            value = value[term.array_index]
-        return float(value)
-    owner = source.pose.bones.get(term.source_bone) if term.source_bone else source
-    if owner is None:
-        raise SemanticOutputError(f"Input bone not found: {term.source_bone}")
-    transform = term.transform_type
-    axis = "XYZ".index(transform[-1])
-    if transform.startswith("LOC_"):
-        value = owner.location[axis]
-    elif transform.startswith("ROT_"):
-        if hasattr(owner, "rotation_mode") and owner.rotation_mode == "QUATERNION":
-            value = owner.rotation_quaternion.to_euler("XYZ")[axis]
-        else:
-            value = owner.rotation_euler[axis]
-    elif transform.startswith("SCALE_"):
-        value = owner.scale[axis]
-    else:
-        raise SemanticOutputError(f"Unsupported input transform: {transform}")
-    return float(value)
+    try:
+        return evaluate_live_input_term(term, armature)
+    except Exception as exc:
+        raise SemanticOutputError(str(exc)) from exc
 
 
 def capture_semantic_input_value(armature, channel) -> float:
@@ -172,7 +289,7 @@ def capture_semantic_input_value(armature, channel) -> float:
 
 def _add_term_variable(driver, armature, output_uuid, channel_index, term_index, term):
     variable = driver.variables.new()
-    variable.name = f"{_driver_token(output_uuid)}q{channel_index}_{term_index}"
+    variable.name = f"q{channel_index}_{term_index}"
     if term.source_kind == "CUSTOM_PROPERTY":
         source = term.source_object or armature
         if not term.data_path:
@@ -180,7 +297,11 @@ def _add_term_variable(driver, armature, output_uuid, channel_index, term_index,
         variable.type = "SINGLE_PROP"
         target = variable.targets[0]
         target.id = source
-        target.data_path = term.data_path
+        target.data_path = (
+            f"{term.data_path}[{term.array_index}]"
+            if term.array_index >= 0
+            else term.data_path
+        )
     else:
         source = term.source_object or armature
         variable.type = "TRANSFORMS"
@@ -207,6 +328,12 @@ def _channel_expression(driver, armature, output_uuid, channel_index, channel):
 
 def ensure_semantic_output_driver(armature, component, stage, output):
     target = resolve_semantic_target(armature, output)
+    _remove_stale_output_identity(
+        armature,
+        component,
+        output.output_uuid,
+        target,
+    )
     existing = _find_driver(target)
     if existing is not None and not _driver_uses_output(
         existing, armature, output.output_uuid
@@ -219,18 +346,41 @@ def ensure_semantic_output_driver(armature, component, stage, output):
     driver.type = "SCRIPTED"
     while driver.variables:
         driver.variables.remove(driver.variables[0])
-    queries = [
-        _channel_expression(driver, armature, output.output_uuid, index, channel)
-        for index, channel in enumerate(stage.inputs)
-    ]
+    owner_property = (
+        "coa_semantic_owner_"
+        + re.sub(r"[^0-9A-Za-z]", "", component.component_uuid)[:12]
+    )
+    if owner_property not in armature:
+        armature[owner_property] = 0.0
+    owner_variable = driver.variables.new()
+    owner_variable.name = f"{_driver_token(output.output_uuid)}owner"
+    owner_variable.type = "SINGLE_PROP"
+    owner_target = owner_variable.targets[0]
+    owner_target.id = armature
+    owner_target.data_path = f'["{owner_property}"]'
+    dependencies = []
+    for channel_index, channel in enumerate(stage.inputs):
+        for term_index, term in enumerate(channel.terms):
+            dependencies.append(
+                _add_term_variable(
+                    driver,
+                    armature,
+                    output.output_uuid,
+                    channel_index,
+                    term_index,
+                    term,
+                )
+            )
     driver.expression = pose_field_driver_expression(
         ensure_rig_instance_id(armature),
         component.component_uuid,
         stage.stage_uuid,
         output.output_uuid,
-        queries,
+        (),
         discrete=bool(output.discrete),
     )
+    if dependencies:
+        driver.expression += "+0*(" + "+".join(dependencies) + ")"
     _record_artifact(
         component,
         f"semantic_output:{stage.stage_uuid}",
@@ -265,7 +415,46 @@ def remove_semantic_output_drivers(armature, output_uuid):
     return count
 
 
+def _remove_stale_output_identity(
+    armature,
+    component,
+    output_uuid,
+    expected_target,
+):
+    """Remove a generated output from its previous Blender destination."""
+
+    expected_identity = _target_identity(expected_target)
+    for target in tuple(_owned_driver_locations(armature, output_uuid)):
+        if _target_identity(target) != expected_identity:
+            _driver_remove(target)
+
+    expected_name = getattr(expected_target.id_data, "name", "")
+    for index in range(len(component.artifacts) - 1, -1, -1):
+        artifact = component.artifacts[index]
+        if (
+            artifact.data_type != "DRIVER"
+            or not artifact.role.startswith("semantic_output:")
+            or artifact.binding_uuid != output_uuid
+        ):
+            continue
+        if (
+            artifact.object_name != expected_name
+            or artifact.data_path != expected_target.data_path
+        ):
+            component.artifacts.remove(index)
+
+
 def preflight_semantic_outputs(armature, component):
+    token_counts = {}
+    for candidate in get_rig_data(armature).rig_components:
+        for candidate_stage in candidate.semantic_stages:
+            for candidate_output in candidate_stage.outputs:
+                if not candidate_output.output_uuid:
+                    continue
+                token = re.sub(
+                    r"[^0-9A-Za-z]", "", candidate_output.output_uuid
+                )[:16]
+                token_counts[token] = token_counts.get(token, 0) + 1
     seen = set()
     for stage in component.semantic_stages:
         if not stage.enabled or stage.stage_type != "POSE_MAP":
@@ -279,6 +468,11 @@ def preflight_semantic_outputs(armature, component):
                 )
             if channel.scale <= 0.0:
                 raise SemanticOutputError("Pose Map input scale must be positive.")
+            if channel.kind != "CONTINUOUS":
+                raise SemanticOutputError(
+                    f"Input channel '{channel.label}' uses {channel.kind}; "
+                    "discrete input dimensions are reserved for a later evaluator."
+                )
         for output in stage.outputs:
             if not output.output_uuid:
                 raise SemanticOutputError("Semantic output UUID is missing.")
@@ -287,8 +481,28 @@ def preflight_semantic_outputs(armature, component):
                     f"Semantic output UUID is duplicated: {output.output_uuid}"
                 )
             seen.add(output.output_uuid)
+            token = re.sub(r"[^0-9A-Za-z]", "", output.output_uuid)[:16]
+            if not token or token_counts.get(token, 0) != 1:
+                raise SemanticOutputError(
+                    f"Semantic output UUID/token is duplicated: {output.output_uuid}"
+                )
             if not output.enabled:
                 continue
+            _migrate_renamed_shape_key_output(
+                armature,
+                component,
+                output,
+            )
+            if output.policy != "PARAMETRIC":
+                raise SemanticOutputError(
+                    f"Output '{output.label}' uses policy {output.policy}; the "
+                    "current Blender adapter supports Parametric outputs only."
+                )
+            if int(output.value_arity) != 1:
+                raise SemanticOutputError(
+                    f"Output '{output.label}' has vector arity {output.value_arity}; "
+                    "create one scalar output per target channel for now."
+                )
             target = resolve_semantic_target(armature, output)
             existing = _find_driver(target)
             if existing is not None and not _driver_uses_output(

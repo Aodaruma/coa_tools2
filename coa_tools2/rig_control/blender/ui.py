@@ -120,7 +120,7 @@ class COATOOLS2_UL_RigStateCells(bpy.types.UIList):
 
 class COATOOLS2_PT_RigControls(bpy.types.Panel):
     bl_idname = "COATOOLS2_PT_rig_controls"
-    bl_label = "Rig Controls"
+    bl_label = "State Rig"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = "COA Tools2"
@@ -141,7 +141,7 @@ class COATOOLS2_PT_RigControls(bpy.types.Panel):
 
         controls = rig_data.rig_controls
         if not controls:
-            layout.label(text="No rig controls yet.", icon="INFO")
+            layout.label(text="No State Rigs yet.", icon="INFO")
             return
 
         layout.template_list(

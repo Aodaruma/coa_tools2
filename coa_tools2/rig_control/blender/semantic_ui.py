@@ -54,7 +54,7 @@ class COATOOLS2_UL_SemanticSamples(bpy.types.UIList):
 
 class COATOOLS2_PT_SemanticRig(bpy.types.Panel):
     bl_idname = "COATOOLS2_PT_semantic_rig"
-    bl_label = "Semantic Rig Layers"
+    bl_label = "Character Rig Layers"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = "COA Tools2"
@@ -69,7 +69,7 @@ class COATOOLS2_PT_SemanticRig(bpy.types.Panel):
         layout = self.layout
         armature, component, stage = _active(context)
         header = layout.box()
-        header.label(text="One rig = composable meaning + solver layers", icon="NODETREE")
+        header.label(text="One action = composable controls + solver layers", icon="NODETREE")
         header.label(text="State Rig remains the parameter/state controller system.")
 
         row = layout.row()
@@ -86,6 +86,20 @@ class COATOOLS2_PT_SemanticRig(bpy.types.Panel):
         box.prop(stage, "stage_type")
         box.prop(stage, "order")
         box.prop(stage, "depends_on", text="After UUIDs")
+
+        if stage.stage_type in {"PROJECTED_TRANSFORM", "CHAIN_IK", "SPLINE"}:
+            chain = box.box()
+            chain.label(text="Stage Source Chain", icon="BONE_DATA")
+            if stage.source_bones:
+                chain.label(
+                    text=" → ".join(ref.bone_name for ref in stage.source_bones)
+                )
+            else:
+                chain.label(text="No source chain assigned", icon="ERROR")
+            chain.operator(
+                "coa_tools2.assign_semantic_stage_chain",
+                icon="RESTRICT_SELECT_OFF",
+            )
 
         if stage.stage_type == "PROJECTED_TRANSFORM":
             box.prop(stage, "projection_mode")
@@ -139,6 +153,40 @@ class COATOOLS2_PT_SemanticRig(bpy.types.Panel):
             "inputs_index", rows=min(5, max(2, len(stage.inputs))),
         )
         row.column(align=True).operator("coa_tools2.add_semantic_input", text="", icon="ADD")
+        if stage.inputs:
+            channel = stage.inputs[
+                min(stage.inputs_index, len(stage.inputs) - 1)
+            ]
+            details = box.box()
+            details.label(text=f"Input Source · {channel.label}", icon="LINKED")
+            dependencies = {
+                item.stage_uuid: item.label
+                for item in component.semantic_stages
+                if item.stage_uuid in {
+                    value.strip()
+                    for value in stage.depends_on.split(",")
+                    if value.strip()
+                }
+            }
+            if dependencies:
+                details.label(
+                    text="Dependencies: "
+                    + ", ".join(
+                        f"{label} [{stage_uuid[:8]}]"
+                        for stage_uuid, label in dependencies.items()
+                    ),
+                    icon="INFO",
+                )
+            for index, term in enumerate(channel.terms):
+                term_box = details.box()
+                term_box.label(text=f"Term {index + 1}")
+                term_box.prop(term, "source_stage_uuid")
+                row = term_box.row(align=True)
+                row.prop(term, "source_object", text="Object")
+                row.prop(term, "source_bone", text="Bone")
+                term_box.label(
+                    text="Stage UUID auto-wires a dependency; empty keeps Object/Bone explicit."
+                )
         row = box.row()
         row.template_list(
             "COATOOLS2_UL_SemanticOutputs", "", stage, "outputs", stage,
@@ -149,13 +197,18 @@ class COATOOLS2_PT_SemanticRig(bpy.types.Panel):
             "COATOOLS2_UL_SemanticSamples", "", stage, "samples", stage,
             "samples_index", rows=min(5, max(2, len(stage.samples))),
         )
-        if component.semantic_edit_sample_uuid:
+        if (
+            component.semantic_edit_sample_uuid
+            and component.semantic_edit_stage_uuid == stage.stage_uuid
+        ):
             warning = box.box()
             warning.label(text="Sample authoring: outputs are temporarily released.", icon="GREASEPENCIL")
             row = warning.row(align=True)
             row.operator("coa_tools2.commit_semantic_sample", icon="CHECKMARK")
             row.operator("coa_tools2.cancel_semantic_sample", icon="CANCEL")
         else:
+            if component.semantic_edit_sample_uuid:
+                box.label(text="Another Pose Map is being authored.", icon="INFO")
             box.operator("coa_tools2.begin_semantic_sample", icon="ADD")
 
 

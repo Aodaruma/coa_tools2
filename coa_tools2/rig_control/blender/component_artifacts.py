@@ -127,6 +127,79 @@ def _owns_constraint(component, bone_name: str, constraint_name: str) -> bool:
     )
 
 
+def _recorded_constraint(
+    pose_bone,
+    component,
+    role: str,
+    constraint_type: str,
+    *,
+    allow_missing: bool,
+):
+    """Resolve a generated Constraint without assuming RNA supports IDProps.
+
+    Constraint names are the only persistent identity available in Blender
+    5.1.  If the recorded name is missing, has changed type, or another
+    unrecorded Constraint of the generated type exists, ownership is
+    ambiguous.  Refuse the rebuild instead of risking edits to user data.
+    """
+
+    artifacts = [
+        artifact
+        for artifact in component.artifacts
+        if artifact.owned
+        and artifact.data_type == "CONSTRAINT"
+        and artifact.role == role
+    ]
+    if len(artifacts) > 1:
+        raise ComponentArtifactConflict(
+            f"Multiple Constraint artifacts use role '{role}'."
+        )
+    if not artifacts:
+        return None
+    artifact = artifacts[0]
+    if artifact.bone_name != pose_bone.name:
+        raise ComponentArtifactConflict(
+            f"Constraint role '{role}' moved from bone '{artifact.bone_name}' "
+            f"to '{pose_bone.name}'."
+        )
+    referenced_names = {
+        candidate.constraint_name
+        for candidate in component.artifacts
+        if candidate.owned
+        and candidate.data_type == "CONSTRAINT"
+        and candidate.bone_name == pose_bone.name
+        and candidate.constraint_name
+    }
+    unrecorded_same_type = [
+        constraint
+        for constraint in pose_bone.constraints
+        if constraint.type == constraint_type
+        and constraint.name not in referenced_names
+    ]
+    constraint = pose_bone.constraints.get(artifact.constraint_name)
+    if constraint is None:
+        if unrecorded_same_type:
+            raise ComponentArtifactConflict(
+                f"Generated Constraint for role '{role}' may have been renamed; "
+                "ownership is ambiguous."
+            )
+        if allow_missing:
+            return None
+        raise ComponentArtifactConflict(
+            f"Generated Constraint '{artifact.constraint_name}' is missing."
+        )
+    if constraint.type != constraint_type:
+        raise ComponentArtifactConflict(
+            f"Recorded Constraint name '{artifact.constraint_name}' is now used "
+            "by an incompatible Constraint."
+        )
+    if unrecorded_same_type:
+        raise ComponentArtifactConflict(
+            f"Constraint ownership for role '{role}' is ambiguous after a rename."
+        )
+    return constraint
+
+
 def _tag_bone(armature, data_bone, component, role: str):
     instance_id = ensure_rig_instance_id(armature)
     existing_uuid = data_bone.get("coa_rig_component_uuid")
@@ -362,40 +435,30 @@ def _component_depth_constraint_name(component) -> str:
 
 def ensure_depth_constraint(pose_bone, component):
     name = _component_depth_constraint_name(component)
-    constraint = pose_bone.constraints.get(name)
+    role = "depth_constraint"
     if component.depth_mode == "FREE" or not component.allow_translation[2]:
-        if constraint is not None and _owns_constraint(
+        constraint = _recorded_constraint(
+            pose_bone,
             component,
-            pose_bone.name,
-            name,
-        ):
+            role,
+            "LIMIT_LOCATION",
+            allow_missing=True,
+        )
+        if constraint is not None:
             pose_bone.constraints.remove(constraint)
         _remove_artifacts(
             component,
-            role="depth_constraint",
+            role=role,
             data_type="CONSTRAINT",
-            bone_name=pose_bone.name,
-            constraint_name=name,
         )
         return None
-    if constraint is not None and constraint.type != "LIMIT_LOCATION":
-        if not _owns_constraint(component, pose_bone.name, name):
-            raise ComponentArtifactConflict(
-                f"Constraint '{name}' is not owned by this pose component."
-            )
-        pose_bone.constraints.remove(constraint)
-        constraint = None
-    elif constraint is not None and not _owns_constraint(
+    constraint = _managed_constraint(
+        pose_bone,
         component,
-        pose_bone.name,
         name,
-    ):
-        raise ComponentArtifactConflict(
-            f"Constraint '{name}' is not owned by this pose component."
-        )
-    if constraint is None:
-        constraint = pose_bone.constraints.new("LIMIT_LOCATION")
-        constraint.name = name
+        "LIMIT_LOCATION",
+        role=role,
+    )
     constraint.owner_space = "LOCAL"
     constraint.use_transform_limit = True
     for axis in "xy":
@@ -411,7 +474,7 @@ def ensure_depth_constraint(pose_bone, component):
         constraint.max_z = component.depth_max
     _record_artifact(
         component,
-        "depth_constraint",
+        role,
         "CONSTRAINT",
         bone_name=pose_bone.name,
         constraint_name=constraint.name,
@@ -837,16 +900,40 @@ def ensure_limb_control_bones(
     return frame_pose, control_pose, pole_pose
 
 
-def _managed_constraint(pose_bone, component, name: str, constraint_type: str):
-    constraint = pose_bone.constraints.get(name)
-    owned = _owns_constraint(component, pose_bone.name, name)
-    if constraint is not None and not owned:
-        raise ComponentArtifactConflict(
-            f"Constraint '{name}' is not owned by this pose component."
+def _managed_constraint(
+    pose_bone,
+    component,
+    name: str,
+    constraint_type: str,
+    *,
+    role: str = "",
+):
+    if role:
+        constraint = _recorded_constraint(
+            pose_bone,
+            component,
+            role,
+            constraint_type,
+            allow_missing=False,
         )
+        if constraint is None:
+            name_collision = pose_bone.constraints.get(name)
+            if name_collision is not None:
+                raise ComponentArtifactConflict(
+                    f"Constraint '{name}' is not owned by semantic role '{role}'."
+                )
+    else:
+        constraint = pose_bone.constraints.get(name)
+        owned = _owns_constraint(component, pose_bone.name, name)
+        if constraint is not None and not owned:
+            raise ComponentArtifactConflict(
+                f"Constraint '{name}' is not owned by this pose component."
+            )
     if constraint is not None and constraint.type != constraint_type:
-        pose_bone.constraints.remove(constraint)
-        constraint = None
+        raise ComponentArtifactConflict(
+            f"Constraint '{constraint.name}' has type '{constraint.type}', "
+            f"expected '{constraint_type}'."
+        )
     if constraint is None:
         constraint = pose_bone.constraints.new(constraint_type)
         constraint.name = name

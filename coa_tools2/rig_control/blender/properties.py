@@ -112,6 +112,12 @@ def _mark_component_dirty(self, _context):
     self.last_error = ""
 
 
+def _mark_pin_driven_explicit(self, _context):
+    """A UI edit takes ownership back from dependency auto-wiring."""
+
+    self.pin_driven_stage_uuid = ""
+
+
 def _update_live_preview(self, _context):
     armature = getattr(self, "id_data", None)
     key = (
@@ -280,6 +286,13 @@ class COATOOLS2_PG_SemanticInputTerm(bpy.types.PropertyGroup):
     """One Blender value contributing to a normalized semantic channel."""
 
     term_uuid: StringProperty()
+    source_stage_uuid: StringProperty(
+        name="Source Stage UUID",
+        description=(
+            "Direct dependency stage that supplies this automatically wired input; "
+            "leave empty for an explicit Object/Bone source"
+        ),
+    )
     source_object: PointerProperty(type=bpy.types.Object)
     source_bone: StringProperty()
     source_kind: EnumProperty(
@@ -489,7 +502,11 @@ class COATOOLS2_PG_SemanticStage(bpy.types.PropertyGroup):
     allow_stretch: BoolProperty(default=False)
     pin_target_object: PointerProperty(type=bpy.types.Object)
     pin_target_bone: StringProperty()
-    pin_driven_bone: StringProperty()
+    pin_driven_bone: StringProperty(update=_mark_pin_driven_explicit)
+    pin_driven_stage_uuid: StringProperty(
+        description="Internal dependency UUID used for automatic pin wiring",
+        options={"HIDDEN"},
+    )
     pin_space: EnumProperty(
         items=(
             ("WORLD", "World", "Keep the contact in world space"),
@@ -518,6 +535,7 @@ class COATOOLS2_PG_SemanticStage(bpy.types.PropertyGroup):
     bake_start: IntProperty(default=1)
     bake_end: IntProperty(default=24)
     secondary_baked: BoolProperty(default=False)
+    secondary_source_signature: StringProperty()
 
 
 class COATOOLS2_PG_RigComponentArtifact(bpy.types.PropertyGroup):
@@ -768,6 +786,7 @@ class COATOOLS2_PG_RigComponent(bpy.types.PropertyGroup):
     semantic_stages: CollectionProperty(type=COATOOLS2_PG_SemanticStage)
     semantic_stages_index: IntProperty(default=0, min=0)
     semantic_edit_sample_uuid: StringProperty()
+    semantic_edit_stage_uuid: StringProperty()
     enabled: BoolProperty(default=True, update=_mark_component_dirty)
     needs_rebuild: BoolProperty(default=False)
     last_error: StringProperty()

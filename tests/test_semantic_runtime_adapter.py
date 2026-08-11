@@ -27,6 +27,7 @@ if "bpy" not in sys.modules:
 from rig_control.pose_field import evaluate_pose_field  # noqa: E402
 from rig_control.blender.semantic_runtime import (  # noqa: E402
     _rig_data,
+    evaluate_live_input_term,
     pose_field_spec_from_property_group,
 )
 
@@ -166,6 +167,43 @@ class SemanticRuntimeAdapterTests(unittest.TestCase):
 
         self.assertIs(dedicated, _rig_data(pg(coa_tools2_rig=dedicated, coa_tools2=legacy)))
         self.assertIs(legacy, _rig_data(pg(coa_tools2=legacy)))
+
+    def test_live_custom_property_term_honors_array_index(self):
+        source = pg(path_resolve=lambda _path: (1.25, 2.5, 3.75))
+        term = pg(
+            source_object=source,
+            source_kind="CUSTOM_PROPERTY",
+            data_path='["semantic_vector"]',
+            array_index=1,
+        )
+
+        self.assertEqual(2.5, evaluate_live_input_term(term, object()))
+
+    def test_live_transform_space_uses_raw_channels(self):
+        source = pg(
+            type="EMPTY",
+            location=(1.0, 2.0, 3.0),
+            rotation_mode="XYZ",
+            rotation_euler=(0.1, 0.2, 0.3),
+            scale=(0.5, 1.5, 2.5),
+        )
+        armature = object()
+
+        for transform_type, expected in (
+            ("LOC_Y", 2.0),
+            ("ROT_Z", 0.3),
+            ("SCALE_X", 0.5),
+        ):
+            term = pg(
+                source_object=source,
+                source_kind="TRANSFORM",
+                source_bone="",
+                transform_type=transform_type,
+                transform_space="TRANSFORM_SPACE",
+                data_path="",
+                array_index=-1,
+            )
+            self.assertEqual(expected, evaluate_live_input_term(term, armature))
 
 
 if __name__ == "__main__":

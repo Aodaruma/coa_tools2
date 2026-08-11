@@ -253,14 +253,15 @@ def main():
         == limb_component.component_uuid
         and bone.get("coa_rig_component_role") == "bend_center"
     )
-    bend_center_pose = armature.pose.bones[bend_center.name]
+    bend_center_name = bend_center.name
+    bend_center_pose = armature.pose.bones[bend_center_name]
     bend_distance = pole_pose.constraints.get(
         f"COA_COMP_{limb_component.component_uuid[:8]}_BendDistance"
     )
     assert bend_distance is not None
     assert bend_distance.type == "LIMIT_DISTANCE"
     assert bend_distance.target == armature
-    assert bend_distance.subtarget == bend_center.name
+    assert bend_distance.subtarget == bend_center_name
     assert bend_distance.limit_mode == "LIMITDIST_ONSURFACE"
     assert bend_distance.use_transform_limit
     assert math.isclose(
@@ -316,7 +317,7 @@ def main():
         bpy.context.evaluated_depsgraph_get()
     )
     evaluated_pole = evaluated_armature.pose.bones[pole_pose.name]
-    evaluated_center = evaluated_armature.pose.bones[bend_center.name]
+    evaluated_center = evaluated_armature.pose.bones[bend_center_name]
     assert math.isclose(
         (evaluated_pole.head - evaluated_center.head).length,
         bend_radius,
@@ -439,7 +440,7 @@ def main():
     previous_pole_widget = armature.pose.bones[
         previous_pole_name
     ].custom_shape
-    previous_bend_center_name = bend_center.name
+    previous_bend_center_name = bend_center_name
     previous_bend_center_matrix = armature.data.bones[
         previous_bend_center_name
     ].matrix_local.copy()

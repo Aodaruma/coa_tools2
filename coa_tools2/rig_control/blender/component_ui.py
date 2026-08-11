@@ -43,7 +43,7 @@ class COATOOLS2_UL_RigComponents(bpy.types.UIList):
 
 class COATOOLS2_PT_RigComponents(bpy.types.Panel):
     bl_idname = "COATOOLS2_PT_rig_components"
-    bl_label = "Character Posing"
+    bl_label = "Character Rig"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = "COA Tools2"
@@ -61,7 +61,7 @@ class COATOOLS2_PT_RigComponents(bpy.types.Panel):
         row.operator("coa_tools2.add_rig_component", icon="ADD")
         row.operator(
             "coa_tools2.add_semantic_rig",
-            text="Semantic",
+            text="Character",
             icon="NODETREE",
         )
         row.operator(
@@ -186,7 +186,10 @@ class COATOOLS2_PT_RigComponents(bpy.types.Panel):
                 icon="FILE_REFRESH",
             )
 
-        if component.deformation_mode == "PARAMETRIC":
+        if (
+            component.deformation_mode == "PARAMETRIC"
+            and component.component_type != "SEMANTIC"
+        ):
             outputs = layout.box()
             outputs.label(text="Shape Key & Property Outputs", icon="DRIVER")
             if not component.bindings:
@@ -233,6 +236,27 @@ class COATOOLS2_PT_RigComponents(bpy.types.Panel):
                         f"{binding.output_max:.3f}"
                     )
                 )
+        elif component.component_type == "SEMANTIC" and component.bindings:
+            outputs = layout.box()
+            outputs.label(text="Legacy Outputs Need Removal", icon="ERROR")
+            outputs.label(
+                text="Use Recorded Pose Map outputs for Character Rigs."
+            )
+            row = outputs.row()
+            row.template_list(
+                "COATOOLS2_UL_RigBindings",
+                "",
+                component,
+                "bindings",
+                component,
+                "bindings_index",
+                rows=min(5, max(2, len(component.bindings))),
+            )
+            row.column(align=True).operator(
+                "coa_tools2.remove_component_binding",
+                text="",
+                icon="REMOVE",
+            )
 
         export = layout.box()
         if component.deformation_mode == "PARAMETRIC":

@@ -83,6 +83,14 @@ def ensure_unique_component_instance(armature):
                     replacement.data = source.data.copy()
                 widget_collection.objects.link(replacement)
                 replacement["coa_rig_instance_id"] = new_instance_id
+                if (
+                    replacement.data is not None
+                    and replacement.data.get("coa_rig_instance_id")
+                    == old_instance_id
+                    and replacement.data.get("coa_rig_component_uuid")
+                    == component.component_uuid
+                ):
+                    replacement.data["coa_rig_instance_id"] = new_instance_id
                 replacements[source.name] = replacement
             artifact.object_name = replacement.name
         if not replacements:
@@ -93,6 +101,59 @@ def ensure_unique_component_instance(armature):
             replacement = replacements.get(pose_bone.custom_shape.name)
             if replacement is not None:
                 pose_bone.custom_shape = replacement
+
+    # A duplicated Armature shares Action datablocks with its source.  Do not
+    # retag or delete those Actions: detach only the duplicate's generated NLA
+    # tracks and fall back to the already generated live-follow constraints.
+    animation_data = armature.animation_data
+    for component in rig_data.rig_components:
+        for stage in component.semantic_stages:
+            if stage.stage_type != "SECONDARY_MOTION":
+                continue
+            stage_uuid = stage.stage_uuid
+            if animation_data is not None:
+                for track in tuple(animation_data.nla_tracks):
+                    owned = any(
+                        strip.action is not None
+                        and strip.action.get("coa_rig_managed")
+                        and strip.action.get("coa_rig_instance_id")
+                        == old_instance_id
+                        and strip.action.get("coa_rig_component_uuid")
+                        == component.component_uuid
+                        and strip.action.get("coa_semantic_stage_uuid")
+                        == stage_uuid
+                        for strip in track.strips
+                    )
+                    if owned:
+                        animation_data.nla_tracks.remove(track)
+            follow_prefix = f"semantic:{stage_uuid}:secondary_follow:"
+            for artifact in component.artifacts:
+                if not (
+                    artifact.owned
+                    and artifact.data_type == "CONSTRAINT"
+                    and artifact.role.startswith(follow_prefix)
+                ):
+                    continue
+                pose_bone = armature.pose.bones.get(artifact.bone_name)
+                constraint = (
+                    pose_bone.constraints.get(artifact.constraint_name)
+                    if pose_bone is not None
+                    else None
+                )
+                if constraint is not None:
+                    constraint.mute = False
+            stage.secondary_baked = False
+            if hasattr(stage, "secondary_source_signature"):
+                stage.secondary_source_signature = ""
+            action_role = f"semantic:{stage_uuid}:secondary_action"
+            nla_role = f"semantic:{stage_uuid}:secondary_nla_track"
+            for index in range(len(component.artifacts) - 1, -1, -1):
+                artifact = component.artifacts[index]
+                if artifact.role in {action_role, nla_role} and artifact.data_type in {
+                    "ACTION",
+                    "NLA_TRACK",
+                }:
+                    component.artifacts.remove(index)
     return True
 
 
@@ -402,6 +463,159 @@ def _data_bone_snapshot(data_bone):
     }
 
 
+def _curve_object_snapshot(obj):
+    """Capture generated Curve geometry and managed Hook state for rollback."""
+
+    data = obj.data
+    splines = []
+    for spline in data.splines:
+        if spline.type == "BEZIER":
+            # Semantic Spline currently emits NURBS, but preserving Bezier data
+            # here keeps the transaction helper safe for later curve presets.
+            points = tuple(
+                {
+                    "co": point.co.copy(),
+                    "handle_left": point.handle_left.copy(),
+                    "handle_right": point.handle_right.copy(),
+                    "handle_left_type": point.handle_left_type,
+                    "handle_right_type": point.handle_right_type,
+                    "radius": point.radius,
+                    "tilt": point.tilt,
+                }
+                for point in spline.bezier_points
+            )
+        else:
+            points = tuple(
+                {
+                    "co": point.co.copy(),
+                    "radius": point.radius,
+                    "tilt": point.tilt,
+                    "weight": getattr(point, "weight", None),
+                    "weight_softbody": getattr(point, "weight_softbody", None),
+                }
+                for point in spline.points
+            )
+        splines.append(
+            {
+                "type": spline.type,
+                "points": points,
+                "order_u": getattr(spline, "order_u", 2),
+                "use_endpoint_u": getattr(spline, "use_endpoint_u", False),
+                "use_cyclic_u": getattr(spline, "use_cyclic_u", False),
+            }
+        )
+
+    hooks = {}
+    for modifier_index, modifier in enumerate(obj.modifiers):
+        if modifier.type != "HOOK":
+            continue
+        indices = tuple(getattr(modifier, "vertex_indices", ()) or ())
+        hooks[modifier.name] = {
+            "index": modifier_index,
+            "object": modifier.object,
+            "subtarget": modifier.subtarget,
+            "strength": modifier.strength,
+            "falloff_type": modifier.falloff_type,
+            "center": modifier.center.copy(),
+            "matrix_inverse": modifier.matrix_inverse.copy(),
+            "vertex_indices": indices,
+        }
+    return {
+        "dimensions": data.dimensions,
+        "resolution_u": data.resolution_u,
+        "render_resolution_u": data.render_resolution_u,
+        "twist_mode": data.twist_mode,
+        "splines": tuple(splines),
+        "hooks": hooks,
+    }
+
+
+def _matches_owned_tags(owner, instance_id, component_uuid, role=None):
+    owner_role = str(owner.get("coa_rig_component_role", "") or "")
+    return (
+        bool(owner.get("coa_rig_managed"))
+        and owner.get("coa_rig_instance_id") == instance_id
+        and owner.get("coa_rig_component_uuid") == component_uuid
+        and bool(owner_role)
+        and (role is None or owner_role == role)
+    )
+
+
+def _restore_curve_object(obj, state):
+    data = obj.data
+    data.dimensions = state["dimensions"]
+    data.resolution_u = state["resolution_u"]
+    data.render_resolution_u = state["render_resolution_u"]
+    data.twist_mode = state["twist_mode"]
+    for spline in tuple(data.splines):
+        data.splines.remove(spline)
+    for saved in state["splines"]:
+        spline = data.splines.new(saved["type"])
+        points = saved["points"]
+        collection = (
+            spline.bezier_points if saved["type"] == "BEZIER" else spline.points
+        )
+        if len(points) > 1:
+            collection.add(len(points) - 1)
+        for point, values in zip(collection, points):
+            point.co = values["co"]
+            point.radius = values["radius"]
+            point.tilt = values["tilt"]
+            if saved["type"] == "BEZIER":
+                point.handle_left = values["handle_left"]
+                point.handle_right = values["handle_right"]
+                point.handle_left_type = values["handle_left_type"]
+                point.handle_right_type = values["handle_right_type"]
+            else:
+                for name in ("weight", "weight_softbody"):
+                    saved_value = values[name]
+                    # Blender 5.1 clamps an explicit weight_softbody=0 assignment
+                    # to 0.01, while a newly created point legitimately keeps
+                    # its implicit 0.0 default.  Do not disturb that default.
+                    if (
+                        saved_value is not None
+                        and hasattr(point, name)
+                        and not (name == "weight_softbody" and saved_value <= 0.0)
+                    ):
+                        setattr(point, name, saved_value)
+        if hasattr(spline, "order_u"):
+            spline.order_u = min(saved["order_u"], max(2, len(points)))
+        if hasattr(spline, "use_endpoint_u"):
+            spline.use_endpoint_u = saved["use_endpoint_u"]
+        if hasattr(spline, "use_cyclic_u"):
+            spline.use_cyclic_u = saved["use_cyclic_u"]
+
+    saved_hooks = state["hooks"]
+    # The build transaction is synchronous, so the names captured at its start
+    # are authoritative within this rollback.  Unlike RNA pointers they cannot
+    # be accidentally reused after Blender frees and reallocates a Modifier.
+    for modifier in tuple(obj.modifiers):
+        if modifier.type == "HOOK" and modifier.name not in saved_hooks:
+            obj.modifiers.remove(modifier)
+    restored_names = {}
+    for name, values in sorted(
+        saved_hooks.items(), key=lambda item: item[1]["index"]
+    ):
+        modifier = obj.modifiers.get(name)
+        if modifier is not None and modifier.type != "HOOK":
+            modifier = None
+        if modifier is None:
+            modifier = obj.modifiers.new(name, "HOOK")
+        modifier.object = values["object"]
+        modifier.subtarget = values["subtarget"]
+        modifier.strength = values["strength"]
+        modifier.falloff_type = values["falloff_type"]
+        modifier.center = values["center"]
+        modifier.matrix_inverse = values["matrix_inverse"]
+        modifier.vertex_indices_set(values["vertex_indices"])
+        current_index = obj.modifiers.find(modifier.name)
+        desired_index = min(values["index"], len(obj.modifiers) - 1)
+        if current_index != desired_index:
+            obj.modifiers.move(current_index, desired_index)
+        restored_names[name] = modifier.name
+    return restored_names
+
+
 def _component_bone_names(component):
     names = {
         reference.bone_name
@@ -427,12 +641,13 @@ def _component_bone_names(component):
 
 
 def capture_component_build_state(armature, component):
+    instance_id = ensure_rig_instance_id(armature)
     widget_geometry = {}
     for obj in bpy.data.objects:
         if (
             obj.type == "MESH"
             and obj.get("coa_rig_component_uuid") == component.component_uuid
-            and obj.get("coa_rig_instance_id") == ensure_rig_instance_id(armature)
+            and obj.get("coa_rig_instance_id") == instance_id
         ):
             widget_geometry[obj.name] = {
                 "vertices": tuple(tuple(vertex.co) for vertex in obj.data.vertices),
@@ -456,7 +671,7 @@ def capture_component_build_state(armature, component):
         if name in armature.data.bones
     }
     object_states = {}
-    instance_id = ensure_rig_instance_id(armature)
+    curve_states = {}
     for obj in bpy.data.objects:
         if (
             obj.get("coa_rig_instance_id") == instance_id
@@ -469,8 +684,14 @@ def capture_component_build_state(armature, component):
                 "parent_bone": obj.parent_bone,
                 "hide_viewport": obj.hide_viewport,
                 "hide_render": obj.hide_render,
+                "hide_select": obj.hide_select,
+                "display_type": obj.display_type,
+                "show_in_front": obj.show_in_front,
             }
+            if obj.type == "CURVE":
+                curve_states[obj.name] = _curve_object_snapshot(obj)
     return {
+        "instance_id": instance_id,
         "object_names": frozenset(obj.name for obj in bpy.data.objects),
         "bone_names": frozenset(bone.name for bone in armature.data.bones),
         "constraints": constraints,
@@ -478,6 +699,7 @@ def capture_component_build_state(armature, component):
         "bone_states": bone_states,
         "widget_geometry": widget_geometry,
         "object_states": object_states,
+        "curve_states": curve_states,
         "artifacts": tuple(
             {
                 "artifact_uuid": artifact.artifact_uuid,
@@ -527,6 +749,7 @@ def _restore_constraint(pose_bone, snapshot):
     target_index = min(snapshot["index"], len(pose_bone.constraints) - 1)
     if current_index != target_index and hasattr(pose_bone.constraints, "move"):
         pose_bone.constraints.move(current_index, target_index)
+    return constraint
 
 
 def _restore_pose_bone(armature, name, snapshot):
@@ -574,69 +797,29 @@ def rollback_component_build(armature, component, snapshot):
     bpy.ops.object.mode_set(mode="POSE")
 
     previous_constraints = snapshot["constraints"]
-    affected_bone_names = set(snapshot["pose_states"])
-    affected_bone_names.update(_component_bone_names(component))
-    current_owned_constraint_pairs = {
-        (artifact.bone_name, artifact.constraint_name)
-        for artifact in component.artifacts
-        if artifact.data_type == "CONSTRAINT"
-        and artifact.bone_name
-        and artifact.constraint_name
-        and artifact.owned
+    instance_id = snapshot.get("instance_id") or ensure_rig_instance_id(armature)
+    component_uuid = component.component_uuid
+    previous_constraint_names = {
+        bone_name: {item["name"] for item in items}
+        for bone_name, items in previous_constraints.items()
     }
-    previous_owned_constraint_pairs = {
-        (artifact["bone_name"], artifact["constraint_name"])
-        for artifact in snapshot["artifacts"]
-        if artifact["data_type"] == "CONSTRAINT"
-        and artifact["bone_name"]
-        and artifact["constraint_name"]
-        and artifact["owned"]
-    }
-    owned_constraint_pairs = (
-        current_owned_constraint_pairs | previous_owned_constraint_pairs
-    )
-    constraint_prefix = f"COA_COMP_{component.component_uuid[:8]}_"
-    generated_constraint_names = {
-        f"{constraint_prefix}Depth",
-        f"{constraint_prefix}IK",
-        f"{constraint_prefix}EndRotation",
-        f"{constraint_prefix}BendDistance",
-    }
-
-    # Detach all component-owned constraints before restoring or recreating
-    # their generated target bones. User constraints remain untouched.
+    # Snapshot names are authoritative only inside this synchronous
+    # transaction.  They avoid RNA pointer reuse while never serving as
+    # persistent artifact ownership outside rollback.
     for pose_bone in armature.pose.bones:
-        if pose_bone.name not in affected_bone_names:
-            continue
-        previous_names = {
-            item["name"]
-            for item in previous_constraints.get(pose_bone.name, ())
-        }
         for constraint in tuple(pose_bone.constraints):
-            if (
-                (pose_bone.name, constraint.name) in owned_constraint_pairs
-                or (
-                    constraint.name in generated_constraint_names
-                    and constraint.name not in previous_names
-                )
+            if constraint.name not in previous_constraint_names.get(
+                pose_bone.name,
+                set(),
             ):
                 pose_bone.constraints.remove(constraint)
 
-    owned_bone_names = _component_bone_names(component)
-    instance_id = ensure_rig_instance_id(armature)
     bpy.ops.object.mode_set(mode="OBJECT")
     bpy.ops.object.mode_set(mode="EDIT")
     for edit_bone in tuple(armature.data.edit_bones):
         if edit_bone.name in snapshot["bone_names"]:
             continue
-        if (
-            edit_bone.name in owned_bone_names
-            or (
-                edit_bone.get("coa_rig_instance_id") == instance_id
-                and edit_bone.get("coa_rig_component_uuid")
-                == component.component_uuid
-            )
-        ):
+        if _matches_owned_tags(edit_bone, instance_id, component_uuid):
             armature.data.edit_bones.remove(edit_bone)
 
     # Recreate component-owned bones that a failed reconcile deleted, then
@@ -678,39 +861,19 @@ def rollback_component_build(armature, component, snapshot):
 
     # Constraint targets are now valid again, so restore the prior managed
     # stack and its original ordering.
-    for bone_name, constraint_name in previous_owned_constraint_pairs:
+    restored_constraints = {}
+    for bone_name, items in previous_constraints.items():
         pose_bone = armature.pose.bones.get(bone_name)
         if pose_bone is None:
             continue
-        item = next(
-            (
-                value
-                for value in previous_constraints.get(bone_name, ())
-                if value["name"] == constraint_name
-            ),
-            None,
-        )
-        if item is not None:
-            _restore_constraint(pose_bone, item)
+        for item in items:
+            constraint = _restore_constraint(pose_bone, item)
+            restored_constraints[(bone_name, item["name"])] = constraint.name
 
-    owned_object_names = {
-        artifact.object_name
-        for artifact in component.artifacts
-        if artifact.data_type == "OBJECT"
-        and artifact.object_name
-        and artifact.owned
-    }
     for obj in tuple(bpy.data.objects):
         if obj.name in snapshot["object_names"]:
             continue
-        if (
-            obj.name in owned_object_names
-            or (
-                obj.get("coa_rig_instance_id") == instance_id
-                and obj.get("coa_rig_component_uuid")
-                == component.component_uuid
-            )
-        ):
+        if _matches_owned_tags(obj, instance_id, component_uuid):
             bpy.data.objects.remove(obj, do_unlink=True)
     for object_name, geometry in snapshot["widget_geometry"].items():
         obj = bpy.data.objects.get(object_name)
@@ -729,12 +892,30 @@ def rollback_component_build(armature, component, snapshot):
         obj.matrix_world = state["matrix_world"]
         obj.hide_viewport = state["hide_viewport"]
         obj.hide_render = state["hide_render"]
+        obj.hide_select = state.get("hide_select", obj.hide_select)
+        obj.display_type = state.get("display_type", obj.display_type)
+        obj.show_in_front = state.get("show_in_front", obj.show_in_front)
+    restored_modifiers = {}
+    for object_name, state in snapshot.get("curve_states", {}).items():
+        obj = bpy.data.objects.get(object_name)
+        if obj is not None and obj.type == "CURVE":
+            for saved_name, modifier_name in _restore_curve_object(
+                obj,
+                state,
+            ).items():
+                restored_modifiers[(object_name, saved_name)] = modifier_name
 
     component.artifacts.clear()
     for values in snapshot["artifacts"]:
         artifact = component.artifacts.add()
         for name, value in values.items():
             setattr(artifact, name, value)
+        constraint_key = (artifact.bone_name, artifact.constraint_name)
+        modifier_key = (artifact.object_name, artifact.constraint_name)
+        if artifact.data_type == "CONSTRAINT" and constraint_key in restored_constraints:
+            artifact.constraint_name = restored_constraints[constraint_key]
+        elif artifact.data_type == "MODIFIER" and modifier_key in restored_modifiers:
+            artifact.constraint_name = restored_modifiers[modifier_key]
     for name, value in snapshot["component_fields"].items():
         setattr(component, name, value)
 

@@ -257,11 +257,11 @@ def _replace_state_cells(control, columns, rows, snapshots=None):
 
 class COATOOLS2_OT_AddRigControl(bpy.types.Operator):
     bl_idname = "coa_tools2.add_rig_control"
-    bl_label = "Add Rig Control"
+    bl_label = "Add State Rig"
     bl_description = "Create a Geometry Nodes control preset; bindings can be added later"
     bl_options = {"REGISTER", "UNDO"}
 
-    label: StringProperty(default="Rig Control")
+    label: StringProperty(default="State Rig")
     control_type: EnumProperty(
         items=(
             ("SLIDER_1D", "1D Slider", "Linear slider"),

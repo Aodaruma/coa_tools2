@@ -72,6 +72,12 @@ from .semantic_schema import (
     WidgetPresentationRef,
     validate_semantic_rig,
 )
+from .secondary_motion import (
+    SecondaryMotionResult,
+    SecondaryMotionSettings,
+    filter_secondary_motion,
+    simulate_secondary_motion,
+)
 
 __all__ = [
     "SCHEMA_VERSION",
@@ -115,6 +121,8 @@ __all__ = [
     "RigSolverMode",
     "RigFrameSpec",
     "SecondaryMotionSolverSpec",
+    "SecondaryMotionResult",
+    "SecondaryMotionSettings",
     "SemanticChannelSpec",
     "SemanticOutputSpec",
     "SemanticRigSpec",
@@ -132,6 +140,8 @@ __all__ = [
     "WidgetSpec",
     "WidgetPresentationRef",
     "evaluate_pose_field",
+    "filter_secondary_motion",
+    "simulate_secondary_motion",
     "validate_pose_field",
     "validate_semantic_rig",
 ]

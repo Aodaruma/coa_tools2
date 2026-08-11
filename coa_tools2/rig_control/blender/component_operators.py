@@ -519,6 +519,7 @@ class COATOOLS2_OT_AddComponentBinding(bpy.types.Operator):
         _armature_object, component = _active_component(context)
         return (
             component is not None
+            and component.component_type != "SEMANTIC"
             and component.deformation_mode == "PARAMETRIC"
             and bool(component.control_bone)
         )
@@ -564,6 +565,12 @@ class COATOOLS2_OT_AddComponentBinding(bpy.types.Operator):
 
     def execute(self, context):
         armature, component = _active_component(context)
+        if component is None or component.component_type == "SEMANTIC":
+            self.report(
+                {"ERROR"},
+                "Character Rig outputs belong to a Recorded Pose Map stage.",
+            )
+            return {"CANCELLED"}
         target = bpy.data.objects.get(self.target_object_name)
         if armature is None or component is None or target is None:
             self.report({"ERROR"}, "Component and target object are required.")

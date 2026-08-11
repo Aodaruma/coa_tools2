@@ -506,7 +506,7 @@ def _resolve_field_storage(
         owner_uuid = _identifier(
             field, ("component_uuid", "owner_component_uuid", "rig_uuid")
         )
-        if not owner_uuid or owner_uuid == component_uuid:
+        if not owner_uuid or _id_matches(owner_uuid, component_uuid):
             return field
     raise PoseFieldResolutionError("Semantic pose-field stage was not found.")
 
@@ -547,6 +547,135 @@ def _query_for_spec(spec: PoseFieldSpec, values: Sequence[float]) -> tuple[float
     return query if all(math.isfinite(value) for value in query) else None
 
 
+def _raw_rotation(owner: Any):
+    mode = getattr(owner, "rotation_mode", "XYZ")
+    if mode == "QUATERNION":
+        return owner.rotation_quaternion.to_euler("XYZ")
+    if mode == "AXIS_ANGLE":
+        from mathutils import Quaternion
+
+        angle, x, y, z = owner.rotation_axis_angle
+        return Quaternion((x, y, z), angle).to_euler("XYZ")
+    return owner.rotation_euler
+
+
+def _matrix_rotation_order(owner: Any) -> str:
+    mode = getattr(owner, "rotation_mode", "XYZ")
+    return mode if mode in {"XYZ", "XZY", "YXZ", "YZX", "ZXY", "ZYX"} else "XYZ"
+
+
+def _evaluated_transform_matrix(
+    source: Any,
+    owner: Any,
+    transform_space: str,
+    *,
+    is_pose_bone: bool,
+):
+    """Return the matrix represented by a Transform Channel variable.
+
+    Blender's ``WORLD_SPACE`` includes parenting, rest pose and constraints;
+    ``LOCAL_SPACE`` includes constraints but excludes parenting/rest pose.
+    Raw channels for ``TRANSFORM_SPACE`` are handled by the caller.
+    """
+
+    if transform_space == "WORLD_SPACE":
+        return source.matrix_world @ owner.matrix if is_pose_bone else owner.matrix_world
+    if transform_space == "LOCAL_SPACE":
+        if is_pose_bone:
+            return source.convert_space(
+                pose_bone=owner,
+                matrix=owner.matrix,
+                from_space="POSE",
+                to_space="LOCAL",
+            )
+        return owner.matrix_local
+    raise PoseFieldAdapterError(
+        f"Unsupported live input transform space: {transform_space}"
+    )
+
+
+def evaluate_live_input_term(term: Any, armature: Any) -> float:
+    """Evaluate one stored input with the same semantics as its driver target."""
+
+    source = _value(term, ("source_object",), None) or armature
+    source_kind = _identifier(term, ("source_kind",)).upper()
+    data_path = _identifier(term, ("data_path",))
+    array_index = int(_value(term, ("array_index",), -1))
+    if source_kind == "CUSTOM_PROPERTY":
+        if not data_path:
+            raise PoseFieldAdapterError("Live input property path is missing.")
+        value = source.path_resolve(data_path)
+        if array_index >= 0:
+            value = value[array_index]
+        return float(value)
+    bone_name = _identifier(term, ("source_bone", "bone_target"))
+    if bone_name and getattr(source, "type", "") != "ARMATURE":
+        raise PoseFieldAdapterError(
+            f"Live input bone '{bone_name}' requires an Armature source."
+        )
+    owner = source.pose.bones.get(bone_name) if bone_name else source
+    if owner is None:
+        raise PoseFieldAdapterError(f"Live input bone is missing: {bone_name}")
+    transform_type = _identifier(term, ("transform_type",)).upper()
+    try:
+        axis = "XYZ".index(transform_type[-1])
+    except (IndexError, ValueError) as exc:
+        raise PoseFieldAdapterError("Invalid live input transform type.") from exc
+    transform_space = _identifier(term, ("transform_space",)) or "LOCAL_SPACE"
+    if transform_space == "TRANSFORM_SPACE":
+        if transform_type.startswith("LOC_"):
+            return float(owner.location[axis])
+        if transform_type.startswith("ROT_"):
+            return float(_raw_rotation(owner)[axis])
+        if transform_type.startswith("SCALE_"):
+            return float(owner.scale[axis])
+        raise PoseFieldAdapterError(
+            f"Unsupported live input transform: {transform_type}"
+        )
+
+    matrix = _evaluated_transform_matrix(
+        source,
+        owner,
+        transform_space,
+        is_pose_bone=bool(bone_name),
+    )
+    location, rotation, scale = matrix.decompose()
+    if transform_type.startswith("LOC_"):
+        return float(location[axis])
+    if transform_type.startswith("ROT_"):
+        return float(rotation.to_euler(_matrix_rotation_order(owner))[axis])
+    if transform_type.startswith("SCALE_"):
+        return float(scale[axis])
+    raise PoseFieldAdapterError(f"Unsupported live input transform: {transform_type}")
+
+
+def _live_term_value(term: Any, armature: Any) -> float:
+    return evaluate_live_input_term(term, armature)
+
+
+def _live_query(storage: Any, spec: PoseFieldSpec, armature: Any) -> tuple[float, ...] | None:
+    values = []
+    for channel in _collection(storage, ("inputs", "input_channels")):
+        value = float(_value(channel, ("offset",), 0.0))
+        for term in _collection(channel, ("terms", "input_terms")):
+            value += float(_value(term, ("coefficient",), 1.0)) * _live_term_value(
+                term, armature
+            )
+        values.append(value)
+    return _query_for_spec(spec, values)
+
+
+def _runtime_query(key: PoseFieldRuntimeKey, spec: PoseFieldSpec, values):
+    if values:
+        return _query_for_spec(spec, values)
+    try:
+        armature = _find_armature(key.rig_instance_uuid)
+        storage = _resolve_field_storage(*key.field_key)
+        return _live_query(storage, spec, armature) if armature is not None else None
+    except Exception:
+        return None
+
+
 def evaluate_continuous_scalar(
     rig_instance_uuid: str,
     component_uuid: str,
@@ -560,7 +689,7 @@ def evaluate_continuous_scalar(
         str(rig_instance_uuid), str(component_uuid), str(stage_uuid), str(output_id)
     )
     spec = _resolve_spec(key)
-    query = _query_for_spec(spec, query_values) if spec is not None else None
+    query = _runtime_query(key, spec, query_values) if spec is not None else None
     if spec is None or query is None:
         return 0.0
     try:
@@ -597,7 +726,7 @@ def evaluate_discrete_scalar(
         str(rig_instance_uuid), str(component_uuid), str(stage_uuid), str(output_id)
     )
     spec = _resolve_spec(key)
-    query = _query_for_spec(spec, query_values) if spec is not None else None
+    query = _runtime_query(key, spec, query_values) if spec is not None else None
     if spec is None or query is None:
         return 0.0
     try:

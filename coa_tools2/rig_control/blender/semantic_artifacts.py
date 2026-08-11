@@ -17,6 +17,7 @@ projected joints, so their local Z axes remain aligned to the artwork plane.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 import re
 from typing import Iterable
 
@@ -51,6 +52,8 @@ class ProjectedIKArtifacts:
     presentation_bones: tuple[str, ...]
     source_bones: tuple[str, ...]
     pole_bone: str = ""
+    bend_center_bone: str = ""
+    pole_distance_constraint: str = ""
 
     @property
     def primary_control_bone(self) -> str:
@@ -59,12 +62,16 @@ class ProjectedIKArtifacts:
     @property
     def generated_bones(self) -> tuple[str, ...]:
         pole = (self.pole_bone,) if self.pole_bone else ()
+        bend_center = (
+            (self.bend_center_bone,) if self.bend_center_bone else ()
+        )
         return (
             self.frames.generated_bones
             + self.mechanism_bones
             + self.projected_joint_bones
             + self.presentation_bones
             + pole
+            + bend_center
         )
 
 
@@ -77,6 +84,7 @@ class SemanticArtifactNamePlan:
     projected_joints: tuple[str, ...]
     presentation_bones: tuple[str, ...]
     pole: str
+    bend_center: str
 
 
 def _slugify(value: str) -> str:
@@ -138,6 +146,7 @@ def semantic_artifact_name_plan(
             f"MCH_{stem}_PRESENT_{index:02d}" for index in range(chain_size)
         ),
         pole=f"CTRL_{stem}_BEND",
+        bend_center=f"MCH_{stem}_BEND_CENTER",
     )
 
 
@@ -183,7 +192,6 @@ def _lazy_helpers():
         _tag_owned_bone,
         find_component_bone,
     )
-
     return {
         "functions": functions,
         "Matrix": Matrix,
@@ -249,6 +257,66 @@ def _owned_bone_names(armature, component, roles: Iterable[str], helpers):
         bone = helpers["find_component_bone"](armature, component_uuid, role)
         result[role] = bone.name if bone is not None else ""
     return result
+
+
+def _reconcile_owned_bone_renames(
+    armature,
+    component,
+    roles: Iterable[str],
+    helpers,
+):
+    """Synchronize artifact references after a generated bone is renamed.
+
+    Blender keeps constraints and pointer-valued references attached when a
+    data bone is renamed, while our serialized artifact owner names are plain
+    strings.  The generated bone's component UUID + semantic stage role tags
+    are therefore the authoritative identity.  Only component-owned records
+    are rewritten.  Blender updates Constraint subtargets itself; Constraint
+    RNA has no custom ID properties in 5.1, so saved Constraint names are never
+    used here to locate and mutate a physical Constraint.
+    """
+
+    component_uuid = _component_uuid(component)
+    current_by_role = {}
+    for role in roles:
+        bone = helpers["find_component_bone"](
+            armature,
+            component_uuid,
+            role,
+        )
+        if bone is not None:
+            current_by_role[role] = bone.name
+
+    renamed = {}
+    for artifact in component.artifacts:
+        if (
+            not artifact.owned
+            or artifact.data_type != "BONE"
+            or artifact.role not in current_by_role
+            or not artifact.bone_name
+        ):
+            continue
+        current_name = current_by_role[artifact.role]
+        if artifact.bone_name == current_name:
+            continue
+        previous = renamed.get(artifact.bone_name)
+        if previous is not None and previous != current_name:
+            raise SemanticArtifactError(
+                f"Generated bone name '{artifact.bone_name}' is ambiguous."
+            )
+        renamed[artifact.bone_name] = current_name
+
+    if not renamed:
+        return {}
+
+    for artifact in component.artifacts:
+        if not artifact.owned:
+            continue
+        if artifact.data_type == "BONE" and artifact.role in current_by_role:
+            artifact.bone_name = current_by_role[artifact.role]
+        elif artifact.bone_name in renamed:
+            artifact.bone_name = renamed[artifact.bone_name]
+    return renamed
 
 
 def _ensure_edit_bone(
@@ -335,6 +403,12 @@ def ensure_projected_transform_artifacts(
         "display": semantic_stage_role(stage_uuid, "display_frame"),
         "control": semantic_stage_role(stage_uuid, "control_bone"),
     }
+    _reconcile_owned_bone_renames(
+        armature,
+        component,
+        roles.values(),
+        helpers,
+    )
     existing = _owned_bone_names(armature, component, roles.values(), helpers)
     plan = semantic_artifact_name_plan(component, stage)
 
@@ -456,9 +530,7 @@ def _project_to_frame(point, frame_matrix, Vector):
     return frame_matrix @ Vector((local.x, local.y, local.z))
 
 
-def _pole_position(source_bones, art_matrix, Vector):
-    upper = source_bones[0]
-    lower = source_bones[1]
+def _pole_position(upper, lower, art_matrix, Vector):
     start = upper.head.copy()
     joint = lower.head.copy()
     end = lower.tail.copy()
@@ -471,8 +543,73 @@ def _pole_position(source_bones, art_matrix, Vector):
         bend = art_matrix.to_3x3().col[2].copy()
         bend -= direction * bend.dot(direction)
     bend = _normalized(bend, art_matrix.to_3x3().col[0])
-    distance = max(sum(float(bone.length) for bone in source_bones[:2]), 0.1)
+    distance = max(float(upper.length) + float(lower.length), 0.1)
     return joint + bend * distance
+
+
+def _compute_pole_angle(upper, lower, pole_pose, Vector):
+    """Return a rest-space estimate for Blender's IK pole twist.
+
+    The estimate explicitly includes the upper bone's roll.  It is refined by
+    :func:`_fit_pole_angle`, because Blender's evaluated pole twist also
+    depends on mirrored chains and parent pose transforms.
+    """
+
+    upper_vector = upper.tail_local - upper.head_local
+    total_vector = lower.tail_local - upper.head_local
+    pole_vector = pole_pose.bone.head_local - upper.head_local
+    pole_normal = total_vector.cross(pole_vector)
+    projected_pole_axis = pole_normal.cross(upper_vector)
+    bone_x = upper.matrix_local.to_3x3() @ Vector((1.0, 0.0, 0.0))
+    if projected_pole_axis.length < 1.0e-6 or bone_x.length < 1.0e-6:
+        return 0.0
+    projected_pole_axis.normalize()
+    bone_x.normalize()
+    angle = bone_x.angle(projected_pole_axis)
+    if bone_x.cross(projected_pole_axis).dot(upper_vector) < 0.0:
+        angle = -angle
+    return angle
+
+
+def _fit_pole_angle(armature, owner, ik, expected_joint, initial_angle):
+    """Calibrate pole twist against the un-solved rest joint.
+
+    A full periodic coarse search followed by deterministic refinement avoids
+    roll and mirror sign assumptions.  The control is temporarily evaluated at
+    rest by the caller, so rebuilding at an animated frame produces the same
+    angle without changing the animator's pose.
+    """
+
+    import bpy
+
+    def wrapped(angle):
+        return (angle + math.pi) % math.tau - math.pi
+
+    def error(angle):
+        ik.pole_angle = wrapped(angle)
+        bpy.context.view_layer.update()
+        return (owner.head - expected_joint).length
+
+    sample_count = 32
+    step = math.tau / sample_count
+    candidates = [initial_angle]
+    candidates.extend(-math.pi + index * step for index in range(sample_count))
+    best_angle = min(candidates, key=error)
+    radius = step
+    for _round in range(7):
+        candidates = (
+            best_angle - radius,
+            best_angle - radius * 0.5,
+            best_angle,
+            best_angle + radius * 0.5,
+            best_angle + radius,
+        )
+        best_angle = min(candidates, key=error)
+        radius *= 0.25
+    best_angle = wrapped(best_angle)
+    ik.pole_angle = best_angle
+    bpy.context.view_layer.update()
+    return best_angle
 
 
 def ensure_projected_ik_artifacts(
@@ -517,8 +654,27 @@ def ensure_projected_ik_artifacts(
         for index in range(len(source_names))
     )
     pole_role = semantic_stage_role(stage_uuid, "pole_control")
-    all_roles = mechanism_roles + projection_roles + presentation_roles + (pole_role,)
+    bend_center_role = semantic_stage_role(stage_uuid, "pole_bend_center")
+    all_roles = (
+        mechanism_roles
+        + projection_roles
+        + presentation_roles
+        + (pole_role, bend_center_role)
+    )
+    _reconcile_owned_bone_renames(
+        armature,
+        component,
+        all_roles,
+        helpers,
+    )
     existing = _owned_bone_names(armature, component, all_roles, helpers)
+    owner_index = len(source_names) - 2
+    available_chain = owner_index + 1
+    chain_count = min(
+        max(int(getattr(stage, "chain_length", 2)), 1),
+        available_chain,
+    )
+    pole_upper_index = max(owner_index - 1, 0)
 
     helpers["switch_to_edit_mode"](armature)
     try:
@@ -605,7 +761,16 @@ def ensure_projected_ik_artifacts(
             presentation.append(bone)
 
         pole = None
+        bend_center = None
         if bool(getattr(stage, "use_pole", False)):
+            bend_center = _ensure_edit_bone(
+                armature,
+                component,
+                role=bend_center_role,
+                default_name=plan.bend_center,
+                existing_name=existing[bend_center_role],
+                helpers=helpers,
+            )
             pole = _ensure_edit_bone(
                 armature,
                 component,
@@ -614,16 +779,35 @@ def ensure_projected_ik_artifacts(
                 existing_name=existing[pole_role],
                 helpers=helpers,
             )
+            pole_upper = mechanism[pole_upper_index]
+            pole_lower = mechanism[owner_index]
+            center_matrix = art_matrix.copy()
+            center_matrix.translation = pole_lower.head.copy()
+            bend_center.parent = source_parent
+            bend_center.use_connect = False
+            bend_center.use_deform = False
+            helpers["set_edit_bone_matrix"](
+                bend_center,
+                center_matrix,
+                helper_length,
+            )
             pole.parent = source_parent
             pole.use_connect = False
+            pole.use_deform = False
             matrix = art_matrix.copy()
-            matrix.translation = _pole_position(source_bones, art_matrix, Vector)
+            matrix.translation = _pole_position(
+                pole_upper,
+                pole_lower,
+                art_matrix,
+                Vector,
+            )
             helpers["set_edit_bone_matrix"](pole, matrix, helper_length * 4.0)
 
         mechanism_names = tuple(bone.name for bone in mechanism)
         projection_names = tuple(bone.name for bone in projected)
         presentation_names = tuple(bone.name for bone in presentation)
         pole_name = pole.name if pole is not None else ""
+        bend_center_name = bend_center.name if bend_center is not None else ""
     finally:
         import bpy
 
@@ -646,10 +830,27 @@ def ensure_projected_ik_artifacts(
         pole_pose = armature.pose.bones[pole_name]
         helpers["tag_owned_bone"](armature, pole_pose.bone, component, pole_role)
         _record_bone(component, pole_role, pole_name, helpers)
+        bend_center_pose = armature.pose.bones[bend_center_name]
+        helpers["tag_owned_bone"](
+            armature,
+            bend_center_pose.bone,
+            component,
+            bend_center_role,
+        )
+        _record_bone(
+            component,
+            bend_center_role,
+            bend_center_name,
+            helpers,
+        )
     else:
         pole_pose = None
+        bend_center_pose = None
 
-    for name in mechanism_names + projection_names + presentation_names:
+    hidden_names = mechanism_names + projection_names + presentation_names
+    if bend_center_name:
+        hidden_names += (bend_center_name,)
+    for name in hidden_names:
         pose_bone = armature.pose.bones[name]
         pose_bone.bone.hide_select = True
         _assign_collection(
@@ -661,6 +862,7 @@ def ensure_projected_ik_artifacts(
         )
     if pole_pose is not None:
         pole_pose.bone.hide_select = False
+        pole_pose.lock_location = (False, False, False)
         pole_pose.lock_rotation = (True, True, True)
         pole_pose.lock_scale = (True, True, True)
         _assign_collection(
@@ -675,9 +877,52 @@ def ensure_projected_ik_artifacts(
     short_stage = stage_uuid.replace("-", "")[:8]
     constraint_stem = f"COA_SEM_{short_component}_{short_stage}"
 
+    pole_distance_name = ""
+    if pole_pose is not None:
+        pole_distance_name = f"{constraint_stem}_BendDistance"
+        pole_distance_role = semantic_stage_role(
+            stage_uuid,
+            "pole_distance_constraint",
+        )
+        pole_distance = helpers["managed_constraint"](
+            pole_pose,
+            component,
+            pole_distance_name,
+            "LIMIT_DISTANCE",
+            role=pole_distance_role,
+        )
+        saved_pole_basis = pole_pose.matrix_basis.copy()
+        pole_distance.mute = True
+        try:
+            # Limit Distance measures world-space distance.  Sample the
+            # generated rest controls in world space so an Armature parent or
+            # object scale cannot shrink/expand the initial pole unexpectedly.
+            pole_pose.matrix_basis = helpers["Matrix"].Identity(4)
+            bpy.context.view_layer.update()
+            pole_world = armature.matrix_world @ pole_pose.head
+            center_world = armature.matrix_world @ bend_center_pose.head
+            pole_distance.target = armature
+            pole_distance.subtarget = bend_center_pose.name
+            pole_distance.distance = max(
+                (pole_world - center_world).length,
+                0.001,
+            )
+            pole_distance.limit_mode = "LIMITDIST_ONSURFACE"
+            pole_distance.use_transform_limit = True
+        finally:
+            pole_pose.matrix_basis = saved_pole_basis
+            pole_distance.mute = False
+            bpy.context.view_layer.update()
+        _record_constraint(
+            component,
+            pole_distance_role,
+            pole_pose,
+            pole_distance,
+            helpers,
+        )
+
     # The final source bone is the hand/foot/end marker.  The IK owner is the
     # preceding segment even for the smallest valid two-bone source chain.
-    owner_index = len(mechanism_names) - 2
     ik_owner = armature.pose.bones[mechanism_names[owner_index]]
     ik_role = semantic_stage_role(stage_uuid, "ik_constraint")
     ik = helpers["managed_constraint"](
@@ -685,23 +930,51 @@ def ensure_projected_ik_artifacts(
         component,
         f"{constraint_stem}_IK",
         "IK",
+        role=ik_role,
     )
-    ik.target = armature
-    ik.subtarget = frames.control_bone
-    available_chain = owner_index + 1 if owner_index >= 0 else len(mechanism_names)
-    ik.chain_count = min(
-        max(int(getattr(stage, "chain_length", 2)), 1),
-        available_chain,
+    control_pose = armature.pose.bones[frames.control_bone]
+    saved_control_basis = control_pose.matrix_basis.copy()
+    saved_pole_basis = (
+        pole_pose.matrix_basis.copy() if pole_pose is not None else None
     )
-    ik.use_stretch = bool(getattr(stage, "allow_stretch", False))
-    if pole_pose is not None:
-        ik.pole_target = armature
-        ik.pole_subtarget = pole_pose.name
-        ik.pole_angle = 0.0
-    else:
-        ik.pole_target = None
-        ik.pole_subtarget = ""
-        ik.pole_angle = 0.0
+    ik.mute = True
+    try:
+        # Fit against the generated rest pose, not whichever animated frame
+        # happened to be active when Update Rig Control was pressed.
+        control_pose.matrix_basis = helpers["Matrix"].Identity(4)
+        if pole_pose is not None:
+            pole_pose.matrix_basis = helpers["Matrix"].Identity(4)
+        bpy.context.view_layer.update()
+        expected_joint = ik_owner.head.copy()
+        ik.target = armature
+        ik.subtarget = frames.control_bone
+        ik.chain_count = chain_count
+        ik.use_stretch = bool(getattr(stage, "allow_stretch", False))
+        if pole_pose is not None:
+            ik.pole_target = armature
+            ik.pole_subtarget = pole_pose.name
+            ik.pole_angle = 0.0
+            ik.mute = False
+            upper = armature.data.bones[mechanism_names[pole_upper_index]]
+            lower = armature.data.bones[mechanism_names[owner_index]]
+            _fit_pole_angle(
+                armature,
+                ik_owner,
+                ik,
+                expected_joint,
+                _compute_pole_angle(upper, lower, pole_pose, helpers["Vector"]),
+            )
+        else:
+            ik.pole_target = None
+            ik.pole_subtarget = ""
+            ik.pole_angle = 0.0
+            ik.mute = False
+    finally:
+        control_pose.matrix_basis = saved_control_basis
+        if pole_pose is not None:
+            pole_pose.matrix_basis = saved_pole_basis
+        ik.mute = False
+        bpy.context.view_layer.update()
     _record_constraint(component, ik_role, ik_owner, ik, helpers)
 
     for index, projection_name in enumerate(projection_names):
@@ -713,6 +986,7 @@ def ensure_projected_ik_artifacts(
             component,
             f"{constraint_stem}_JointCopy_{index:02d}",
             "COPY_LOCATION",
+            role=copy_role,
         )
         copy.target = armature
         copy.subtarget = mechanism_names[source_index]
@@ -729,6 +1003,7 @@ def ensure_projected_ik_artifacts(
             component,
             f"{constraint_stem}_JointPlane_{index:02d}",
             "LIMIT_LOCATION",
+            role=limit_role,
         )
         limit.owner_space = "CUSTOM"
         limit.space_object = armature
@@ -748,6 +1023,7 @@ def ensure_projected_ik_artifacts(
             component,
             f"{constraint_stem}_PresentCopy_{index:02d}",
             "COPY_LOCATION",
+            role=copy_role,
         )
         copy.target = armature
         copy.subtarget = projection_names[index]
@@ -762,6 +1038,7 @@ def ensure_projected_ik_artifacts(
             component,
             f"{constraint_stem}_PresentStretch_{index:02d}",
             "STRETCH_TO",
+            role=stretch_role,
         )
         stretch.target = armature
         stretch.subtarget = projection_names[index + 1]
@@ -788,6 +1065,7 @@ def ensure_projected_ik_artifacts(
             component,
             f"{constraint_stem}_SourcePresent_{index:02d}",
             "COPY_TRANSFORMS",
+            role=copy_role,
         )
         copy.target = armature
         copy.subtarget = presentation_name
@@ -809,6 +1087,8 @@ def ensure_projected_ik_artifacts(
         presentation_bones=presentation_names,
         source_bones=source_names,
         pole_bone=pole_name,
+        bend_center_bone=bend_center_name,
+        pole_distance_constraint=pole_distance_name,
     )
 
 
