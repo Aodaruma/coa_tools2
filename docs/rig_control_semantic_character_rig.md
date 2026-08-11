@@ -13,7 +13,44 @@
 - 「見た目の法線方向へ動かす」: 傾けて表示したControlを操作しつつ、実際のArtは平面内に保ち、短縮や重なりをShape Keyで表現する。
 - 「紐を揺らす」: Spline IKによる基本形状へSecondary Motionを後段合成する。
 
-本書は目標設計であり、現行実装の説明は[Phase 6 キャラクターリグ現行実装資料](rig_control_phase6_current_implementation_inventory.md)を正とする。
+本書は目標設計とPhase 7の実装結果を併記する。[Phase 6 キャラクターリグ現行実装資料](rig_control_phase6_current_implementation_inventory.md)は、再設計前の試作を確認するための履歴資料として扱う。
+
+### 1.1 Phase 7実装状況
+
+本設計のPhase 1〜5は`codex/issue-47-rig-design`へ段階的に実装した。
+
+- Phase 1: Frame、Channel、Solver DAG、Output Policy、Presentation Referenceを持つSemantic Rig Schema
+- Phase 2: Projected Transformと、任意N次元のRecorded Pose Map
+- Phase 3: 3D Mechanism IKと、Art Planeへ投影するPresentation Chain
+- Phase 4: 区間指定、前後Blend、Anchor Captureを持つContact / Pin
+- Phase 5: NURBS、Hook、Spline IKを使うSpline Chainと、決定論的Bake方式のSecondary Motion
+
+Blender UIでは、`Projected Transform`、`Kinematic Chain`、`Spline Chain`がそれぞれ独立したSource Chainを持つ。Pose Modeで連結Boneを選択し、各Stageの`Assign Selected Chain`から割り当てる。これにより、同じCharacter Rig内でも腕をIK、髪をSplineとして別Chainへ接続できる。Mapping、Pin、Secondaryは`After UUIDs`で上流Stageを参照し、Component全体の最後のControlへ暗黙接続しない。
+
+Character Rigの絵側出力は、`Recorded Pose Map` Stage内のOutputだけを正規経路とする。旧`RigComponent.bindings`はLegacy Component専用であり、Character Rigでは追加を拒否する。複数の上流Stageを持つPose Mapへ入力次元を追加するときは、その次元が読むSource Stageを明示する。
+
+Recorded Pose Mapは初期実装から3次元以上を扱える。次元数を固定した3D専用実装ではなく、`SemanticChannel`の個数をそのままPose Fieldの次元として使用し、正規化した局所RBFで補間する。したがって、移動、回転、スケール、Solver Featureを必要な数だけ組み合わせられる。
+
+Character RigのCustom Shapeは内部機構と分離したPresentation Referenceまでを実装範囲とし、Geometry Nodesによる意味別Widget生成はPhase 6以降に行う。これにより、内部Solverを作り直さずに表示形状だけを交換できる。
+
+初期Blender Adapterの境界も明示しておく。
+
+- Pose Fieldの**入力次元数は任意**であり、3次元以上を同じEvaluatorで扱う。
+- Blender上のOutput Adapterは現在scalar単位である。Vector Snapshot自体はSchema/Evaluatorで保持できるが、Bone XYZ等は軸ごとのOutputとして登録する。
+- 離散Outputはnearest sampleで扱える。離散**入力次元**は、連続RBFと混同しないため未対応値を明示エラーにする。
+- 投影は明示的なArt Planeを標準とする。Screen Plane等の未実装modeを黙って同じ挙動にせず、Compile時に説明付きで拒否する。
+- Secondary Motionの初期版は位置Bakeである。回転はSpline tangentが作り、将来Quaternion log空間のspringを追加する。
+
+### 1.2 配布用サンプル
+
+実装済み機構を一つのファイルで比較できるよう、[semantic_character_rig_demo.blend](../samples/semantic_character_rig_demo.blend)を同梱する。ビューポートをCamera Viewのまま開き、フレーム`1`、`24`、`48`を切り替えると、次の四例を確認できる。
+
+- State Rig: 2x2 State MatrixとGeometry Nodes Widget
+- Character Rig: 4次元Recorded Pose Mapと9個のRBF Sample
+- Character Rig: 3D Mechanismで解き、平面へ投影する実IKと円形Pole制限
+- Character Rig: Spline ChainとBake済みSecondary Motion
+
+ファイル内の`README_SemanticCharacterRig.txt`に、各例の目的、操作対象、確認ポイントを収録している。再生成する場合は、既存プロジェクトでは実行せず、Blender 5.1以降を`--factory-startup --python scripts/blender_rig_semantic_character_sample.py`で起動する。Scriptは`--factory-startup`がない実行、ファイルを開いた状態、未保存変更がある状態をScene初期化前に拒否する。また、リポジトリ相対で保存先を解決し、個人環境の絶対パスをコードや説明文へ埋め込まない。
 
 ## 2. 用語
 
@@ -70,7 +107,7 @@ Semantic Rigはユーザーが直接選ぶ第三のリグ種類ではない。St
 
 State Matrixは1Dまたは2Dの状態補間として動作する。N次元Pose Map、Solver、接触、時間区間はまだ持たない。
 
-### 4.2 現在のCharacter Rig試作
+### 4.2 Phase 6以前のLegacy Character Component
 
 現行`RigComponent`には`ROOT`、`FK_CHAIN`、`SPINE_FK`、`LIMB_IK`があり、次の二方式に分かれている。
 
@@ -79,7 +116,7 @@ State Matrixは1Dまたは2Dの状態補間として動作する。N次元Pose M
 | `PARAMETRIC` | 非DeformなFrame / Controlの6軸をShape Key等へ線形Mappingする | `LIMB_IK`でもIKを生成せず、多点・非線形補間を持たない |
 | `DIRECT_BONES` | Source Boneを直接操作し、`LIMB_IK`ではBlender IKを生成する | 平面メッシュもBoneとともに3D回転する |
 
-現行サンプルはSource Boneを動かさず、Controlの6軸からShape Keyを駆動するサンプルである。実IKと平面維持を同時に検証するサンプルではない。
+旧サンプルはSource Boneを動かさず、Controlの6軸からShape Keyを駆動するサンプルである。実IKと平面維持を同時に検証するサンプルではない。Phase 7のCharacter RigはこのLegacy経路を暗黙変換せず、後述のSolver Stage DAGとして別に保存・評価する。
 
 ### 4.3 継続利用するもの
 
@@ -543,11 +580,14 @@ Acceptance:
 
 ### Phase 5: Spline Chain + Secondary Motion
 
-- Spline IK / B-Bone Adapter
+- NURBS Curve / Hook / Spline IK Adapter
+- 3D MechanismをArt Planeへ戻すProjected Presentation Chain
 - Root / Tip Pin、Twist、Stretch
 - Spring / Lag / Damping
-- Preview Cache、Reset、Bake
+- 決定論的な位置Secondary Motion Bake
 - Spline FeatureからCorrective Pose Mapを駆動
+
+初期実装では、解析解Springを明示的にBakeし、完成したAction / NLAだけを原子的に差し替える。常時HandlerによるLive Physicsは使用しない。B-Bone Adapter、回転Spring、Live Preview Cache / Reset UI、Splineの曲率・短縮量等を直接Semantic Channelへ公開するAdapterは後続実装とする。Spline Controlそのものは通常のPose Map入力として利用できる。
 
 Acceptance:
 

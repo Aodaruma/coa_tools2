@@ -168,3 +168,6 @@ Krita/coa_tools2_exporter/.idea/
 coa_tools2/_py_deps/
 
 bl_ext.vscode_development.*/
+
+# Blender automatic save backups
+*.blend1
