@@ -312,6 +312,24 @@ def _constraint_snapshot(constraint, index):
         "use_stretch",
         "distance",
         "limit_mode",
+        "space_object",
+        "space_subtarget",
+        "head_tail",
+        "use_x",
+        "use_y",
+        "use_z",
+        "use_offset",
+        "mix_mode",
+        "remove_target_shear",
+        "keep_axis",
+        "volume",
+        "rest_length",
+        "use_chain_offset",
+        "use_even_divisions",
+        "use_curve_radius",
+        "y_scale_mode",
+        "xz_scale_mode",
+        "use_original_scale",
     )
     values = {}
     for name in attributes:
@@ -437,6 +455,21 @@ def capture_component_build_state(armature, component):
         for name in _component_bone_names(component)
         if name in armature.data.bones
     }
+    object_states = {}
+    instance_id = ensure_rig_instance_id(armature)
+    for obj in bpy.data.objects:
+        if (
+            obj.get("coa_rig_instance_id") == instance_id
+            and obj.get("coa_rig_component_uuid") == component.component_uuid
+        ):
+            object_states[obj.name] = {
+                "matrix_world": obj.matrix_world.copy(),
+                "parent": obj.parent,
+                "parent_type": obj.parent_type,
+                "parent_bone": obj.parent_bone,
+                "hide_viewport": obj.hide_viewport,
+                "hide_render": obj.hide_render,
+            }
     return {
         "object_names": frozenset(obj.name for obj in bpy.data.objects),
         "bone_names": frozenset(bone.name for bone in armature.data.bones),
@@ -444,6 +477,7 @@ def capture_component_build_state(armature, component):
         "pose_states": pose_states,
         "bone_states": bone_states,
         "widget_geometry": widget_geometry,
+        "object_states": object_states,
         "artifacts": tuple(
             {
                 "artifact_uuid": artifact.artifact_uuid,
@@ -685,6 +719,16 @@ def rollback_component_build(armature, component, snapshot):
         obj.data.clear_geometry()
         obj.data.from_pydata(geometry["vertices"], geometry["edges"], ())
         obj.data.update()
+    for object_name, state in snapshot.get("object_states", {}).items():
+        obj = bpy.data.objects.get(object_name)
+        if obj is None:
+            continue
+        obj.parent = state["parent"]
+        obj.parent_type = state["parent_type"]
+        obj.parent_bone = state["parent_bone"]
+        obj.matrix_world = state["matrix_world"]
+        obj.hide_viewport = state["hide_viewport"]
+        obj.hide_render = state["hide_render"]
 
     component.artifacts.clear()
     for values in snapshot["artifacts"]:
