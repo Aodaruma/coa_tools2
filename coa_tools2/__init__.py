@@ -87,6 +87,9 @@ from .rig_control.blender import properties as rig_control_properties
 from .rig_control.blender import ui as rig_control_ui
 from .rig_control.blender import component_operators as rig_component_operators
 from .rig_control.blender import component_ui as rig_component_ui
+from .rig_control.blender import semantic_runtime as rig_semantic_runtime
+from .rig_control.blender import semantic_operators as rig_semantic_operators
+from .rig_control.blender import semantic_ui as rig_semantic_ui
 
 # register
 ##################################
@@ -228,6 +231,13 @@ classes = (
     rig_control_properties.COATOOLS2_PG_RigStatePoint,
     rig_control_properties.COATOOLS2_PG_RigStateCell,
     rig_control_properties.COATOOLS2_PG_RigComponentBoneRef,
+    rig_control_properties.COATOOLS2_PG_SemanticInputTerm,
+    rig_control_properties.COATOOLS2_PG_SemanticInputChannel,
+    rig_control_properties.COATOOLS2_PG_SemanticOutputChannel,
+    rig_control_properties.COATOOLS2_PG_SemanticSampleInput,
+    rig_control_properties.COATOOLS2_PG_SemanticSampleOutput,
+    rig_control_properties.COATOOLS2_PG_SemanticPoseSample,
+    rig_control_properties.COATOOLS2_PG_SemanticStage,
     rig_control_properties.COATOOLS2_PG_RigComponentArtifact,
     rig_control_properties.COATOOLS2_PG_RigComponent,
     rig_control_properties.COATOOLS2_PG_RigControl,
@@ -329,8 +339,10 @@ classes = (
     rig_component_operators.COATOOLS2_OT_UpdateRigComponent,
     rig_component_operators.COATOOLS2_OT_AddComponentBinding,
     rig_component_operators.COATOOLS2_OT_RemoveComponentBinding,
+    *rig_semantic_operators.CLASSES,
     rig_component_ui.COATOOLS2_UL_RigComponents,
     rig_component_ui.COATOOLS2_PT_RigComponents,
+    *rig_semantic_ui.CLASSES,
     # exporter
     export_dragonbones.COATOOLS2_OT_DragonBonesExport,
     export_dragonbones.COATOOLS2_PT_ExportPanel,
@@ -522,6 +534,14 @@ def register():
     # register props and keymap
     props.register()
     rig_control_properties.start_selection_sync()
+    rig_semantic_runtime.register_driver_namespace()
+    if (
+        rig_semantic_runtime.semantic_runtime_load_post
+        not in bpy.app.handlers.load_post
+    ):
+        bpy.app.handlers.load_post.append(
+            rig_semantic_runtime.semantic_runtime_load_post
+        )
     register_keymaps()
 
     # create handler
@@ -551,6 +571,10 @@ def unregister():
         (bpy.app.handlers.load_post, check_for_deprecated_data),
         (bpy.app.handlers.load_post, check_for_old_coatools),
         (bpy.app.handlers.load_post, set_shading),
+        (
+            bpy.app.handlers.load_post,
+            rig_semantic_runtime.semantic_runtime_load_post,
+        ),
     )
     for handler_list, callback in handlers:
         while callback in handler_list:
@@ -565,6 +589,7 @@ def unregister():
 
     # RNA pointer properties must be removed before their PropertyGroup classes.
     props.unregister()
+    rig_semantic_runtime.unregister_driver_namespace()
 
     for cls in reversed(classes):
         try:

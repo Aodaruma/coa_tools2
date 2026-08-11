@@ -159,7 +159,7 @@ def preflight_component_artifacts(armature, component):
 
     slug = slugify(component.semantic_id or component.label)
     expected_bones = ()
-    if (
+    if component.component_type != "SEMANTIC" and (
         component.deformation_mode == "PARAMETRIC"
         or component.component_type == "LIMB_IK"
     ):

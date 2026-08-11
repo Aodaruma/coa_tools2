@@ -60,6 +60,11 @@ class COATOOLS2_PT_RigComponents(bpy.types.Panel):
         row = layout.row(align=True)
         row.operator("coa_tools2.add_rig_component", icon="ADD")
         row.operator(
+            "coa_tools2.add_semantic_rig",
+            text="Semantic",
+            icon="NODETREE",
+        )
+        row.operator(
             "coa_tools2.update_rig_component",
             text="",
             icon="FILE_REFRESH",

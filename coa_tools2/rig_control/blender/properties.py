@@ -21,6 +21,7 @@ from bpy.props import (
 
 from ..component_schema import RIG_COMPONENT_SCHEMA_VERSION, RigComponentSpec
 from ..schema import SCHEMA_VERSION
+from ..semantic_schema import SEMANTIC_RIG_SCHEMA_VERSION
 
 
 AUTO_REBUILD_DELAY = 0.35
@@ -275,6 +276,250 @@ class COATOOLS2_PG_RigComponentBoneRef(bpy.types.PropertyGroup):
     bone_name: StringProperty()
 
 
+class COATOOLS2_PG_SemanticInputTerm(bpy.types.PropertyGroup):
+    """One Blender value contributing to a normalized semantic channel."""
+
+    term_uuid: StringProperty()
+    source_object: PointerProperty(type=bpy.types.Object)
+    source_bone: StringProperty()
+    source_kind: EnumProperty(
+        items=(
+            ("TRANSFORM", "Transform", "Read a local transform component"),
+            ("CUSTOM_PROPERTY", "Property", "Read an ID or pose-bone property"),
+        ),
+        default="TRANSFORM",
+    )
+    transform_type: EnumProperty(
+        items=tuple(
+            (identifier, label, label)
+            for identifier, label in (
+                ("LOC_X", "Location X"),
+                ("LOC_Y", "Location Y"),
+                ("LOC_Z", "Location Z"),
+                ("ROT_X", "Rotation X"),
+                ("ROT_Y", "Rotation Y"),
+                ("ROT_Z", "Rotation Z"),
+                ("SCALE_X", "Scale X"),
+                ("SCALE_Y", "Scale Y"),
+                ("SCALE_Z", "Scale Z"),
+            )
+        ),
+        default="LOC_X",
+    )
+    transform_space: EnumProperty(
+        items=(
+            ("LOCAL_SPACE", "Local", "Read the transform in local space"),
+            ("WORLD_SPACE", "World", "Read the transform in world space"),
+            ("TRANSFORM_SPACE", "Transform", "Read transform space"),
+        ),
+        default="LOCAL_SPACE",
+    )
+    data_path: StringProperty()
+    array_index: IntProperty(default=-1, min=-1)
+    coefficient: FloatProperty(default=1.0)
+
+
+class COATOOLS2_PG_SemanticInputChannel(bpy.types.PropertyGroup):
+    channel_uuid: StringProperty()
+    channel_id: StringProperty()
+    label: StringProperty(default="Input")
+    kind: EnumProperty(
+        items=(
+            ("CONTINUOUS", "Continuous", "Numerically interpolate this channel"),
+            ("DISCRETE", "Discrete", "Use nearest-sample selection"),
+        ),
+        default="CONTINUOUS",
+    )
+    scale: FloatProperty(
+        name="Distance Scale",
+        description="Meaningful size of one unit in the pose field",
+        default=1.0,
+        min=1.0e-8,
+    )
+    offset: FloatProperty(default=0.0)
+    terms: CollectionProperty(type=COATOOLS2_PG_SemanticInputTerm)
+    terms_index: IntProperty(default=0, min=0)
+
+
+class COATOOLS2_PG_SemanticOutputChannel(bpy.types.PropertyGroup):
+    output_uuid: StringProperty()
+    output_id: StringProperty()
+    label: StringProperty(default="Output")
+    target_kind: EnumProperty(
+        items=(
+            ("SHAPE_KEY", "Shape Key", "Drive a Shape Key value"),
+            (
+                "CONSTRAINT_INFLUENCE",
+                "Constraint Influence",
+                "Drive a pose-bone constraint influence",
+            ),
+            ("BONE_LOCATION", "Bone Location", "Drive one pose-bone location axis"),
+            ("BONE_ROTATION", "Bone Rotation", "Drive one pose-bone rotation axis"),
+            ("CUSTOM_PROPERTY", "Property", "Drive an arbitrary scalar property"),
+            ("SLOT_INDEX", "Sprite Slot", "Drive a discrete sprite slot"),
+            ("Z_VALUE", "Draw Order", "Drive COA draw order"),
+        ),
+        default="SHAPE_KEY",
+    )
+    target_object: PointerProperty(type=bpy.types.Object)
+    target_bone: StringProperty()
+    target_name: StringProperty()
+    data_path: StringProperty()
+    array_index: IntProperty(default=-1, min=-1, max=3)
+    policy: EnumProperty(
+        items=(
+            ("DIRECT", "Direct", "Apply the recorded value directly"),
+            (
+                "PROJECT_TO_ART_PLANE",
+                "Project to Art Plane",
+                "Discard motion normal to the configured art plane",
+            ),
+            ("PARAMETRIC", "Parametric", "Drive artwork parameters only"),
+            ("HYBRID", "Hybrid", "Combine projected transform and artwork output"),
+        ),
+        default="PARAMETRIC",
+    )
+    value_arity: IntProperty(default=1, min=1, max=4)
+    discrete: BoolProperty(default=False)
+    enabled: BoolProperty(default=True)
+
+
+class COATOOLS2_PG_SemanticSampleInput(bpy.types.PropertyGroup):
+    channel_id: StringProperty()
+    value: FloatProperty()
+
+
+class COATOOLS2_PG_SemanticSampleOutput(bpy.types.PropertyGroup):
+    output_uuid: StringProperty()
+    value: FloatVectorProperty(size=4)
+    value_arity: IntProperty(default=1, min=1, max=4)
+    discrete_value: StringProperty()
+
+
+class COATOOLS2_PG_SemanticPoseSample(bpy.types.PropertyGroup):
+    sample_uuid: StringProperty()
+    label: StringProperty(default="Pose Sample")
+    enabled: BoolProperty(default=True)
+    inputs: CollectionProperty(type=COATOOLS2_PG_SemanticSampleInput)
+    outputs: CollectionProperty(type=COATOOLS2_PG_SemanticSampleOutput)
+
+
+class COATOOLS2_PG_SemanticStage(bpy.types.PropertyGroup):
+    """One ordered, composable solver or mapping layer."""
+
+    stage_uuid: StringProperty()
+    semantic_id: StringProperty()
+    label: StringProperty(default="Semantic Stage")
+    stage_type: EnumProperty(
+        items=(
+            (
+                "PROJECTED_TRANSFORM",
+                "Projected Transform",
+                "Decode a displayed 3D direction into art-plane values",
+            ),
+            (
+                "POSE_MAP",
+                "Recorded Pose Map",
+                "Interpolate recorded outputs in an N-dimensional pose field",
+            ),
+            ("CHAIN_IK", "Kinematic Chain", "Solve a managed IK mechanism chain"),
+            (
+                "CONTACT_PIN",
+                "Contact / Pin",
+                "Constrain a control over an explicit frame range",
+            ),
+            ("SPLINE", "Spline Chain", "Solve a chain along a generated curve"),
+            (
+                "SECONDARY_MOTION",
+                "Secondary Motion",
+                "Bake deterministic spring and lag motion",
+            ),
+        ),
+        default="PROJECTED_TRANSFORM",
+    )
+    enabled: BoolProperty(default=True)
+    order: IntProperty(default=0, min=0)
+    depends_on: StringProperty(
+        description="Comma-separated stage UUIDs; normalized by the compiler"
+    )
+    source_bones: CollectionProperty(type=COATOOLS2_PG_RigComponentBoneRef)
+    source_bones_index: IntProperty(default=0, min=0)
+
+    projection_mode: EnumProperty(
+        items=(
+            ("SCREEN_PLANE", "Screen Plane", "Use the configured screen plane"),
+            ("ART_PLANE", "Art Plane", "Project onto the artwork plane"),
+            (
+                "VISUAL_NORMAL",
+                "Apparent Normal",
+                "Decode motion along the displayed apparent normal",
+            ),
+        ),
+        default="ART_PLANE",
+    )
+    preserve_art_plane: BoolProperty(default=True)
+    art_plane_normal: FloatVectorProperty(
+        size=3,
+        subtype="DIRECTION",
+        default=(0.0, 1.0, 0.0),
+    )
+    visual_axis: FloatVectorProperty(
+        size=3,
+        subtype="DIRECTION",
+        default=(0.0, 0.0, 1.0),
+    )
+    control_bone: StringProperty()
+    display_frame_bone: StringProperty()
+    mechanism_frame_bone: StringProperty()
+    art_frame_bone: StringProperty()
+
+    inputs: CollectionProperty(type=COATOOLS2_PG_SemanticInputChannel)
+    inputs_index: IntProperty(default=0, min=0)
+    outputs: CollectionProperty(type=COATOOLS2_PG_SemanticOutputChannel)
+    outputs_index: IntProperty(default=0, min=0)
+    samples: CollectionProperty(type=COATOOLS2_PG_SemanticPoseSample)
+    samples_index: IntProperty(default=0, min=0)
+    neighborhood_size: IntProperty(default=8, min=1, max=64)
+    kernel_radius: FloatProperty(default=2.0, min=1.0e-6)
+    exact_epsilon: FloatProperty(default=1.0e-8, min=1.0e-12)
+
+    use_pole: BoolProperty(default=True)
+    pole_bone: StringProperty()
+    chain_length: IntProperty(default=2, min=1, max=64)
+    allow_stretch: BoolProperty(default=False)
+    pin_target_object: PointerProperty(type=bpy.types.Object)
+    pin_target_bone: StringProperty()
+    pin_driven_bone: StringProperty()
+    pin_space: EnumProperty(
+        items=(
+            ("WORLD", "World", "Keep the contact in world space"),
+            ("CHARACTER", "Character", "Keep the contact relative to the rig"),
+            ("TARGET", "Target", "Keep the contact relative to a target"),
+        ),
+        default="WORLD",
+    )
+    pin_position: BoolProperty(default=True)
+    pin_orientation: BoolProperty(default=False)
+    pin_start: IntProperty(default=1)
+    pin_end: IntProperty(default=24)
+    blend_in: IntProperty(default=2, min=1)
+    blend_out: IntProperty(default=2, min=1)
+    pin_property: StringProperty()
+
+    curve_object: PointerProperty(type=bpy.types.Object)
+    spline_control_count: IntProperty(default=3, min=2, max=32)
+    root_pin: BoolProperty(default=True)
+    tip_pin: BoolProperty(default=False)
+
+    frequency_hz: FloatProperty(default=3.0, min=0.001)
+    damping_ratio: FloatProperty(default=0.65, min=0.0)
+    substeps: IntProperty(default=2, min=1, max=64)
+    pre_roll: IntProperty(default=8, min=0, max=250)
+    bake_start: IntProperty(default=1)
+    bake_end: IntProperty(default=24)
+    secondary_baked: BoolProperty(default=False)
+
+
 class COATOOLS2_PG_RigComponentArtifact(bpy.types.PropertyGroup):
     artifact_uuid: StringProperty()
     role: StringProperty()
@@ -302,6 +547,11 @@ class COATOOLS2_PG_RigComponent(bpy.types.PropertyGroup):
                 "Parametric limb target or legacy three-bone direct IK",
             ),
             ("SPINE_FK", "Spine / Body", "Body parameter or direct FK component"),
+            (
+                "SEMANTIC",
+                "Semantic Character Rig",
+                "Compose projected input, pose maps, kinematics, contact, and motion layers",
+            ),
         ),
         default="LIMB_IK",
         update=_mark_component_dirty,
@@ -514,6 +764,10 @@ class COATOOLS2_PG_RigComponent(bpy.types.PropertyGroup):
     bindings_index: IntProperty(default=0, min=0)
     artifacts: CollectionProperty(type=COATOOLS2_PG_RigComponentArtifact)
     artifacts_index: IntProperty(default=0, min=0)
+    semantic_schema_version: IntProperty(default=SEMANTIC_RIG_SCHEMA_VERSION)
+    semantic_stages: CollectionProperty(type=COATOOLS2_PG_SemanticStage)
+    semantic_stages_index: IntProperty(default=0, min=0)
+    semantic_edit_sample_uuid: StringProperty()
     enabled: BoolProperty(default=True, update=_mark_component_dirty)
     needs_rebuild: BoolProperty(default=False)
     last_error: StringProperty()
@@ -946,6 +1200,13 @@ CLASSES = (
     COATOOLS2_PG_RigStatePoint,
     COATOOLS2_PG_RigStateCell,
     COATOOLS2_PG_RigComponentBoneRef,
+    COATOOLS2_PG_SemanticInputTerm,
+    COATOOLS2_PG_SemanticInputChannel,
+    COATOOLS2_PG_SemanticOutputChannel,
+    COATOOLS2_PG_SemanticSampleInput,
+    COATOOLS2_PG_SemanticSampleOutput,
+    COATOOLS2_PG_SemanticPoseSample,
+    COATOOLS2_PG_SemanticStage,
     COATOOLS2_PG_RigComponentArtifact,
     COATOOLS2_PG_RigComponent,
     COATOOLS2_PG_RigControl,

@@ -166,6 +166,10 @@ def compile_component(armature, component):
         raise RigComponentCompileError(
             "Character posing components require an Armature SpriteObject."
         )
+    if component.component_type == "SEMANTIC":
+        from .semantic_compiler import compile_semantic_component
+
+        return compile_semantic_component(armature, component)
     _validate_deformation_mode_transition(component)
     _resolve_generated_bone_names(armature, component)
     issues = validate_component_spec(component_to_spec(component))
