@@ -20,6 +20,7 @@ from .semantic_outputs import (
     remove_semantic_output_drivers,
 )
 from .semantic_runtime import clear_pose_field_cache
+from .semantic_contact import key_pin_range
 
 
 def _armature(context):
@@ -477,6 +478,29 @@ class COATOOLS2_OT_CancelSemanticSample(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class COATOOLS2_OT_ApplySemanticPinRange(bpy.types.Operator):
+    bl_idname = "coa_tools2.apply_semantic_pin_range"
+    bl_label = "Capture & Key Pin Range"
+    bl_description = "Capture the contact at the start frame and key its smooth Pin/Release range"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        return _active_stage(context, stage_type="CONTACT_PIN")[2] is not None
+
+    def execute(self, context):
+        armature, component, stage = _active_stage(context, stage_type="CONTACT_PIN")
+        try:
+            compile_component(armature, component)
+            key_pin_range(armature, component, stage)
+        except Exception as exc:
+            traceback.print_exc()
+            self.report({"ERROR"}, str(exc))
+            return {"CANCELLED"}
+        self.report({"INFO"}, "Pin contact captured and transition range keyed.")
+        return {"FINISHED"}
+
+
 CLASSES = (
     COATOOLS2_OT_AddSemanticRig,
     COATOOLS2_OT_AddSemanticStage,
@@ -485,4 +509,5 @@ CLASSES = (
     COATOOLS2_OT_BeginSemanticSample,
     COATOOLS2_OT_CommitSemanticSample,
     COATOOLS2_OT_CancelSemanticSample,
+    COATOOLS2_OT_ApplySemanticPinRange,
 )

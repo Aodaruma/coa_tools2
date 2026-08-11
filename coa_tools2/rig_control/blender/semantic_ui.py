@@ -113,6 +113,7 @@ class COATOOLS2_PT_SemanticRig(bpy.types.Panel):
             row.prop(stage, "blend_out")
             box.prop(stage, "pin_position")
             box.prop(stage, "pin_orientation")
+            box.operator("coa_tools2.apply_semantic_pin_range", icon="KEY_HLT")
         elif stage.stage_type == "SPLINE":
             box.prop(stage, "spline_control_count")
             box.prop(stage, "root_pin")

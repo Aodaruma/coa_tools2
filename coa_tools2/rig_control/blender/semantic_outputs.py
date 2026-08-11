@@ -48,12 +48,10 @@ def _driver_uses_output(fcurve, armature, output_uuid: str) -> bool:
     if fcurve is None:
         return False
     prefix = _driver_token(output_uuid)
-    for variable in fcurve.driver.variables:
-        if not variable.name.startswith(prefix):
-            continue
-        if any(target.id == armature for target in variable.targets):
-            return True
-    return False
+    return any(
+        variable.name.startswith(prefix)
+        for variable in fcurve.driver.variables
+    )
 
 
 def _driver_add(target: SemanticTarget):
@@ -387,7 +385,7 @@ def capture_semantic_output_state(armature, component):
     for token in tokens:
         for target in _owned_driver_locations(armature, token):
             locations[(target.id_data.as_pointer(), target.data_path, target.array_index)] = (
-                target, token
+                target, token, False
             )
     for stage in component.semantic_stages:
         for output in stage.outputs:
@@ -396,19 +394,35 @@ def capture_semantic_output_state(armature, component):
             except SemanticOutputError:
                 continue
             locations[(target.id_data.as_pointer(), target.data_path, target.array_index)] = (
-                target, output.output_uuid
+                target, output.output_uuid, False
             )
+    for artifact in component.artifacts:
+        if (
+            artifact.data_type != "DRIVER"
+            or not artifact.role.startswith("semantic:")
+            or not artifact.data_path
+        ):
+            continue
+        id_data = bpy.data.objects.get(artifact.object_name)
+        if id_data is None:
+            continue
+        target = SemanticTarget(id_data, artifact.data_path)
+        locations[(id_data.as_pointer(), artifact.data_path, -1)] = (
+            target, artifact.binding_uuid, True
+        )
     return tuple(
-        (target, token, _driver_snapshot(_find_driver(target)))
-        for target, token in locations.values()
+        (target, token, force_owned, _driver_snapshot(_find_driver(target)))
+        for target, token, force_owned in locations.values()
     )
 
 
 def restore_semantic_output_state(armature, snapshots):
-    for target, token, previous in snapshots:
+    for target, token, force_owned, previous in snapshots:
         current = _find_driver(target)
         if previous is None:
-            if current is not None and _driver_uses_output(current, armature, token):
+            if current is not None and (
+                force_owned or _driver_uses_output(current, armature, token)
+            ):
                 _driver_remove(target)
             continue
         if current is None:

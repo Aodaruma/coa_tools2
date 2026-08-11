@@ -20,6 +20,11 @@ from .semantic_artifacts import (
     ensure_projected_ik_artifacts,
     ensure_projected_transform_artifacts,
 )
+from .semantic_contact import (
+    SemanticContactError,
+    ensure_contact_pin_artifacts,
+    validate_pin_ranges,
+)
 from .semantic_outputs import (
     SemanticOutputError,
     capture_semantic_output_state,
@@ -168,6 +173,10 @@ def compile_semantic_component(armature, component):
     stages = ordered_semantic_stages(component)
     _validate_sources(armature, component)
     try:
+        validate_pin_ranges(component)
+    except SemanticContactError as exc:
+        raise SemanticRigCompileError(str(exc)) from exc
+    try:
         preflight_semantic_outputs(armature, component)
     except SemanticOutputError as exc:
         raise SemanticRigCompileError(str(exc)) from exc
@@ -200,6 +209,18 @@ def compile_semantic_component(armature, component):
                     primary = _ensure_projected_stage(armature, component, stage)
                 elif stage.stage_type == "CHAIN_IK":
                     primary = _ensure_ik_stage(armature, component, stage)
+                elif stage.stage_type == "CONTACT_PIN":
+                    if primary is None and not stage.pin_driven_bone:
+                        raise SemanticRigCompileError(
+                            "Contact / Pin needs a preceding input or IK stage."
+                        )
+                    pin = ensure_contact_pin_artifacts(
+                        armature,
+                        component,
+                        stage,
+                        default_driven_bone=primary.name if primary else "",
+                    )
+                    primary = armature.pose.bones[pin.driven_bone]
             if primary is None:
                 raise SemanticRigCompileError(
                     "Add a Projected Transform or Kinematic Chain input stage."
