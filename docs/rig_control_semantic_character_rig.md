@@ -43,14 +43,24 @@ Character RigのCustom Shapeは内部機構と分離したPresentation Reference
 
 ### 1.2 配布用サンプル
 
-実装済み機構を一つのファイルで比較できるよう、[semantic_character_rig_demo.blend](../samples/semantic_character_rig_demo.blend)を同梱する。ビューポートをCamera Viewのまま開き、フレーム`1`、`24`、`48`を切り替えると、次の四例を確認できる。
+実装済み機構を一つのファイルで比較できるよう、[semantic_character_rig_demo.blend](../samples/semantic_character_rig_demo.blend)を同梱する。推奨起動方法は次のとおり。
+
+```powershell
+.\scripts\launch_blender_rig_manual_test.ps1 -OpenSemanticSample
+```
+
+この起動方法では開発中のCOA Tools 2を有効化してから、検証用一時フォルダへコピーしたサンプルを開く。手動保存してもリポジトリ内の配布ファイルは上書きされない。通常起動やダブルクリックで先にファイルを開き、Bが動かなかった場合は、`codex/issue-47-rig-design`のアドオンを有効化してからサンプルを開き直す。Recorded Pose MapのDriver関数`coa_pose_field_scalar`はファイル読込前に登録されている必要があり、古いExtension版やアドオン無効状態で一度失敗したDriverは、有効化しただけでは即時復帰しない。
+
+サンプルは四つのArmatureをMulti-Object Pose Modeにした状態で保存している。ビューポートをCamera Viewのまま開き、フレーム`1`、`24`、`48`を切り替えると、次の四例を確認できる。
 
 - State Rig: 2x2 State MatrixとGeometry Nodes Widget
 - Character Rig: 4次元Recorded Pose Mapと9個のRBF Sample
 - Character Rig: 3D Mechanismで解き、平面へ投影する実IKと円形Pole制限
 - Character Rig: Spline ChainとBake済みSecondary Motion
 
-ファイル内の`README_SemanticCharacterRig.txt`に、各例の目的、操作対象、確認ポイントを収録している。再生成する場合は、既存プロジェクトでは実行せず、Blender 5.1以降を`--factory-startup --python scripts/blender_rig_semantic_character_sample.py`で起動する。Scriptは`--factory-startup`がない実行、ファイルを開いた状態、未保存変更がある状態をScene初期化前に拒否する。また、リポジトリ相対で保存先を解決し、個人環境の絶対パスをコードや説明文へ埋め込まない。
+操作時は、Bの左側にあるダイヤ形CTRLをクリックし、`G`による画面内移動で`Move X/Y`、`R X X`と`R Z Z`でBone Localの`Turn X/Z`を変更する。この四入力は互いに独立しており、9個のSampleは中央と各軸の正負に対応する。Cは起動時に手形CTRLだけがActiveであり、`G`で動かすとIK Target、円形CTRLを動かすと曲げ方向を操作できる。手動操作後にフレームを変更すると、フレーム`1`、`24`、`48`のデモ用Keyへ戻る。
+
+ファイル内の`README_SemanticCharacterRig.txt`にも、各例の目的、操作対象、確認ポイントを収録している。再生成する場合は、既存プロジェクトでは実行せず、Blender 5.1以降を`--factory-startup --python scripts/blender_rig_semantic_character_sample.py`で起動する。Scriptは`--factory-startup`がない実行、ファイルを開いた状態、未保存変更がある状態をScene初期化前に拒否する。また、リポジトリ相対で保存先を解決し、個人環境の絶対パスをコードや説明文へ埋め込まない。
 
 ## 2. 用語
 

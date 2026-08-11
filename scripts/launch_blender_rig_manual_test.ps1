@@ -8,12 +8,17 @@ to load the normal Blender preferences while temporarily overriding only the
 user scripts directory for the launched process. No installed add-on files are
 deleted or overwritten in either mode. When -BlenderExecutable is omitted, the
 newest version found under Program Files\Blender Foundation is selected.
+-OpenSemanticSample enables this checkout first and then opens a temporary copy
+of the interactive State/Character Rig demo, so its Driver namespace is ready.
 
 .EXAMPLE
 .\scripts\launch_blender_rig_manual_test.ps1
 
 .EXAMPLE
 .\scripts\launch_blender_rig_manual_test.ps1 -UseCurrentProfile
+
+.EXAMPLE
+.\scripts\launch_blender_rig_manual_test.ps1 -OpenSemanticSample
 
 .EXAMPLE
 .\scripts\launch_blender_rig_manual_test.ps1 -BlenderExecutable "D:\Blender\blender.exe"
@@ -24,7 +29,10 @@ param(
     [string]$BlenderExecutable = "",
 
     [Parameter()]
-    [switch]$UseCurrentProfile
+    [switch]$UseCurrentProfile,
+
+    [Parameter()]
+    [switch]$OpenSemanticSample
 )
 
 $ErrorActionPreference = "Stop"
@@ -68,6 +76,14 @@ $addonSource = Join-Path $repositoryRoot "coa_tools2"
 if (-not (Test-Path -LiteralPath (Join-Path $addonSource "__init__.py") -PathType Leaf)) {
     throw "COA Tools 2 add-on source was not found: $addonSource"
 }
+$semanticSampleSource = ""
+if ($OpenSemanticSample) {
+    $semanticSampleSource = Join-Path $repositoryRoot "samples\semantic_character_rig_demo.blend"
+    if (-not (Test-Path -LiteralPath $semanticSampleSource -PathType Leaf)) {
+        throw "Semantic Character Rig sample was not found: $semanticSampleSource"
+    }
+    $semanticSampleSource = (Resolve-Path -LiteralPath $semanticSampleSource).Path
+}
 
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss-fff"
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) "coa_tools2-rig-manual-$timestamp"
@@ -76,13 +92,19 @@ $addonsRoot = Join-Path $scriptsRoot "addons"
 $configRoot = Join-Path $testRoot "config"
 $datafilesRoot = Join-Path $testRoot "datafiles"
 $addonDestination = Join-Path $addonsRoot "coa_tools2"
+$semanticSample = ""
 
 New-Item -ItemType Directory -Path $addonsRoot, $configRoot, $datafilesRoot | Out-Null
 Copy-Item -LiteralPath $addonSource -Destination $addonDestination -Recurse
+if ($semanticSampleSource) {
+    $semanticSample = Join-Path $testRoot "semantic_character_rig_demo.blend"
+    Copy-Item -LiteralPath $semanticSampleSource -Destination $semanticSample
+}
 
 $environmentNames = @(
     "BLENDER_USER_SCRIPTS",
-    "COA_TOOLS2_TEST_ADDONS"
+    "COA_TOOLS2_TEST_ADDONS",
+    "COA_TOOLS2_TEST_BLEND_FILE"
 )
 if (-not $UseCurrentProfile) {
     $environmentNames += @(
@@ -108,6 +130,9 @@ Write-Host "Starting COA Tools 2 rig test session..." -ForegroundColor Cyan
 Write-Host "Mode:      $sessionMode"
 Write-Host "Blender:   $BlenderExecutable"
 Write-Host "Add-on:    $addonSource"
+if ($semanticSample) {
+    Write-Host "Blend:     $semanticSample"
+}
 Write-Host "Test data: $testRoot"
 Write-Host "Close Blender to return to this console." -ForegroundColor DarkGray
 
@@ -115,6 +140,16 @@ $blenderExitCode = 0
 try {
     $env:BLENDER_USER_SCRIPTS = $scriptsRoot
     $env:COA_TOOLS2_TEST_ADDONS = $addonsRoot
+    if ($semanticSample) {
+        $env:COA_TOOLS2_TEST_BLEND_FILE = $semanticSample
+    }
+    else {
+        [Environment]::SetEnvironmentVariable(
+            "COA_TOOLS2_TEST_BLEND_FILE",
+            $null,
+            [EnvironmentVariableTarget]::Process
+        )
+    }
     if (-not $UseCurrentProfile) {
         $env:BLENDER_USER_CONFIG = $configRoot
         $env:BLENDER_USER_DATAFILES = $datafilesRoot

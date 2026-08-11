@@ -411,6 +411,32 @@ def _create_pose_map_demo(collection, material, widgets):
     projected.visual_axis = (0.18, 0.94, 0.28)
     compile_semantic_component(armature, component)
 
+    # A projected apparent-depth axis is intentionally kept inside the art
+    # plane.  Combining that proxy with both screen translation axes would
+    # therefore make a nominal four-dimensional field linearly dependent.
+    # This demo uses four genuinely independent control channels instead.
+    channel_specs = (
+        ("move_x", "Move X", "LOC_X"),
+        ("move_y", "Move Y", "LOC_Y"),
+        ("turn_x", "Turn X", "ROT_X"),
+        ("turn_z", "Turn Z", "ROT_Z"),
+    )
+    for channel, (channel_id, label, transform_type) in zip(
+        pose_map.inputs, channel_specs
+    ):
+        channel.channel_id = channel_id
+        channel.label = label
+        channel.terms.clear()
+        term = channel.terms.add()
+        term.term_uuid = str(uuid.uuid4())
+        term.source_stage_uuid = projected.stage_uuid
+        term.source_object = armature
+        term.source_bone = projected.control_bone
+        term.source_kind = "TRANSFORM"
+        term.transform_type = transform_type
+        term.transform_space = "LOCAL_SPACE"
+    compile_semantic_component(armature, component)
+
     target = _flat_target(
         "DEMO_B_FlatShapeKeyArt",
         collection,
@@ -418,6 +444,8 @@ def _create_pose_map_demo(collection, material, widgets):
         parent=armature,
         location=(2.4, 0.05, 0.55),
     )
+    target.show_wire = True
+    target.show_all_edges = True
 
     def expression(point, index):
         column = index % 3
@@ -443,19 +471,19 @@ def _create_pose_map_demo(collection, material, widgets):
     control = armature.pose.bones[projected.control_bone]
     _set_custom_shape(control, widgets["diamond"], 0.55)
     sample_poses = (
-        ((0.0, 0.0, 0.0), 0.0, 0.10),
-        ((1.0, 0.0, 0.0), 0.0, 0.95),
-        ((-1.0, 0.0, 0.0), 0.0, 0.30),
-        ((0.0, 1.0, 0.0), 0.0, 0.72),
-        ((0.0, -1.0, 0.0), 0.0, 0.42),
-        ((0.0, 0.0, 0.9), 0.0, 0.84),
-        ((0.0, 0.0, -0.9), 0.0, 0.22),
-        ((0.0, 0.0, 0.0), 0.65, 0.78),
-        ((0.0, 0.0, 0.0), -0.65, 0.36),
+        ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0), 0.10),
+        ((1.0, 0.0, 0.0), (0.0, 0.0, 0.0), 0.95),
+        ((-1.0, 0.0, 0.0), (0.0, 0.0, 0.0), 0.30),
+        ((0.0, 1.0, 0.0), (0.0, 0.0, 0.0), 0.72),
+        ((0.0, -1.0, 0.0), (0.0, 0.0, 0.0), 0.42),
+        ((0.0, 0.0, 0.0), (0.65, 0.0, 0.0), 0.84),
+        ((0.0, 0.0, 0.0), (-0.65, 0.0, 0.0), 0.22),
+        ((0.0, 0.0, 0.0), (0.0, 0.0, 0.65), 0.78),
+        ((0.0, 0.0, 0.0), (0.0, 0.0, -0.65), 0.36),
     )
-    for location, rotation_x, output_value in sample_poses:
+    for location, rotation, output_value in sample_poses:
         control.location = location
-        control.rotation_euler = (rotation_x, 0.0, 0.0)
+        control.rotation_euler = rotation
         bpy.context.view_layer.update()
         result = bpy.ops.coa_tools2.begin_semantic_sample("EXEC_DEFAULT")
         assert result == {"FINISHED"}, result
@@ -465,6 +493,15 @@ def _create_pose_map_demo(collection, material, widgets):
 
     assert len(pose_map.inputs) == 4
     assert len(pose_map.samples) == len(sample_poses)
+    assert tuple(
+        channel.terms[0].transform_type for channel in pose_map.inputs
+    ) == ("LOC_X", "LOC_Y", "ROT_X", "ROT_Z")
+    assert len(
+        {
+            tuple(round(value.value, 6) for value in sample.inputs)
+            for sample in pose_map.samples
+        }
+    ) == len(sample_poses)
     assert all(abs(point.co.y) < 1.0e-8 for block in target.data.shape_keys.key_blocks for point in block.data)
     control.location = (0.0, 0.0, 0.0)
     control.rotation_euler = (0.0, 0.0, 0.0)
@@ -472,14 +509,14 @@ def _create_pose_map_demo(collection, material, widgets):
     _key_pose(
         control,
         24,
-        location=(0.62, 0.30, 0.42),
-        rotation=(0.30, 0.0, 0.0),
+        location=(0.62, 0.30, 0.0),
+        rotation=(0.30, 0.0, 0.24),
     )
     _key_pose(
         control,
         48,
-        location=(-0.62, -0.24, -0.36),
-        rotation=(-0.28, 0.0, 0.0),
+        location=(-0.62, -0.24, 0.0),
+        rotation=(-0.28, 0.0, -0.22),
     )
     assert target.data.shape_keys.animation_data is not None
     assert target.data.shape_keys.animation_data.drivers
@@ -540,8 +577,8 @@ def _create_projected_ik_demo(collection, material, widgets):
     info = result["stage_results"][stage.stage_uuid]
     control = armature.pose.bones[stage.control_bone]
     pole = armature.pose.bones[stage.pole_bone]
-    _set_custom_shape(control, widgets["hand"], 0.55)
-    _set_custom_shape(pole, widgets["circle"], 0.34)
+    _set_custom_shape(control, widgets["hand"], 0.72)
+    _set_custom_shape(pole, widgets["circle"], 0.44)
 
     _key_pose(control, 1, location=(0.0, 0.0, 0.0))
     _key_pose(control, 24, location=(0.42, -0.36, 0.72))
@@ -715,16 +752,24 @@ def _create_readme(scene):
         "====================================================\n\n"
         "This file is generated by scripts/blender_rig_semantic_character_sample.py.\n"
         "Animation samples are keyed at frames 1, 24 and 48.\n\n"
+        "Open / driver runtime\n"
+        "  Recommended: .\\scripts\\launch_blender_rig_manual_test.ps1 -OpenSemanticSample\n"
+        "  The current development add-on must be enabled before this file is opened.\n"
+        "  If B is static after opening with an older/disabled add-on, enable the development\n"
+        "  add-on and reopen this file so coa_pose_field_scalar is registered first.\n"
+        "  All four Armatures are saved in multi-object Pose Mode for direct CTRL selection.\n\n"
         "A / State Rig — 2 x 2 State Matrix\n"
         "  A Geometry Nodes matrix widget drives four Shape Key states.\n"
-        "  Select DEMO_A_StateRig, enter Pose Mode, and drag its circular handle.\n\n"
+        "  Drag its circular handle in the visible matrix.\n\n"
         "B / Character Rig — 4D Recorded Pose Map\n"
-        "  One projected control supplies Move X, Move Y, Apparent Depth and Turn X.\n"
+        "  Click the diamond CTRL at the left of the amber mesh.\n"
+        "  G in the screen plane supplies Move X/Y; R X X and R Z Z supply local Turn X/Z.\n"
         "  Nine recorded samples interpolate the flat mesh Shape Key with a local RBF.\n"
-        "  The artwork remains a flat X/Z mesh; apparent 3D motion is parametric.\n\n"
+        "  The four channels are independent and the artwork remains a flat X/Z mesh.\n"
+        "  Changing frame restores the keyed demo pose after a temporary manual edit.\n\n"
         "C / Character Rig — Projected IK\n"
-        "  The hand-shaped CTRL drives a real hidden 3D IK mechanism.\n"
-        "  The circular bend CTRL is constrained to a Limit Distance rail.\n"
+        "  The hand-shaped CTRL is active on open; move it with G to drive real IK.\n"
+        "  Move the circular bend CTRL around its Limit Distance rail to change the bend.\n"
         "  Projected joints and presentation bones return the source ribbon to the Art Plane.\n\n"
         "D / Character Rig — Spline + Secondary Motion\n"
         "  Four circle CTRLs Hook a generated NURBS curve feeding Spline IK.\n"
@@ -762,15 +807,35 @@ def _camera(scene):
     return camera
 
 
-def _prepare_saved_view(scene, active_armature, active_bones):
-    from coa_tools2.rig_control.blender.selection import select_pose_bones
+def _hide_source_bone_collection(armature):
+    source = armature.data.collections_all.get("Bones")
+    if source is not None:
+        source.is_visible = False
 
-    _activate_armature(active_armature)
-    select_pose_bones(
-        active_armature,
-        set(active_bones),
-        active_bones[0],
-    )
+
+def _prepare_saved_view(scene, armatures, active_armature, active_bone):
+    if bpy.context.object is not None and bpy.context.object.mode != "OBJECT":
+        bpy.ops.object.mode_set(mode="OBJECT")
+    bpy.ops.object.select_all(action="DESELECT")
+    for armature in armatures:
+        armature.hide_set(False)
+        armature.select_set(True)
+    bpy.context.view_layer.objects.active = active_armature
+    # Blender 5.x moved pose selection away from Bone RNA.  Multi-object Edit
+    # Mode remains a stable way to author the saved active/selected PoseBone.
+    bpy.ops.object.mode_set(mode="EDIT")
+    for armature in armatures:
+        for edit_bone in armature.data.edit_bones:
+            selected = armature == active_armature and edit_bone.name == active_bone
+            edit_bone.select = selected
+            edit_bone.select_head = selected
+            edit_bone.select_tail = selected
+        if armature == active_armature:
+            active = armature.data.edit_bones[active_bone]
+            armature.data.edit_bones.active = active
+    bpy.ops.object.mode_set(mode="POSE")
+    assert all(armature.mode == "POSE" for armature in armatures)
+    assert bpy.context.active_pose_bone.name == active_bone
     for screen in bpy.data.screens:
         for area in screen.areas:
             if area.type != "VIEW_3D":
@@ -781,6 +846,50 @@ def _prepare_saved_view(scene, active_armature, active_bones):
             space.overlay.show_relationship_lines = False
             if space.region_3d is not None:
                 space.region_3d.view_perspective = "CAMERA"
+
+
+def _validate_reloaded_sample(output, armature_names, active_armature_name, active_bone):
+    """Reopen the distributable file and verify its interactive saved state."""
+
+    bpy.ops.wm.open_mainfile(filepath=str(output))
+    armatures = tuple(bpy.data.objects[name] for name in armature_names)
+    assert bpy.context.mode == "POSE"
+    assert all(armature.mode == "POSE" and armature.select_get() for armature in armatures)
+    assert bpy.context.active_object.name == active_armature_name
+    assert bpy.context.active_pose_bone.name == active_bone
+    for armature in armatures[1:]:
+        source = armature.data.collections_all.get("Bones")
+        assert source is None or not source.is_visible
+
+    pose_armature = bpy.data.objects["DEMO_B_4D_PoseMap"]
+    component = pose_armature.coa_tools2_rig.rig_components[0]
+    projected, pose_map = component.semantic_stages
+    assert tuple(
+        channel.terms[0].transform_type for channel in pose_map.inputs
+    ) == ("LOC_X", "LOC_Y", "ROT_X", "ROT_Z")
+    assert len(
+        {
+            tuple(round(value.value, 6) for value in sample.inputs)
+            for sample in pose_map.samples
+        }
+    ) == 9
+    target = bpy.data.objects["DEMO_B_FlatShapeKeyArt"]
+    assert target.show_wire and target.show_all_edges
+    key = target.data.shape_keys.key_blocks["Expression"]
+    values = []
+    for frame in (1, 24, 48):
+        bpy.context.scene.frame_set(frame)
+        bpy.context.view_layer.update()
+        values.append(round(key.value, 6))
+    assert len(set(values)) == 3, values
+
+    control = pose_armature.pose.bones[projected.control_bone]
+    bpy.context.scene.frame_set(24)
+    bpy.context.view_layer.update()
+    before = key.value
+    control.location.x = 1.0
+    bpy.context.view_layer.update()
+    assert abs(key.value - before) > 1.0e-4, (before, key.value)
 
 
 def main():
@@ -884,6 +993,26 @@ def main():
             text_material,
             size=0.34,
         )
+    for name, body, location in (
+        (
+            "DEMO_Guide_B",
+            "B  CLICK DIAMOND | G: MOVE X/Y | R X X / R Z Z: TURN",
+            (1.30, -0.28, 2.45),
+        ),
+        (
+            "DEMO_Guide_C",
+            "C  HAND: IK TARGET (ACTIVE) | CIRCLE: BEND RAIL",
+            (-6.20, -0.28, -5.25),
+        ),
+    ):
+        _text_object(
+            name,
+            body,
+            location,
+            guide_collection,
+            text_material,
+            size=0.22,
+        )
     _create_readme(scene)
     _camera(scene)
 
@@ -908,22 +1037,35 @@ def main():
     assert all(abs(vertex.co.y) < 1.0e-8 for vertex in pose_target.data.vertices)
     assert bpy.data.texts.get("README_SemanticCharacterRig.txt") is not None
 
+    armatures = (state_armature, pose_armature, ik_armature, spline_armature)
+    for armature in armatures[1:]:
+        _hide_source_bone_collection(armature)
     scene.frame_set(24)
     _prepare_saved_view(
         scene,
+        armatures,
         ik_armature,
-        (ik_stage.control_bone, ik_stage.pole_bone),
+        ik_stage.control_bone,
     )
     output = DEFAULT_OUTPUT.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     bpy.ops.wm.save_as_mainfile(filepath=str(output), compress=True)
     assert output.is_file() and output.stat().st_size > 0
-    print(
-        "SEMANTIC_CHARACTER_SAMPLE_OK",
-        output,
+    summary = (
         len(pose_stage.inputs),
         len(pose_stage.samples),
         len(spline_info.control_bones),
+    )
+    _validate_reloaded_sample(
+        output,
+        tuple(armature.name for armature in armatures),
+        ik_armature.name,
+        ik_stage.control_bone,
+    )
+    print(
+        "SEMANTIC_CHARACTER_SAMPLE_OK",
+        output,
+        *summary,
     )
 
 

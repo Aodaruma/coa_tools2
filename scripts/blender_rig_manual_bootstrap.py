@@ -149,6 +149,23 @@ def main():
     _verify_object_properties()
     print("COA Tools 2 manual-test source and RigObjectProperties verified.")
 
+    blend_file_value = os.environ.get("COA_TOOLS2_TEST_BLEND_FILE")
+    if blend_file_value:
+        blend_file = Path(blend_file_value).resolve()
+        if not blend_file.is_file():
+            raise RuntimeError(f"Requested manual-test blend was not found: {blend_file}")
+        bpy.ops.wm.open_mainfile(filepath=str(blend_file))
+        if Path(bpy.data.filepath).resolve() != blend_file:
+            raise RuntimeError(
+                f"Wrong manual-test blend loaded: {bpy.data.filepath}; "
+                f"expected {blend_file}"
+            )
+        if "coa_pose_field_scalar" not in bpy.app.driver_namespace:
+            raise RuntimeError(
+                "Semantic driver runtime was not registered before opening the sample."
+            )
+        print(f"COA Tools 2 manual-test blend opened: {blend_file}")
+
 
 if __name__ == "__main__":
     main()
