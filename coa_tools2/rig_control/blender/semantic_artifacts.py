@@ -514,6 +514,69 @@ def ensure_projected_transform_artifacts(
         visible=True,
     )
 
+    # ``custom_shape_transform`` replaces the control bone transform used to
+    # draw a widget.  The display frame therefore has to follow the control's
+    # projected position; leaving it at its rest transform makes the visible
+    # widget appear immobile even though the control and its outputs move.
+    # Keep rotation independent so ``visual_axis`` can still tilt the widget,
+    # and project only its location back onto the artwork plane.
+    short_component = _component_uuid(component).replace("-", "")[:8]
+    short_stage = stage_uuid.replace("-", "")[:8]
+    constraint_stem = f"COA_SEM_{short_component}_{short_stage}"
+    display_follow_role = semantic_stage_role(stage_uuid, "display_follow")
+    display_follow = helpers["managed_constraint"](
+        display_pose,
+        component,
+        f"{constraint_stem}_DisplayFollow",
+        "COPY_LOCATION",
+        role=display_follow_role,
+    )
+    display_follow.target = armature
+    display_follow.subtarget = control_pose.name
+    display_follow.owner_space = "WORLD"
+    display_follow.target_space = "WORLD"
+    display_follow.use_x = display_follow.use_y = display_follow.use_z = True
+    display_follow.use_offset = False
+    _record_constraint(
+        component,
+        display_follow_role,
+        display_pose,
+        display_follow,
+        helpers,
+    )
+
+    display_plane_role = semantic_stage_role(stage_uuid, "display_plane_limit")
+    display_plane = helpers["managed_constraint"](
+        display_pose,
+        component,
+        f"{constraint_stem}_DisplayPlane",
+        "LIMIT_LOCATION",
+        role=display_plane_role,
+    )
+    display_plane.owner_space = "CUSTOM"
+    display_plane.space_object = armature
+    display_plane.space_subtarget = art_pose.name
+    display_plane.use_min_x = display_plane.use_max_x = False
+    display_plane.use_min_y = display_plane.use_max_y = False
+    display_plane.use_min_z = display_plane.use_max_z = True
+    display_plane.min_z = display_plane.max_z = 0.0
+    display_plane.use_transform_limit = True
+    _record_constraint(
+        component,
+        display_plane_role,
+        display_pose,
+        display_plane,
+        helpers,
+    )
+
+    # Recreating a manually deleted constraint appends it to the stack.  Keep
+    # the projection after Copy Location on every idempotent compile.
+    constraints = display_pose.constraints
+    follow_index = tuple(constraints).index(display_follow)
+    plane_index = tuple(constraints).index(display_plane)
+    if follow_index > plane_index and hasattr(constraints, "move"):
+        constraints.move(follow_index, plane_index)
+
     stage.art_frame_bone = art_pose.name
     stage.display_frame_bone = display_pose.name
     stage.control_bone = control_pose.name

@@ -109,6 +109,29 @@ def main():
     presentation = tuple(sorted(presentation))
 
     stage_role = f"semantic:{ik_stage.stage_uuid}:"
+    display = armature.pose.bones[ik_stage.display_frame_bone]
+    art = armature.pose.bones[ik_stage.art_frame_bone]
+    assert control.custom_shape_transform == display
+    follow_artifact = next(
+        artifact
+        for artifact in component.artifacts
+        if artifact.role == stage_role + "display_follow"
+    )
+    plane_artifact = next(
+        artifact
+        for artifact in component.artifacts
+        if artifact.role == stage_role + "display_plane_limit"
+    )
+    follow = display.constraints[follow_artifact.constraint_name]
+    plane = display.constraints[plane_artifact.constraint_name]
+    assert follow.type == "COPY_LOCATION" and follow.subtarget == control.name
+    assert plane.type == "LIMIT_LOCATION"
+    assert plane.space_subtarget == art.name
+    assert tuple(display.constraints).index(follow) < tuple(display.constraints).index(
+        plane
+    )
+    display_orientation = display.matrix.to_quaternion()
+
     bend_center_artifact = next(
         artifact
         for artifact in component.artifacts
@@ -163,13 +186,26 @@ def main():
     control.location.y -= 0.40  # Pull inward so the no-stretch chain can reach.
     bpy.context.view_layer.update()
 
+    art_world = armature.matrix_world @ art.matrix
+    control_world = (armature.matrix_world @ control.matrix).translation
+    expected_display = art_world.inverted() @ control_world
+    expected_display.z = 0.0
+    expected_display = art_world @ expected_display
+    display_world = (armature.matrix_world @ display.matrix).translation
+    assert (display_world - expected_display).length < 1.0e-5, (
+        display_world,
+        expected_display,
+    )
+    assert display_orientation.rotation_difference(
+        display.matrix.to_quaternion()
+    ).angle < 1.0e-5
+
     target_error = (
         armature.pose.bones[mechanism[2]].head - control.head
     ).length
     assert target_error < 1.0e-4, target_error
     assert abs(armature.pose.bones[mechanism[2]].head.y) > 0.1
 
-    art = armature.pose.bones[ik_stage.art_frame_bone]
     art_inverse = art.matrix.inverted()
     for name in projected:
         local = art_inverse @ armature.pose.bones[name].head

@@ -79,6 +79,66 @@ def main():
     depth = control.constraints.get(f"COA_COMP_{component.component_uuid[:8]}_Depth")
     assert depth is not None and depth.min_z == 0.0 and depth.max_z == 0.0
 
+    stage_role = f"semantic:{projected.stage_uuid}:"
+    display = armature.pose.bones[projected.display_frame_bone]
+    art = armature.pose.bones[projected.art_frame_bone]
+    follow_artifact = next(
+        artifact
+        for artifact in component.artifacts
+        if artifact.role == stage_role + "display_follow"
+    )
+    plane_artifact = next(
+        artifact
+        for artifact in component.artifacts
+        if artifact.role == stage_role + "display_plane_limit"
+    )
+    follow = display.constraints[follow_artifact.constraint_name]
+    plane = display.constraints[plane_artifact.constraint_name]
+    assert follow.type == "COPY_LOCATION" and follow.subtarget == control.name
+    assert plane.type == "LIMIT_LOCATION"
+    assert plane.owner_space == "CUSTOM" and plane.space_subtarget == art.name
+    assert tuple(display.constraints).index(follow) < tuple(display.constraints).index(
+        plane
+    )
+
+    display_orientation = display.matrix.to_quaternion()
+    control_basis = control.matrix_basis.copy()
+    control.location.x += 0.45
+    control.location.y -= 0.20
+    bpy.context.view_layer.update()
+    art_world = armature.matrix_world @ art.matrix
+    control_world = (armature.matrix_world @ control.matrix).translation
+    expected_display = art_world.inverted() @ control_world
+    expected_display.z = 0.0
+    expected_display = art_world @ expected_display
+    display_world = (armature.matrix_world @ display.matrix).translation
+    assert (display_world - expected_display).length < 1.0e-5
+    assert display_orientation.rotation_difference(
+        display.matrix.to_quaternion()
+    ).angle < 1.0e-5
+    control.matrix_basis = control_basis
+    bpy.context.view_layer.update()
+
+    display_constraints = tuple(constraint.name for constraint in display.constraints)
+    compile_component(armature, component)
+    assert (
+        tuple(constraint.name for constraint in display.constraints)
+        == display_constraints
+    )
+
+    renamed_display = display.name + "_Renamed"
+    armature.data.bones[display.name].name = renamed_display
+    compile_component(armature, component)
+    assert projected.display_frame_bone == renamed_display
+    display = armature.pose.bones[renamed_display]
+    assert control.custom_shape_transform == display
+    assert follow_artifact.bone_name == renamed_display
+    assert plane_artifact.bone_name == renamed_display
+    assert (
+        tuple(constraint.name for constraint in display.constraints)
+        == display_constraints
+    )
+
     mesh = bpy.data.meshes.new("FaceMesh")
     mesh.from_pydata(((-1, 0, -1), (1, 0, -1), (1, 0, 1), (-1, 0, 1)), (), ((0, 1, 2, 3),))
     sprite = bpy.data.objects.new("FaceSprite", mesh)
@@ -289,6 +349,39 @@ def main():
     result = bpy.ops.coa_tools2.update_rig_component("EXEC_DEFAULT")
     assert result == {"FINISHED"}, result
     assert {bone.name for bone in armature.data.bones} == before_bones
+
+    # A later compile failure must restore the display constraints exactly,
+    # including values corrected during the attempted build.
+    from coa_tools2.rig_control.blender import semantic_compiler
+
+    follow = display.constraints[follow_artifact.constraint_name]
+    plane = display.constraints[plane_artifact.constraint_name]
+    follow.use_offset = True
+    plane.max_z = 0.35
+    original_reconcile = semantic_compiler.reconcile_semantic_outputs
+
+    def fail_reconcile(*_args, **_kwargs):
+        raise RuntimeError("injected display-follow rollback failure")
+
+    semantic_compiler.reconcile_semantic_outputs = fail_reconcile
+    try:
+        semantic_compiler.compile_semantic_component(armature, component)
+    except Exception as exc:
+        assert "injected display-follow rollback failure" in str(exc), str(exc)
+    else:
+        raise AssertionError("Injected display-follow failure did not propagate")
+    finally:
+        semantic_compiler.reconcile_semantic_outputs = original_reconcile
+
+    follow = display.constraints[follow_artifact.constraint_name]
+    plane = display.constraints[plane_artifact.constraint_name]
+    assert follow.use_offset
+    assert abs(plane.max_z - 0.35) < 1.0e-8
+    semantic_compiler.compile_semantic_component(armature, component)
+    follow = display.constraints[follow_artifact.constraint_name]
+    plane = display.constraints[plane_artifact.constraint_name]
+    assert not follow.use_offset
+    assert abs(plane.max_z) < 1.0e-8
     print("PHASE7A_SEMANTIC_OK", len(component.artifacts), key.value)
 
 

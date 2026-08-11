@@ -653,7 +653,13 @@ def _expected_stage_roles(component, stages, built_stages=None):
         role = lambda value: semantic_stage_role(stage.stage_uuid, value)
         if stage.stage_type in {"PROJECTED_TRANSFORM", "CHAIN_IK"}:
             expected.update(
-                {role("art_frame"), role("display_frame"), role("control_bone")}
+                {
+                    role("art_frame"),
+                    role("display_frame"),
+                    role("control_bone"),
+                    role("display_follow"),
+                    role("display_plane_limit"),
+                }
             )
         if stage.stage_type == "CHAIN_IK":
             count = len(stage.source_bones) or len(component.source_bones)
@@ -857,8 +863,12 @@ def _semantic_constraint_type(role):
         return "LIMIT_DISTANCE"
     if detail == "spline_ik_constraint":
         return "SPLINE_IK"
+    if detail == "display_follow":
+        return "COPY_LOCATION"
     if detail.startswith(("joint_copy:", "presentation_copy:")):
         return "COPY_LOCATION"
+    if detail == "display_plane_limit":
+        return "LIMIT_LOCATION"
     if detail.startswith("joint_plane_limit:"):
         return "LIMIT_LOCATION"
     if detail.startswith("presentation_stretch:"):
