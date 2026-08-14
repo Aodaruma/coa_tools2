@@ -89,6 +89,7 @@ from .rig_control.blender import component_operators as rig_component_operators
 from .rig_control.blender import component_ui as rig_component_ui
 from .rig_control.blender import semantic_runtime as rig_semantic_runtime
 from .rig_control.blender import semantic_operators as rig_semantic_operators
+from .rig_control.blender import semantic_presentations as rig_semantic_presentations
 from .rig_control.blender import semantic_ui as rig_semantic_ui
 
 # register
@@ -231,6 +232,7 @@ classes = (
     rig_control_properties.COATOOLS2_PG_RigStatePoint,
     rig_control_properties.COATOOLS2_PG_RigStateCell,
     rig_control_properties.COATOOLS2_PG_RigComponentBoneRef,
+    rig_control_properties.COATOOLS2_PG_RigWidgetPresentation,
     rig_control_properties.COATOOLS2_PG_SemanticInputTerm,
     rig_control_properties.COATOOLS2_PG_SemanticInputChannel,
     rig_control_properties.COATOOLS2_PG_SemanticOutputChannel,
@@ -340,6 +342,7 @@ classes = (
     rig_component_operators.COATOOLS2_OT_AddComponentBinding,
     rig_component_operators.COATOOLS2_OT_RemoveComponentBinding,
     *rig_semantic_operators.CLASSES,
+    *rig_semantic_presentations.CLASSES,
     rig_component_ui.COATOOLS2_UL_RigComponents,
     rig_component_ui.COATOOLS2_PT_RigComponents,
     *rig_semantic_ui.CLASSES,
@@ -557,6 +560,7 @@ def register():
 
 def unregister():
     rig_control_properties.cancel_auto_rebuild()
+    rig_semantic_presentations.cancel_semantic_presentation_update()
     rig_control_properties.cancel_selection_sync()
     # Remove callbacks before unregistering the classes and properties they use.
     handlers = (

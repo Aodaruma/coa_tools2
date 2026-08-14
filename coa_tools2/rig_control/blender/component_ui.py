@@ -9,6 +9,135 @@ from .properties import get_rig_data
 from .selection import active_data_bone
 
 
+_ARROW_SHAPES = {
+    "ARROW_1D",
+    "ARROW_2D",
+    "CYLINDER_ARROW_1D",
+    "SPHERE_ARROW_2D",
+}
+_SPATIAL_ARROW_SHAPES = {
+    "CYLINDER_ARROW_1D",
+    "SPHERE_ARROW_2D",
+}
+_WIDTH_HEIGHT_SHAPES = {
+    "ARROW_1D",
+    "ARROW_2D",
+    "TOMBSTONE",
+    "ELLIPSE",
+    "TRIANGLE",
+    "RECTANGLE",
+    "DIAMOND",
+}
+_CORNER_SHAPES = {"TOMBSTONE", "TRIANGLE", "RECTANGLE", "DIAMOND"}
+_RESOLUTION_SHAPES = {
+    "CYLINDER_ARROW_1D",
+    "SPHERE_ARROW_2D",
+    "TOMBSTONE",
+    "ELLIPSE",
+    "TRIANGLE",
+    "RECTANGLE",
+    "DIAMOND",
+    "SECTOR",
+}
+
+
+def _draw_presentation_status(
+    layout,
+    presentation,
+    *,
+    stage_uuid="",
+    target_role="",
+):
+    if presentation.last_error:
+        layout.label(text=presentation.last_error, icon="ERROR")
+    if presentation.needs_rebuild:
+        row = layout.row(align=True)
+        row.label(text="Presentation changes pending.", icon="INFO")
+        operator = row.operator(
+            "coa_tools2.update_rig_presentation",
+            text="Apply",
+            icon="CHECKMARK",
+        )
+        operator.stage_uuid = stage_uuid
+        operator.target_role = target_role
+
+
+def draw_widget_presentation(
+    layout,
+    presentation,
+    *,
+    panel_id,
+    title="Presentation Settings",
+    default_closed=True,
+    stage_uuid="",
+    target_role="",
+):
+    """Draw one shape-aware, collapsible presentation editor."""
+
+    header, body = layout.panel(panel_id, default_closed=default_closed)
+    header.label(text=title, icon="BONE_DATA")
+    header.prop(presentation, "live_preview", text="", icon="PLAY")
+    if not body:
+        return
+
+    body.prop(presentation, "shape")
+    shape = presentation.shape
+    if shape == "NONE":
+        body.label(text="No procedural custom shape is generated.", icon="INFO")
+        _draw_presentation_status(
+            body,
+            presentation,
+            stage_uuid=stage_uuid,
+            target_role=target_role,
+        )
+        return
+    body.prop(presentation, "wire_width")
+    if shape == "CUSTOM_OBJECT":
+        body.prop(presentation, "custom_object")
+        if presentation.custom_object is None:
+            body.label(text="Choose an existing custom-shape object.", icon="INFO")
+        _draw_presentation_status(
+            body,
+            presentation,
+            stage_uuid=stage_uuid,
+            target_role=target_role,
+        )
+        return
+
+    if shape in _WIDTH_HEIGHT_SHAPES:
+        dimensions = body.row(align=True)
+        dimensions.prop(presentation, "width")
+        if shape != "ARROW_1D":
+            dimensions.prop(presentation, "height")
+    if shape in _CORNER_SHAPES:
+        body.prop(presentation, "corner_radius")
+    if shape in _ARROW_SHAPES:
+        arrow = body.column(align=True)
+        arrow.prop(presentation, "bar_width")
+        row = arrow.row(align=True)
+        row.prop(presentation, "head_length")
+        row.prop(presentation, "head_width")
+    if shape in _SPATIAL_ARROW_SHAPES:
+        row = body.row(align=True)
+        row.prop(presentation, "radius")
+        row.prop(presentation, "arc_angle")
+    if shape == "SECTOR":
+        radii = body.row(align=True)
+        radii.prop(presentation, "sector_inner_radius")
+        radii.prop(presentation, "sector_outer_radius")
+        angles = body.row(align=True)
+        angles.prop(presentation, "sector_start_angle")
+        angles.prop(presentation, "sector_sweep_angle")
+    if shape in _RESOLUTION_SHAPES:
+        body.prop(presentation, "segments")
+    _draw_presentation_status(
+        body,
+        presentation,
+        stage_uuid=stage_uuid,
+        target_role=target_role,
+    )
+
+
 def sync_component_index_from_active_bone(armature, rig_data):
     if rig_data is None:
         return False
@@ -21,6 +150,17 @@ def sync_component_index_from_active_bone(armature, rig_data):
     for index, component in enumerate(rig_data.rig_components):
         if component.component_uuid == component_uuid:
             rig_data.rig_components_index = index
+            if component.component_type == "SEMANTIC":
+                role = str(active_bone.get("coa_rig_component_role", ""))
+                parts = role.split(":", 2)
+                if len(parts) >= 2 and parts[0] == "semantic":
+                    stage_uuid = parts[1]
+                    for stage_index, stage in enumerate(
+                        component.semantic_stages
+                    ):
+                        if stage.stage_uuid == stage_uuid:
+                            component.semantic_stages_index = stage_index
+                            break
             return True
     return False
 
@@ -167,8 +307,27 @@ class COATOOLS2_PT_RigComponents(bpy.types.Panel):
         )
         visual_header.label(text="Visual Settings", icon="HIDE_OFF")
         if visual_body:
-            visual_body.prop(component, "widget")
-            visual_body.prop(component, "widget_size")
+            if component.component_type == "SEMANTIC":
+                visual_body.label(
+                    text="Select a stage below to edit its presentation.",
+                    icon="INFO",
+                )
+            else:
+                draw_widget_presentation(
+                    visual_body,
+                    component.presentation,
+                    panel_id="coa_tools2_component_presentation",
+                    default_closed=False,
+                )
+                if component.presentation.shape == "NONE":
+                    visual_body.prop(
+                        component,
+                        "widget_size",
+                        text="Legacy Size",
+                    )
+                    legacy = visual_body.row()
+                    legacy.enabled = False
+                    legacy.prop(component, "widget", text="Legacy Preset")
 
         if component.last_error:
             box.label(text=component.last_error, icon="ERROR")

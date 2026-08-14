@@ -195,6 +195,12 @@ def compile_component(armature, component):
         snapshot = capture_component_build_state(armature, component)
         output_snapshot = capture_component_output_state(armature, component)
         try:
+            from .semantic_presentations import (
+                cleanup_component_presentation_artifacts,
+                mark_component_presentation_reconciled,
+                reconcile_component_presentation,
+            )
+
             if component.deformation_mode == "PARAMETRIC":
                 primary = ensure_parameter_component(armature, component)
             elif component.component_type in {"ROOT", "FK_CHAIN", "SPINE_FK"}:
@@ -210,7 +216,18 @@ def compile_component(armature, component):
                 raise RigComponentCompileError(
                     f"Unsupported pose component: {component.component_type}."
                 )
+            presentation_roles = reconcile_component_presentation(
+                armature,
+                component,
+                primary.name,
+                cleanup=False,
+            )
             reconcile_component_outputs(armature, component)
+            cleanup_component_presentation_artifacts(
+                armature,
+                component,
+                presentation_roles,
+            )
         except Exception as exc:
             structural_rollback_error = None
             try:
@@ -244,6 +261,7 @@ def compile_component(armature, component):
             if isinstance(exc, (ComponentArtifactConflict, ComponentOutputError)):
                 raise RigComponentCompileError(str(exc)) from exc
             raise
+    mark_component_presentation_reconciled(component)
     component.needs_rebuild = False
     component.last_error = ""
     component.compiled_deformation_mode = component.deformation_mode

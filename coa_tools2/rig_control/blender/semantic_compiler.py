@@ -647,6 +647,42 @@ def _restore_stage_fields(component, snapshot):
             setattr(stage, name, value)
 
 
+def _expected_presentation_roles(stages):
+    expected = set()
+    for stage in stages:
+        if not getattr(stage, "enabled", True):
+            continue
+        presentations = []
+        if stage.stage_type in {"PROJECTED_TRANSFORM", "CHAIN_IK"}:
+            presentation = getattr(stage, "presentation", None)
+            if presentation is not None:
+                presentations.append(("PRIMARY", presentation))
+        elif stage.stage_type == "SPLINE":
+            presentation = getattr(stage, "presentation", None)
+            if presentation is not None:
+                presentations.append(("SPLINE_CONTROL", presentation))
+        if stage.stage_type == "CHAIN_IK" and stage.use_pole:
+            pole_presentation = getattr(stage, "pole_presentation", None)
+            if pole_presentation is not None:
+                presentations.append(("POLE", pole_presentation))
+        for target_role, presentation in presentations:
+            if presentation.shape in {"NONE", "CUSTOM_OBJECT"}:
+                continue
+            expected.update(
+                {
+                    semantic_stage_role(
+                        stage.stage_uuid,
+                        f"widget:{target_role.lower()}:source",
+                    ),
+                    semantic_stage_role(
+                        stage.stage_uuid,
+                        f"widget:{target_role.lower()}:cache",
+                    ),
+                }
+            )
+    return expected
+
+
 def _expected_stage_roles(component, stages, built_stages=None):
     expected = set()
     for stage in stages:
@@ -773,6 +809,7 @@ def _expected_stage_roles(component, stages, built_stages=None):
                         role("secondary_nla_track"),
                     }
                 )
+    expected.update(_expected_presentation_roles(stages))
     return expected
 
 
@@ -1227,7 +1264,13 @@ def _cleanup_obsolete_stage_artifacts(armature, component, expected_roles):
                     # Only a tag match, never a reused serialized name, can
                     # authorize deleting Blender data.
                     if obj.users_collection or obj.users <= 1:
+                        owned_data = obj.data
                         bpy.data.objects.remove(obj, do_unlink=True)
+                        if owned_data is not None and owned_data.users == 0:
+                            if isinstance(owned_data, bpy.types.Mesh):
+                                bpy.data.meshes.remove(owned_data)
+                            elif isinstance(owned_data, bpy.types.Curve):
+                                bpy.data.curves.remove(owned_data)
 
     for index in sorted(
         (item["index"] for item in obsolete),
@@ -1346,6 +1389,15 @@ def compile_semantic_component(armature, component):
             # converge onto the same control without rejecting independent
             # branches that merely share a component.
             validate_pin_ranges(component, resolved=True)
+            from .semantic_presentations import reconcile_semantic_presentations
+
+            reconcile_semantic_presentations(
+                armature,
+                component,
+                stages,
+                built_stages,
+                cleanup=False,
+            )
             primary_result = next(
                 (
                     built_stages[stage.stage_uuid]
@@ -1407,6 +1459,9 @@ def compile_semantic_component(armature, component):
                 raise
             raise SemanticRigCompileError(str(exc)) from exc
 
+    from .semantic_presentations import mark_semantic_presentations_reconciled
+
+    mark_semantic_presentations_reconciled(stages)
     component.needs_rebuild = False
     component.last_error = ""
     component.compiled_deformation_mode = component.deformation_mode

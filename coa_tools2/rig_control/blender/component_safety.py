@@ -405,7 +405,7 @@ def _constraint_snapshot(constraint, index):
 
 
 def _pose_bone_snapshot(pose_bone):
-    return {
+    snapshot = {
         "custom_shape": pose_bone.custom_shape,
         "use_custom_shape_bone_size": pose_bone.use_custom_shape_bone_size,
         "custom_shape_wire_width": getattr(
@@ -433,6 +433,22 @@ def _pose_bone_snapshot(pose_bone):
             if key.startswith("coa_rig_")
         },
     }
+    if hasattr(pose_bone, "custom_shape_transform"):
+        transform = pose_bone.custom_shape_transform
+        # Store the name rather than the PoseBone RNA pointer.  A failed
+        # reconcile may delete and recreate a generated transform bone before
+        # rollback, which invalidates the original pointer.
+        snapshot["custom_shape_transform_name"] = (
+            transform.name if transform is not None else ""
+        )
+    for name in (
+        "custom_shape_translation",
+        "custom_shape_rotation_euler",
+        "custom_shape_scale_xyz",
+    ):
+        if hasattr(pose_bone, name):
+            snapshot[name] = tuple(getattr(pose_bone, name))
+    return snapshot
 
 
 def _data_bone_snapshot(data_bone):
@@ -530,6 +546,91 @@ def _curve_object_snapshot(obj):
     }
 
 
+def _copy_id_property_value(value):
+    """Copy an ID-property value without duplicating referenced datablocks."""
+
+    if isinstance(value, bpy.types.ID):
+        return value
+    if hasattr(value, "to_dict"):
+        return {
+            key: _copy_id_property_value(item)
+            for key, item in value.to_dict().items()
+        }
+    if hasattr(value, "to_list"):
+        return [_copy_id_property_value(item) for item in value.to_list()]
+    if isinstance(value, dict):
+        return {
+            key: _copy_id_property_value(item) for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_copy_id_property_value(item) for item in value]
+    try:
+        return value.copy()
+    except (AttributeError, TypeError):
+        return value
+
+
+def _id_properties_snapshot(owner, *, prefixes=None):
+    return {
+        key: _copy_id_property_value(owner[key])
+        for key in owner.keys()
+        if prefixes is None or key.startswith(prefixes)
+    }
+
+
+def _restore_id_properties(owner, snapshot, *, prefixes=None):
+    """Restore both ID-property values and whether each key existed."""
+
+    for key in tuple(owner.keys()):
+        if prefixes is not None and not key.startswith(prefixes):
+            continue
+        if key not in snapshot:
+            try:
+                del owner[key]
+            except (KeyError, TypeError):
+                pass
+    for key, value in snapshot.items():
+        try:
+            owner[key] = _copy_id_property_value(value)
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            # An obsolete socket identifier can become read-only when a node
+            # group is externally removed.  Keep rollback best-effort without
+            # masking restoration of the remaining transaction state.
+            pass
+
+
+def _nodes_modifier_snapshot(obj):
+    """Capture Geometry Nodes modifier state on an owned widget object."""
+
+    snapshots = []
+    for index, modifier in enumerate(obj.modifiers):
+        if modifier.type != "NODES":
+            continue
+        show_flags = {}
+        for name in (
+            "show_viewport",
+            "show_render",
+            "show_in_editmode",
+            "show_on_cage",
+            "show_expanded",
+        ):
+            if hasattr(modifier, name):
+                show_flags[name] = getattr(modifier, name)
+        snapshots.append(
+            {
+                "name": modifier.name,
+                "index": index,
+                "node_group": modifier.node_group,
+                "show_flags": show_flags,
+                # Geometry Nodes input overrides are ID properties.  Saving
+                # every key also preserves the absence of a socket override,
+                # including *_use_attribute and *_attribute_name companions.
+                "id_properties": _id_properties_snapshot(modifier),
+            }
+        )
+    return tuple(snapshots)
+
+
 def _matches_owned_tags(owner, instance_id, component_uuid, role=None):
     owner_role = str(owner.get("coa_rig_component_role", "") or "")
     return (
@@ -616,6 +717,41 @@ def _restore_curve_object(obj, state):
     return restored_names
 
 
+def _restore_nodes_modifiers(obj, snapshots):
+    """Restore pre-existing Geometry Nodes modifiers and their exact order."""
+
+    saved_names = {snapshot["name"] for snapshot in snapshots}
+    for modifier in tuple(obj.modifiers):
+        if modifier.type == "NODES" and modifier.name not in saved_names:
+            obj.modifiers.remove(modifier)
+
+    restored_names = {}
+    for snapshot in sorted(snapshots, key=lambda item: item["index"]):
+        name = snapshot["name"]
+        modifier = obj.modifiers.get(name)
+        if modifier is not None and modifier.type != "NODES":
+            # The transaction is synchronous.  If a non-Nodes modifier took a
+            # name that belonged to a saved Nodes modifier, it was introduced
+            # by the failed build and must not block restoration.
+            obj.modifiers.remove(modifier)
+            modifier = None
+        if modifier is None:
+            modifier = obj.modifiers.new(name, "NODES")
+        modifier.node_group = snapshot["node_group"]
+        _restore_id_properties(modifier, snapshot["id_properties"])
+        for flag, value in snapshot["show_flags"].items():
+            try:
+                setattr(modifier, flag, value)
+            except (AttributeError, RuntimeError, TypeError):
+                pass
+        current_index = obj.modifiers.find(modifier.name)
+        desired_index = min(snapshot["index"], len(obj.modifiers) - 1)
+        if current_index != desired_index:
+            obj.modifiers.move(current_index, desired_index)
+        restored_names[name] = modifier.name
+    return restored_names
+
+
 def _component_bone_names(component):
     names = {
         reference.bone_name
@@ -650,8 +786,16 @@ def capture_component_build_state(armature, component):
             and obj.get("coa_rig_instance_id") == instance_id
         ):
             widget_geometry[obj.name] = {
+                "data": obj.data,
                 "vertices": tuple(tuple(vertex.co) for vertex in obj.data.vertices),
                 "edges": tuple(tuple(edge.vertices) for edge in obj.data.edges),
+                "faces": tuple(
+                    tuple(polygon.vertices) for polygon in obj.data.polygons
+                ),
+                "mesh_tags": _id_properties_snapshot(
+                    obj.data,
+                    prefixes=("coa_rig_", "coa_semantic_widget_"),
+                ),
             }
     constraints = {
         pose_bone.name: tuple(
@@ -687,12 +831,21 @@ def capture_component_build_state(armature, component):
                 "hide_select": obj.hide_select,
                 "display_type": obj.display_type,
                 "show_in_front": obj.show_in_front,
+                "object_tags": _id_properties_snapshot(
+                    obj,
+                    prefixes=("coa_rig_", "coa_semantic_widget_"),
+                ),
             }
             if obj.type == "CURVE":
                 curve_states[obj.name] = _curve_object_snapshot(obj)
+    nodes_modifier_states = {
+        object_name: _nodes_modifier_snapshot(bpy.data.objects[object_name])
+        for object_name in widget_geometry
+    }
     return {
         "instance_id": instance_id,
         "object_names": frozenset(obj.name for obj in bpy.data.objects),
+        "mesh_names": frozenset(mesh.name for mesh in bpy.data.meshes),
         "bone_names": frozenset(bone.name for bone in armature.data.bones),
         "constraints": constraints,
         "pose_states": pose_states,
@@ -700,6 +853,7 @@ def capture_component_build_state(armature, component):
         "widget_geometry": widget_geometry,
         "object_states": object_states,
         "curve_states": curve_states,
+        "nodes_modifier_states": nodes_modifier_states,
         "artifacts": tuple(
             {
                 "artifact_uuid": artifact.artifact_uuid,
@@ -760,6 +914,21 @@ def _restore_pose_bone(armature, name, snapshot):
     pose_bone.use_custom_shape_bone_size = snapshot["use_custom_shape_bone_size"]
     if snapshot["custom_shape_wire_width"] is not None:
         pose_bone.custom_shape_wire_width = snapshot["custom_shape_wire_width"]
+    if (
+        "custom_shape_transform_name" in snapshot
+        and hasattr(pose_bone, "custom_shape_transform")
+    ):
+        transform_name = snapshot["custom_shape_transform_name"]
+        pose_bone.custom_shape_transform = (
+            armature.pose.bones.get(transform_name) if transform_name else None
+        )
+    for attribute in (
+        "custom_shape_translation",
+        "custom_shape_rotation_euler",
+        "custom_shape_scale_xyz",
+    ):
+        if attribute in snapshot and hasattr(pose_bone, attribute):
+            setattr(pose_bone, attribute, snapshot[attribute])
     pose_bone.rotation_mode = snapshot["rotation_mode"]
     pose_bone.lock_location = snapshot["lock_location"]
     pose_bone.lock_rotation = snapshot["lock_rotation"]
@@ -879,9 +1048,25 @@ def rollback_component_build(armature, component, snapshot):
         obj = bpy.data.objects.get(object_name)
         if obj is None or obj.type != "MESH":
             continue
+        saved_data = geometry.get("data")
+        if saved_data is not None:
+            try:
+                if saved_data.name in bpy.data.meshes:
+                    obj.data = saved_data
+            except ReferenceError:
+                pass
         obj.data.clear_geometry()
-        obj.data.from_pydata(geometry["vertices"], geometry["edges"], ())
+        obj.data.from_pydata(
+            geometry["vertices"],
+            geometry["edges"],
+            geometry.get("faces", ()),
+        )
         obj.data.update()
+        _restore_id_properties(
+            obj.data,
+            geometry.get("mesh_tags", {}),
+            prefixes=("coa_rig_", "coa_semantic_widget_"),
+        )
     for object_name, state in snapshot.get("object_states", {}).items():
         obj = bpy.data.objects.get(object_name)
         if obj is None:
@@ -895,6 +1080,11 @@ def rollback_component_build(armature, component, snapshot):
         obj.hide_select = state.get("hide_select", obj.hide_select)
         obj.display_type = state.get("display_type", obj.display_type)
         obj.show_in_front = state.get("show_in_front", obj.show_in_front)
+        _restore_id_properties(
+            obj,
+            state.get("object_tags", {}),
+            prefixes=("coa_rig_", "coa_semantic_widget_"),
+        )
     restored_modifiers = {}
     for object_name, state in snapshot.get("curve_states", {}).items():
         obj = bpy.data.objects.get(object_name)
@@ -904,6 +1094,25 @@ def rollback_component_build(armature, component, snapshot):
                 state,
             ).items():
                 restored_modifiers[(object_name, saved_name)] = modifier_name
+    for object_name, states in snapshot.get("nodes_modifier_states", {}).items():
+        obj = bpy.data.objects.get(object_name)
+        if obj is None or obj.type != "MESH":
+            continue
+        for saved_name, modifier_name in _restore_nodes_modifiers(
+            obj,
+            states,
+        ).items():
+            restored_modifiers[(object_name, saved_name)] = modifier_name
+
+    # Removing a newly generated object does not automatically remove its Mesh
+    # datablock.  Delete only newly created, now-unused datablocks whose live
+    # ownership tags still prove they belong to this component transaction.
+    previous_mesh_names = snapshot.get("mesh_names", frozenset())
+    for mesh in tuple(bpy.data.meshes):
+        if mesh.name in previous_mesh_names or mesh.users:
+            continue
+        if _matches_owned_tags(mesh, instance_id, component_uuid):
+            bpy.data.meshes.remove(mesh)
 
     component.artifacts.clear()
     for values in snapshot["artifacts"]:

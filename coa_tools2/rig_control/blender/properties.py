@@ -19,7 +19,11 @@ from bpy.props import (
     StringProperty,
 )
 
-from ..component_schema import RIG_COMPONENT_SCHEMA_VERSION, RigComponentSpec
+from ..component_schema import (
+    RIG_COMPONENT_SCHEMA_VERSION,
+    RigComponentSpec,
+    RigWidgetPresentationSpec,
+)
 from ..schema import SCHEMA_VERSION
 from ..semantic_schema import SEMANTIC_RIG_SCHEMA_VERSION
 
@@ -110,6 +114,40 @@ def _mark_component_dirty(self, _context):
 
     self.needs_rebuild = True
     self.last_error = ""
+
+
+def _schedule_widget_presentation_update(presentation):
+    """Hand a dirty presentation to the optional debounced compiler bridge."""
+
+    try:
+        from .semantic_presentations import schedule_semantic_presentation_update
+    except ImportError:
+        return
+    schedule_semantic_presentation_update(presentation)
+
+
+def _cancel_widget_presentation_update(presentation):
+    try:
+        from .semantic_presentations import cancel_semantic_presentation_update
+    except ImportError:
+        return
+    cancel_semantic_presentation_update(presentation)
+
+
+def _mark_widget_presentation_dirty(self, _context):
+    """Invalidate only replaceable visual data, never the solver structure."""
+
+    self.needs_rebuild = True
+    self.last_error = ""
+    if self.live_preview:
+        _schedule_widget_presentation_update(self)
+
+
+def _update_widget_presentation_live_preview(self, _context):
+    if not self.live_preview:
+        _cancel_widget_presentation_update(self)
+    elif self.needs_rebuild:
+        _schedule_widget_presentation_update(self)
 
 
 def _mark_pin_driven_explicit(self, _context):
@@ -280,6 +318,151 @@ class COATOOLS2_PG_RigStateCell(bpy.types.PropertyGroup):
 
 class COATOOLS2_PG_RigComponentBoneRef(bpy.types.PropertyGroup):
     bone_name: StringProperty()
+
+
+class COATOOLS2_PG_RigWidgetPresentation(bpy.types.PropertyGroup):
+    """Solver-independent custom-shape presentation shared by rig controls."""
+
+    shape: EnumProperty(
+        name="Shape",
+        items=(
+            ("NONE", "None", "Do not generate a custom shape"),
+            ("ARROW_1D", "1D Double Arrow", "Flat double-ended arrow"),
+            ("ARROW_2D", "2D Four-way Arrow", "Flat four-way arrow"),
+            (
+                "CYLINDER_ARROW_1D",
+                "Cylindrical 1D Arrow",
+                "Wrap the 1D double arrow around a cylinder",
+            ),
+            (
+                "SPHERE_ARROW_2D",
+                "Spherical 2D Arrow",
+                "Wrap the 2D four-way arrow around a sphere",
+            ),
+            ("TOMBSTONE", "Tombstone", "Rounded hand or foot silhouette"),
+            ("ELLIPSE", "Ellipse", "Ellipse outline"),
+            ("TRIANGLE", "Triangle", "Rounded triangle outline"),
+            ("RECTANGLE", "Rectangle", "Rounded rectangle outline"),
+            ("DIAMOND", "Diamond", "Rounded diamond outline"),
+            ("SECTOR", "Sector", "Circular sector or annular sector outline"),
+            (
+                "CUSTOM_OBJECT",
+                "Custom Object",
+                "Use an existing Blender object as the custom shape",
+            ),
+        ),
+        default="NONE",
+        update=_mark_widget_presentation_dirty,
+    )
+    custom_object: PointerProperty(
+        name="Object",
+        description="Existing object used directly as the bone custom shape",
+        type=bpy.types.Object,
+        update=_mark_widget_presentation_dirty,
+    )
+    width: FloatProperty(
+        name="Width",
+        default=2.0,
+        min=0.001,
+        update=_mark_widget_presentation_dirty,
+    )
+    height: FloatProperty(
+        name="Height",
+        default=1.0,
+        min=0.001,
+        update=_mark_widget_presentation_dirty,
+    )
+    corner_radius: FloatProperty(
+        name="Corner Radius",
+        default=0.15,
+        min=0.0,
+        update=_mark_widget_presentation_dirty,
+    )
+    bar_width: FloatProperty(
+        name="Bar Width",
+        default=0.18,
+        min=0.001,
+        update=_mark_widget_presentation_dirty,
+    )
+    head_length: FloatProperty(
+        name="Head Length",
+        default=0.35,
+        min=0.001,
+        update=_mark_widget_presentation_dirty,
+    )
+    head_width: FloatProperty(
+        name="Head Width",
+        default=0.6,
+        min=0.001,
+        update=_mark_widget_presentation_dirty,
+    )
+    radius: FloatProperty(
+        name="Radius",
+        default=1.0,
+        min=0.001,
+        update=_mark_widget_presentation_dirty,
+    )
+    arc_angle: FloatProperty(
+        name="Arc Angle",
+        subtype="ANGLE",
+        default=math.pi,
+        min=0.001,
+        max=math.tau,
+        update=_mark_widget_presentation_dirty,
+    )
+    sector_inner_radius: FloatProperty(
+        name="Inner Radius",
+        default=0.0,
+        min=0.0,
+        update=_mark_widget_presentation_dirty,
+    )
+    sector_outer_radius: FloatProperty(
+        name="Outer Radius",
+        default=1.0,
+        min=0.001,
+        update=_mark_widget_presentation_dirty,
+    )
+    sector_start_angle: FloatProperty(
+        name="Start Angle",
+        subtype="ANGLE",
+        default=0.0,
+        update=_mark_widget_presentation_dirty,
+    )
+    sector_sweep_angle: FloatProperty(
+        name="Sweep Angle",
+        subtype="ANGLE",
+        default=math.pi * 0.5,
+        min=-math.tau,
+        max=math.tau,
+        update=_mark_widget_presentation_dirty,
+    )
+    segments: IntProperty(
+        name="Resolution",
+        description="Number of segments used by curved and spatial shapes",
+        default=96,
+        min=3,
+        max=256,
+        update=_mark_widget_presentation_dirty,
+    )
+    wire_width: FloatProperty(
+        name="Wire Width",
+        description="Viewport line width; does not change procedural geometry",
+        default=1.0,
+        min=0.5,
+        max=16.0,
+        update=_mark_widget_presentation_dirty,
+    )
+    live_preview: BoolProperty(
+        name="Live Preview",
+        description=(
+            "Apply presentation changes automatically when compiler preview "
+            "support is available"
+        ),
+        default=True,
+        update=_update_widget_presentation_live_preview,
+    )
+    needs_rebuild: BoolProperty(default=False)
+    last_error: StringProperty()
 
 
 class COATOOLS2_PG_SemanticInputTerm(bpy.types.PropertyGroup):
@@ -457,6 +640,8 @@ class COATOOLS2_PG_SemanticStage(bpy.types.PropertyGroup):
     )
     source_bones: CollectionProperty(type=COATOOLS2_PG_RigComponentBoneRef)
     source_bones_index: IntProperty(default=0, min=0)
+    presentation: PointerProperty(type=COATOOLS2_PG_RigWidgetPresentation)
+    pole_presentation: PointerProperty(type=COATOOLS2_PG_RigWidgetPresentation)
 
     projection_mode: EnumProperty(
         items=(
@@ -712,6 +897,7 @@ class COATOOLS2_PG_RigComponent(bpy.types.PropertyGroup):
         min=0.01,
         update=_mark_component_dirty,
     )
+    presentation: PointerProperty(type=COATOOLS2_PG_RigWidgetPresentation)
     ik_chain_length: IntProperty(
         default=2,
         min=1,
@@ -1180,6 +1366,9 @@ def component_to_spec(component) -> RigComponentSpec:
             "allow_rotation": tuple(component.allow_rotation),
             "widget": component.widget,
             "widget_size": component.widget_size,
+            "presentation": widget_presentation_to_spec(
+                component.presentation
+            ).to_dict(),
             "ik_chain_length": component.ik_chain_length,
             "solver_mode": component.ik_solver_mode,
             "bend_axis": component.bend_axis,
@@ -1213,12 +1402,43 @@ def component_to_spec(component) -> RigComponentSpec:
     )
 
 
+def widget_presentation_to_spec(presentation) -> RigWidgetPresentationSpec:
+    """Convert a persisted Blender presentation into its pure schema value."""
+
+    return RigWidgetPresentationSpec.from_dict(
+        {
+            "shape": presentation.shape,
+            "custom_object_name": (
+                presentation.custom_object.name
+                if presentation.custom_object is not None
+                else ""
+            ),
+            "width": presentation.width,
+            "height": presentation.height,
+            "corner_radius": presentation.corner_radius,
+            "bar_width": presentation.bar_width,
+            "head_length": presentation.head_length,
+            "head_width": presentation.head_width,
+            "radius": presentation.radius,
+            "arc_angle": presentation.arc_angle,
+            "sector_inner_radius": presentation.sector_inner_radius,
+            "sector_outer_radius": presentation.sector_outer_radius,
+            "sector_start_angle": presentation.sector_start_angle,
+            "sector_sweep_angle": presentation.sector_sweep_angle,
+            "segments": presentation.segments,
+            "wire_width": presentation.wire_width,
+            "live_preview": presentation.live_preview,
+        }
+    )
+
+
 CLASSES = (
     COATOOLS2_PG_RigBinding,
     COATOOLS2_PG_RigValidationIssue,
     COATOOLS2_PG_RigStatePoint,
     COATOOLS2_PG_RigStateCell,
     COATOOLS2_PG_RigComponentBoneRef,
+    COATOOLS2_PG_RigWidgetPresentation,
     COATOOLS2_PG_SemanticInputTerm,
     COATOOLS2_PG_SemanticInputChannel,
     COATOOLS2_PG_SemanticOutputChannel,

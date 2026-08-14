@@ -5,6 +5,7 @@ from __future__ import annotations
 import bpy
 
 from ... import functions
+from .component_ui import draw_widget_presentation
 from .properties import get_rig_data
 
 
@@ -86,6 +87,42 @@ class COATOOLS2_PT_SemanticRig(bpy.types.Panel):
         box.prop(stage, "stage_type")
         box.prop(stage, "order")
         box.prop(stage, "depends_on", text="After UUIDs")
+
+        if stage.stage_type == "CHAIN_IK":
+            draw_widget_presentation(
+                box,
+                stage.presentation,
+                panel_id="coa_tools2_semantic_ik_presentation",
+                title="IK Handle Presentation",
+                stage_uuid=stage.stage_uuid,
+                target_role="PRIMARY",
+            )
+            if stage.use_pole:
+                draw_widget_presentation(
+                    box,
+                    stage.pole_presentation,
+                    panel_id="coa_tools2_semantic_pole_presentation",
+                    title="Pole Presentation",
+                    stage_uuid=stage.stage_uuid,
+                    target_role="POLE",
+                )
+        elif stage.stage_type in {"PROJECTED_TRANSFORM", "SPLINE"}:
+            draw_widget_presentation(
+                box,
+                stage.presentation,
+                panel_id="coa_tools2_semantic_stage_presentation",
+                title=(
+                    "Spline Controls Presentation"
+                    if stage.stage_type == "SPLINE"
+                    else "Control Presentation"
+                ),
+                stage_uuid=stage.stage_uuid,
+                target_role=(
+                    "SPLINE_CONTROL"
+                    if stage.stage_type == "SPLINE"
+                    else "PRIMARY"
+                ),
+            )
 
         if stage.stage_type in {"PROJECTED_TRANSFORM", "CHAIN_IK", "SPLINE"}:
             chain = box.box()
