@@ -13,9 +13,9 @@
 - 「見た目の法線方向へ動かす」: 傾けて表示したControlを操作しつつ、実際のArtは平面内に保ち、短縮や重なりをShape Keyで表現する。
 - 「紐を揺らす」: Spline IKによる基本形状へSecondary Motionを後段合成する。
 
-本書は目標設計とPhase 7の実装結果を併記する。[Phase 6 キャラクターリグ現行実装資料](rig_control_phase6_current_implementation_inventory.md)は、再設計前の試作を確認するための履歴資料として扱う。
+本書は目標設計とPhase 7〜8の実装結果を併記する。[Phase 6 キャラクターリグ現行実装資料](rig_control_phase6_current_implementation_inventory.md)は、再設計前の試作を確認するための履歴資料として扱う。
 
-### 1.1 Phase 7実装状況
+### 1.1 Phase 7〜8実装状況
 
 本設計のPhase 1〜5は`codex/issue-47-rig-design`へ段階的に実装した。
 
@@ -24,6 +24,7 @@
 - Phase 3: 3D Mechanism IKと、Art Planeへ投影するPresentation Chain
 - Phase 4: 区間指定、前後Blend、Anchor Captureを持つContact / Pin
 - Phase 5: NURBS、Hook、Spline IKを使うSpline Chainと、決定論的Bake方式のSecondary Motion
+- Presentation Phase: Geometry Nodesで生成する意味別Custom Shapeと、Solverから独立したLive Preview
 
 Blender UIでは、`Projected Transform`、`Kinematic Chain`、`Spline Chain`がそれぞれ独立したSource Chainを持つ。Pose Modeで連結Boneを選択し、各Stageの`Assign Selected Chain`から割り当てる。これにより、同じCharacter Rig内でも腕をIK、髪をSplineとして別Chainへ接続できる。Mapping、Pin、Secondaryは`After UUIDs`で上流Stageを参照し、Component全体の最後のControlへ暗黙接続しない。
 
@@ -31,7 +32,7 @@ Character Rigの絵側出力は、`Recorded Pose Map` Stage内のOutputだけを
 
 Recorded Pose Mapは初期実装から3次元以上を扱える。次元数を固定した3D専用実装ではなく、`SemanticChannel`の個数をそのままPose Fieldの次元として使用し、正規化した局所RBFで補間する。したがって、移動、回転、スケール、Solver Featureを必要な数だけ組み合わせられる。
 
-Character RigのCustom Shapeは内部機構と分離したPresentation Referenceまでを実装範囲とし、Geometry Nodesによる意味別Widget生成はPhase 6以降に行う。これにより、内部Solverを作り直さずに表示形状だけを交換できる。
+Character RigのCustom Shapeは内部機構から分離したPresentation Layerとして実装済みである。Geometry Nodesの共有GroupへStageごとのSource ObjectからParametersを渡し、評価済みの無面Edge MeshをBone Custom Shapeへ割り当てる。Shapeや寸法を変更してもIK、Pose Map、Spline、Driver、Animation Dataは再構築しない。
 
 初期Blender Adapterの境界も明示しておく。
 
@@ -54,11 +55,11 @@ Character RigのCustom Shapeは内部機構と分離したPresentation Reference
 サンプルは四つのArmatureをMulti-Object Pose Modeにした状態で保存している。ビューポートをCamera Viewのまま開き、フレーム`1`、`24`、`48`を切り替えると、次の四例を確認できる。
 
 - State Rig: 2x2 State MatrixとGeometry Nodes Widget
-- Character Rig: 4次元Recorded Pose Mapと9個のRBF Sample
-- Character Rig: 3D Mechanismで解き、平面へ投影する実IKと円形Pole制限
-- Character Rig: Spline ChainとBake済みSecondary Motion
+- Character Rig: 4次元Recorded Pose Map、9個のRBF Sample、2D四方向矢印Widget
+- Character Rig: 3D Mechanismで解き、平面へ投影する実IK、墓標型IK Handle、楕円Pole
+- Character Rig: Spline Chain、球面四方向矢印Widget、Bake済みSecondary Motion
 
-操作時は、Bの左側にあるダイヤ形CTRLをクリックし、`G`による画面内移動で`Move X/Y`、`R X X`と`R Z Z`でBone Localの`Turn X/Z`を変更する。この四入力は互いに独立しており、9個のSampleは中央と各軸の正負に対応する。Cは起動時に手形CTRLだけがActiveであり、`G`で動かすとIK Target、円形CTRLを動かすと曲げ方向を操作できる。手動操作後にフレームを変更すると、フレーム`1`、`24`、`48`のデモ用Keyへ戻る。
+操作時は、Bの左側にある四方向矢印CTRLをクリックし、`G`による画面内移動で`Move X/Y`、`R X X`と`R Z Z`でBone Localの`Turn X/Z`を変更する。この四入力は互いに独立しており、9個のSampleは中央と各軸の正負に対応する。Cは起動時に墓標型CTRLがActiveであり、`G`で動かすとIK Target、楕円CTRLを動かすと曲げ方向を操作できる。手動操作後にフレームを変更すると、フレーム`1`、`24`、`48`のデモ用Keyへ戻る。
 
 ファイル内の`README_SemanticCharacterRig.txt`にも、各例の目的、操作対象、確認ポイントを収録している。再生成する場合は、既存プロジェクトでは実行せず、Blender 5.1以降を`--factory-startup --python scripts/blender_rig_semantic_character_sample.py`で起動する。Scriptは`--factory-startup`がない実行、ファイルを開いた状態、未保存変更がある状態をScene初期化前に拒否する。また、リポジトリ相対で保存先を解決し、個人環境の絶対パスをコードや説明文へ埋め込まない。
 
@@ -454,29 +455,61 @@ Secondary Motionは必ず次を備える。
 
 ## 13. Custom ShapeとGeometry Nodes
 
-Custom Shapeは内部機構の完成後に、**差し替え可能なPresentation Layer**として実装する。
+Custom Shapeは内部機構へ依存しない、**差し替え可能なPresentation Layer**として実装する。StageのSolver出力、Driver、KeyframeはWidget Object名やTopologyを参照しない。
 
-評価GraphはWidget Object名やTopologyを参照せず、次の抽象情報だけを出力する。
+### 13.1 生成構造
 
-- Control Role
-- Display Frame
-- 寸法、向き、Side
-- 操作可能Channel
-- 状態表示用の任意Property
+実装はShape Familyごとに共有Geometry Nodes Groupを一つ持ち、各Control Roleには次の二Objectを所有する。
 
-各Widget種類に共通Geometry Nodes Groupを用意し、各Source ObjectへParametersを設定する。
+```text
+Stage Presentation
+├─ Source Mesh Object
+│  └─ Geometry Nodes Modifier + Stage固有Parameters
+└─ evaluated edge-only Cache Mesh
+   └─ PoseBone.custom_shape
+```
 
-候補:
+Source Objectは編集値を保持し、CacheはCustom Shape表示を安定させる。生成結果は面を持たないEdgeのみの閉じたシルエットであり、Object、Mesh、Artifact RecordはRig Instance / Component / Stage / Roleで所有管理する。再Compileでは同じRoleを再利用し、Shape変更で不要になった所有Objectだけを削除する。
 
-- 軸回転: 円筒状または円弧状の矢印
-- 画面移動: 縦横矢印
-- IK Effector: 手のひら、足裏、角丸形状
-- Apparent Normal Move: 事前に傾けた円形Control
-- Spline: Curve Point、Root / Tip Pin、Tangent Handle
+State Rigの`COA_RigWidget_GN`とは別系統とし、Character Rig内でも全Shapeを一つの巨大Groupへ集約しない。これにより、Shape Family単位でVersion管理し、将来Polygon、手足専用形状、状態表示付きWidgetを追加できる。
 
-GN生成に失敗した場合は単純なMesh WidgetへFallbackできるようにする。Widget更新でSolver、Driver、Animation Dataを再構築しない。
+### 13.2 Shape一覧とParameters
 
-State Rigの既存GN Groupは可能な範囲でPrimitiveや寸法規則を共有するが、Character Rigの意味ごとのGroupを一つへ無理に統合しない。
+| Shape | 主な用途 | 編集値 |
+| --- | --- | --- |
+| 1D Double Arrow | 一軸移動 | Width、Bar Width、Arrow Head Length / Width |
+| 2D Four-way Arrow | 画面平面移動 | Width / Height、Bar Width、Arrow Head Length / Width |
+| Cylindrical 1D Arrow | 見た目軸まわりの一軸操作 | Radius、Arc Angle、矢印寸法、Resolution |
+| Spherical 2D Arrow | 立体的な二方向操作 | Radius、Arc Angle、矢印寸法、Resolution |
+| Tombstone | 手・足IK等の方向性を持つHandle | Width / Height、Corner Radius、Resolution |
+| Ellipse | Pole、汎用回転・移動Handle | Width / Height、Resolution |
+| Triangle / Rectangle / Diamond | 意味別の汎用Handle | Width / Height、Corner Radius、Resolution |
+| Sector | 角度範囲、扇形操作 | Inner / Outer Radius、Start / Sweep Angle、Resolution |
+| Custom Object | 制作者固有の形 | 既存Mesh Object、Wire Width |
+| None | Custom Shapeを表示しない | なし |
+
+曲線と3D変形Shapeの`Resolution`は既定`96`、最大`256`とする。特に円筒・球面矢印は旧Prototypeより高い既定解像度で、輪郭の角張りを抑える。`Wire Width`は表示線幅だけを変え、GeometryやSolverには影響しない。Bone ColorはPresentation適用時に上書きしない。
+
+### 13.3 Stageへの割り当て
+
+- `Projected Transform`: Primary Controlへ一つ
+- `Kinematic Chain`: IK HandleとPoleへ独立した二設定
+- `Spline Chain`: Stage内の全Spline Controlで一設定を共有
+- `Recorded Pose Map`、`Contact / Pin`、`Secondary Motion`: 自身ではControlを生成しないため、上流StageのPresentationを利用
+
+Custom Shapeは`Display Frame`用Boneを`custom_shape_transform`として維持する。見た目の向きは変更できるが、Control Boneの入力FrameとArt Plane評価を変更しない。
+
+### 13.4 Blender UIでの設定
+
+1. ArmatureをPose Modeにし、Nパネルの`COA Tools2 > Character Rig`を開く。
+2. Componentと対象Stageを選ぶ。生成Control Boneを選択した場合は、そのComponent / Stageへ自動同期する。
+3. `Control Presentation`、`IK Handle Presentation`、`Pole Presentation`、または`Spline Controls Presentation`を展開する。
+4. `Shape`を選び、表示されたShape固有Parametersを調整する。
+5. `Live Preview`が有効なら短いDebounce後に表示だけを自動反映する。無効なら`Apply`を押した時点で反映する。
+
+`Custom Object`はユーザー所有のMeshを直接参照し、COA Tools 2はそのObjectを削除・改変しない。`None`へ変更するとBoneのCustom Shapeを解除し、以前の生成Widgetだけを安全にCleanupする。IKではHandleとPoleを別々に設定できる。
+
+Presentation更新は専用Transactionで実行する。失敗時はCustom Shape割り当て、所有Object、Geometry Nodes Modifierと入力値をRollbackし、IK、Pose Map、Spline、Driver、Animation Dataを再構築しない。
 
 ## 14. 保存Schema案
 
@@ -607,15 +640,26 @@ Acceptance:
 - Scrub、Save / Reload、Bake後に結果が破綻しない。
 - Secondary Motionなしの基礎Animationを保持する。
 
-### Phase 6以降: Procedural Custom Shape
+### Presentation Phase: Procedural Custom Shape
 
-Phase 1〜5の内部評価を確認後、ユーザー提案のWidgetをGeometry Nodesで実装する。
+Phase 1〜5の内部評価に依存しないPresentation Layerとして実装済み。
 
-- 意味別GN Group
-- Primitive合成、Offset、Repeat、Curve処理
-- Source Object Parameter
-- Display Frameへの配置
-- Style PresetとFallback Mesh
+- 意味別の共有GN Groupと、Stage / RoleごとのSource Object Parameter
+- Flat / Cylindrical / Spherical Arrow、Tombstone、幾何形状、Sector
+- 評価済みEdge-only Cache MeshとDisplay Frameへの配置
+- IK Handle / Poleの独立設定、Spline Controlsの共有設定
+- Custom Object / Noneへの非破壊切替
+- Debounce付きLive Previewと手動Apply
+- 所有Artifact、Modifier入力、Custom Shape割り当てのRollback
+
+Acceptance:
+
+- Shapeまたは寸法だけの変更でSolver、Driver、Keyframeを再構築しない。
+- 同じ設定の再適用でWidget Object、Modifier、Artifact Recordが重複しない。
+- 全Procedural Shapeが面を持たないEdge-only Geometryを返す。
+- 生成ObjectのRename、Save / Reload、Armature複製後も所有Roleから復旧できる。
+- 3D Shapeは既定96、最大256 Segmentで調整できる。
+- Custom Objectはユーザー所有のまま保持し、None切替で削除しない。
 
 ## 17. 検証方針
 
@@ -635,6 +679,8 @@ Phase 1〜5の内部評価を確認後、ユーザー提案のWidgetをGeometry 
 - IK、Pin、Splineの合成
 - Art Plane法線維持
 - Secondary MotionのCacheとBake
+- Procedural WidgetのTopology、冪等性、Shape切替とRollback
+- Live Preview / Manual Apply、Custom Object / None
 - 既存State Rig / Legacy Componentの非破壊性
 
 ### 17.3 DCC実機
@@ -659,7 +705,7 @@ Phase 1〜5の内部評価を確認後、ユーザー提案のWidgetをGeometry 
 6. Pin、Spline、Secondary Motionを他Nodeと複合できる。
 7. 既存State Rig、Action、未所有Artifactを暗黙変更しない。
 8. 最終結果をBone / Shape Key / Slot / PropertyへBakeできる。
-9. Custom Shapeを後からGNへ置換しても内部評価とAnimationが変化しない。
+9. GN Custom Shapeを変更・解除・Custom Objectへ差し替えても内部評価とAnimationが変化しない。
 
 ## 19. 今回の決定事項
 
@@ -678,7 +724,7 @@ Phase 1〜5の内部評価を確認後、ユーザー提案のWidgetをGeometry 
 | IK/FK Sliderだけを切替の中核にする | 不採用 |
 | PinをIK/FKへ内包 | 不採用。独立Nodeとして合成 |
 | SplineとSecondary Motion | 独立Nodeとして合成 |
-| GN Custom Shape | 内部機構後のPresentation Layerとして採用 |
+| GN Custom Shape | 内部機構から独立したPresentation Layerとして採用・実装済み |
 
 ## 20. 関連資料
 

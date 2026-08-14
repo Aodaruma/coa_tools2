@@ -202,64 +202,26 @@ def _flat_ribbon(
     return obj
 
 
-def _wire_shape(name, vertices, edges, collection):
-    mesh = bpy.data.meshes.new(f"{name}_Mesh")
-    mesh.from_pydata(vertices, edges, ())
-    mesh.update()
-    obj = bpy.data.objects.new(name, mesh)
-    collection.objects.link(obj)
-    obj.hide_render = True
-    obj.hide_set(True)
-    return obj
+def _configure_presentation(presentation, shape, **parameters):
+    """Author a production widget without scheduling a half-configured preview."""
+
+    presentation.live_preview = False
+    presentation.shape = shape
+    for name, value in parameters.items():
+        setattr(presentation, name, value)
 
 
-def _demo_widgets(collection):
-    segments = 32
-    circle_vertices = [
-        (
-            math.cos(math.tau * index / segments),
-            math.sin(math.tau * index / segments),
-            0.0,
-        )
-        for index in range(segments)
-    ]
-    circle_edges = [(index, (index + 1) % segments) for index in range(segments)]
-    circle = _wire_shape(
-        "DEMO_WGT_Circle", circle_vertices, circle_edges, collection
-    )
-    diamond = _wire_shape(
-        "DEMO_WGT_Diamond",
-        ((-1.0, 0.0, 0.0), (0.0, -0.65, 0.0), (1.0, 0.0, 0.0), (0.0, 0.65, 0.0)),
-        ((0, 1), (1, 2), (2, 3), (3, 0)),
-        collection,
-    )
-    # A compact hand/foot-like outline.  It deliberately has no direction
-    # arrow: translation and rotation come from the transform gizmo itself.
-    hand = _wire_shape(
-        "DEMO_WGT_HandIK",
-        (
-            (-1.05, -0.45, 0.0),
-            (-0.55, -0.72, 0.0),
-            (0.45, -0.66, 0.0),
-            (1.08, -0.25, 0.0),
-            (0.92, 0.34, 0.0),
-            (0.30, 0.65, 0.0),
-            (-0.58, 0.62, 0.0),
-            (-1.08, 0.25, 0.0),
-        ),
-        tuple((index, (index + 1) % 8) for index in range(8)),
-        collection,
-    )
-    return {"circle": circle, "diamond": diamond, "hand": hand}
+def _assert_procedural_custom_shape(pose_bone, shape, target_role):
+    """Prove that compilation, rather than sample-only code, assigned the widget."""
 
-
-def _set_custom_shape(pose_bone, shape, scale=0.45):
-    pose_bone.custom_shape = shape
-    pose_bone.use_custom_shape_bone_size = False
-    pose_bone.custom_shape_scale_xyz = (scale, scale, scale)
-    bone_color = getattr(pose_bone, "color", None)
-    if bone_color is not None:
-        bone_color.palette = "DEFAULT"
+    widget = pose_bone.custom_shape
+    assert widget is not None and widget.type == "MESH"
+    assert widget.get("coa_semantic_widget_shape") == shape
+    assert widget.get("coa_semantic_widget_target_role") == target_role
+    assert widget.data is not None and len(widget.data.edges) > 0
+    assert len(widget.data.polygons) == 0
+    assert not pose_bone.use_custom_shape_bone_size
+    return widget
 
 
 def _key_pose(pose_bone, frame, *, location=None, rotation=None):
@@ -374,7 +336,7 @@ def _create_state_demo(collection, material):
     return armature, control, target
 
 
-def _create_pose_map_demo(collection, material, widgets):
+def _create_pose_map_demo(collection, material):
     from coa_tools2.rig_control.blender.semantic_compiler import (
         compile_semantic_component,
     )
@@ -409,7 +371,18 @@ def _create_pose_map_demo(collection, material, widgets):
     component.depth_min = -1.0
     component.depth_max = 1.0
     projected.visual_axis = (0.18, 0.94, 0.28)
+    _configure_presentation(
+        projected.presentation,
+        "ARROW_2D",
+        width=1.25,
+        height=1.25,
+        bar_width=0.12,
+        head_length=0.24,
+        head_width=0.34,
+        wire_width=1.5,
+    )
     compile_semantic_component(armature, component)
+    projected.presentation.live_preview = True
 
     # A projected apparent-depth axis is intentionally kept inside the art
     # plane.  Combining that proxy with both screen translation axes would
@@ -469,7 +442,7 @@ def _create_pose_map_demo(collection, material, widgets):
     assert result == {"FINISHED"}, result
 
     control = armature.pose.bones[projected.control_bone]
-    _set_custom_shape(control, widgets["diamond"], 0.55)
+    _assert_procedural_custom_shape(control, "ARROW_2D", "PRIMARY")
     sample_poses = (
         ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0), 0.10),
         ((1.0, 0.0, 0.0), (0.0, 0.0, 0.0), 0.95),
@@ -523,7 +496,7 @@ def _create_pose_map_demo(collection, material, widgets):
     return armature, component, projected, pose_map, target
 
 
-def _create_projected_ik_demo(collection, material, widgets):
+def _create_projected_ik_demo(collection, material):
     from coa_tools2.rig_control.blender.semantic_compiler import (
         compile_semantic_component,
     )
@@ -573,12 +546,31 @@ def _create_projected_ik_demo(collection, material, widgets):
     stage.use_pole = True
     stage.allow_stretch = False
     stage.visual_axis = (0.18, 0.94, 0.28)
+    _configure_presentation(
+        stage.presentation,
+        "TOMBSTONE",
+        width=1.35,
+        height=0.82,
+        corner_radius=0.22,
+        segments=64,
+        wire_width=1.5,
+    )
+    _configure_presentation(
+        stage.pole_presentation,
+        "ELLIPSE",
+        width=0.68,
+        height=0.68,
+        segments=64,
+        wire_width=1.5,
+    )
     result = compile_semantic_component(armature, component)
+    stage.presentation.live_preview = True
+    stage.pole_presentation.live_preview = True
     info = result["stage_results"][stage.stage_uuid]
     control = armature.pose.bones[stage.control_bone]
     pole = armature.pose.bones[stage.pole_bone]
-    _set_custom_shape(control, widgets["hand"], 0.72)
-    _set_custom_shape(pole, widgets["circle"], 0.44)
+    _assert_procedural_custom_shape(control, "TOMBSTONE", "PRIMARY")
+    _assert_procedural_custom_shape(pole, "ELLIPSE", "POLE")
 
     _key_pose(control, 1, location=(0.0, 0.0, 0.0))
     _key_pose(control, 24, location=(0.42, -0.36, 0.72))
@@ -613,7 +605,7 @@ def _create_projected_ik_demo(collection, material, widgets):
     return armature, component, stage, ribbon
 
 
-def _create_spline_secondary_demo(collection, internal_collection, material, widgets):
+def _create_spline_secondary_demo(collection, internal_collection, material):
     from coa_tools2.rig_control.blender.semantic_compiler import (
         compile_semantic_component,
     )
@@ -666,6 +658,17 @@ def _create_spline_secondary_demo(collection, internal_collection, material, wid
     spline_stage.spline_control_count = 4
     spline_stage.root_pin = True
     spline_stage.tip_pin = False
+    _configure_presentation(
+        spline_stage.presentation,
+        "SPHERE_ARROW_2D",
+        radius=0.38,
+        arc_angle=math.radians(150.0),
+        bar_width=0.08,
+        head_length=0.14,
+        head_width=0.18,
+        segments=96,
+        wire_width=1.5,
+    )
     secondary_stage = _new_semantic_stage(
         component, "SECONDARY_MOTION", "Secondary Motion", 1
     )
@@ -678,13 +681,21 @@ def _create_spline_secondary_demo(collection, internal_collection, material, wid
     secondary_stage.bake_end = 48
 
     compiled = compile_semantic_component(armature, component)
+    spline_stage.presentation.live_preview = True
     spline = compiled["stage_results"][spline_stage.stage_uuid].spline_info
     assert spline is not None
     curve_object = bpy.data.objects[spline.curve_object]
     _move_to_collection(curve_object, internal_collection)
     controls = tuple(armature.pose.bones[name] for name in spline.control_bones)
+    shared_widget = None
     for control in controls:
-        _set_custom_shape(control, widgets["circle"], 0.28)
+        widget = _assert_procedural_custom_shape(
+            control,
+            "SPHERE_ARROW_2D",
+            "SPLINE_CONTROL",
+        )
+        shared_widget = shared_widget or widget
+        assert widget == shared_widget
         _key_pose(control, -3, location=(0.0, 0.0, 0.0))
         _key_pose(control, 1, location=(0.0, 0.0, 0.0))
         _key_pose(control, 24, location=(0.0, 0.0, 0.0))
@@ -762,27 +773,31 @@ def _create_readme(scene):
         "  A Geometry Nodes matrix widget drives four Shape Key states.\n"
         "  Drag its circular handle in the visible matrix.\n\n"
         "B / Character Rig — 4D Recorded Pose Map\n"
-        "  Click the diamond CTRL at the left of the amber mesh.\n"
+        "  Click the procedural four-way arrow CTRL at the left of the amber mesh.\n"
         "  G in the screen plane supplies Move X/Y; R X X and R Z Z supply local Turn X/Z.\n"
         "  Nine recorded samples interpolate the flat mesh Shape Key with a local RBF.\n"
         "  The four channels are independent and the artwork remains a flat X/Z mesh.\n"
         "  Changing frame restores the keyed demo pose after a temporary manual edit.\n\n"
         "C / Character Rig — Projected IK\n"
-        "  The hand-shaped CTRL is active on open; move it with G to drive real IK.\n"
-        "  Move the circular bend CTRL around its Limit Distance rail to change the bend.\n"
+        "  The tombstone CTRL is active on open; move it with G to drive real IK.\n"
+        "  Move the ellipse pole CTRL around its Limit Distance rail to change the bend.\n"
         "  Projected joints and presentation bones return the source ribbon to the Art Plane.\n\n"
         "D / Character Rig — Spline + Secondary Motion\n"
-        "  Four circle CTRLs Hook a generated NURBS curve feeding Spline IK.\n"
+        "  Four spherical four-way arrow CTRLs Hook a generated NURBS curve feeding Spline IK.\n"
         "  A deterministic spring layer is baked to a managed NLA Action.\n"
         "  Edit the Spline controls, then use Bake Secondary Motion to rebuild the layer.\n\n"
         "UI\n"
         "  N-panel > COA Tools2 > State Rig shows A.\n"
         "  N-panel > COA Tools2 > Character Rig shows B/C/D.\n"
+        "  Select a Stage, open its Presentation Settings, then choose Shape and parameters.\n"
+        "  Live Preview applies edits after a short delay; disable it to use Apply manually.\n"
+        "  IK Handle and Pole presentations are configured independently.\n"
         "  Generated mechanism bones live in the hidden COA Rig MCH bone collection.\n"
         "  The DEMO_Internal collection contains the generated Spline curve.\n\n"
         "Notes\n"
-        "  Semantic custom-shape Geometry Nodes are intentionally a later presentation phase.\n"
-        "  The simple diamond/hand/circle shapes in this sample only make controls easy to find.\n"
+        "  B/C/D use the production Geometry Nodes presentation system, not sample-only meshes.\n"
+        "  Spatial arrow resolution defaults to 96 segments and supports up to 256.\n"
+        "  Shape can also be None or an existing Mesh selected through Custom Object.\n"
         "  All generated Character Rig artifacts are tagged by instance/component/stage identity.\n"
     )
     scene["coa_demo_readme"] = readme.name
@@ -929,8 +944,6 @@ def main():
     ik_collection = _collection("C_Projected_IK", parent=root)
     spline_collection = _collection("D_Spline_Secondary", parent=root)
     guide_collection = _collection("DEMO_Guides", parent=root)
-    widget_collection = _collection("DEMO_Widgets", parent=root)
-    widget_collection.hide_render = True
     internal_collection = _collection("DEMO_Internal", parent=root)
     internal_collection.hide_render = True
 
@@ -939,20 +952,17 @@ def main():
     green = _material("DEMO_Green", (0.23, 0.76, 0.48))
     rose = _material("DEMO_Rose", (0.92, 0.28, 0.47))
     text_material = _material("DEMO_Text", (0.90, 0.93, 1.0))
-    widgets = _demo_widgets(widget_collection)
-
     state_armature, state_control, state_target = _create_state_demo(
         state_collection, blue
     )
-    pose_map = _create_pose_map_demo(pose_map_collection, amber, widgets)
+    pose_map = _create_pose_map_demo(pose_map_collection, amber)
     pose_armature, pose_component, projected_stage, pose_stage, pose_target = pose_map
-    ik_demo = _create_projected_ik_demo(ik_collection, green, widgets)
+    ik_demo = _create_projected_ik_demo(ik_collection, green)
     ik_armature, ik_component, ik_stage, ik_ribbon = ik_demo
     spline_demo = _create_spline_secondary_demo(
         spline_collection,
         internal_collection,
         rose,
-        widgets,
     )
     (
         spline_armature,
@@ -996,12 +1006,12 @@ def main():
     for name, body, location in (
         (
             "DEMO_Guide_B",
-            "B  CLICK DIAMOND | G: MOVE X/Y | R X X / R Z Z: TURN",
+            "B  FOUR-WAY ARROW | G: MOVE X/Y | R X X / R Z Z: TURN",
             (1.30, -0.28, 2.45),
         ),
         (
             "DEMO_Guide_C",
-            "C  HAND: IK TARGET (ACTIVE) | CIRCLE: BEND RAIL",
+            "C  TOMBSTONE: IK TARGET (ACTIVE) | ELLIPSE: BEND RAIL",
             (-6.20, -0.28, -5.25),
         ),
     ):
