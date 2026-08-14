@@ -37,7 +37,7 @@ Character RigのCustom Shapeは内部機構から分離したPresentation Layer�
 初期Blender Adapterの境界も明示しておく。
 
 - Pose Fieldの**入力次元数は任意**であり、3次元以上を同じEvaluatorで扱う。
-- Blender上のOutput Adapterは現在scalar単位である。Vector Snapshot自体はSchema/Evaluatorで保持できるが、Bone XYZ等は軸ごとのOutputとして登録する。
+- Blender上のOutput Adapterはscalarに加えてvectorを扱う。Bone Location／Euler Rotationは最大3要素、array Custom Propertyは最大4要素を1つの意味的Outputとして記録し、Blender上では要素ごとの管理FCurveへ安全に展開する。Shape Key、Constraint Influence、Slot、Z Value、discrete outputはscalarのままとする。
 - 離散Outputはnearest sampleで扱える。離散**入力次元**は、連続RBFと混同しないため未対応値を明示エラーにする。
 - 投影は明示的なArt Planeを標準とする。Screen Plane等の未実装modeを黙って同じ挙動にせず、Compile時に説明付きで拒否する。
 - Secondary Motionの初期版は位置Bakeである。回転はSpline tangentが作り、将来Quaternion log空間のspringを追加する。
@@ -303,9 +303,11 @@ Output Snapshot
 
 FK、IK、Global Orientation、Bend、Stretch、Joint Limitを扱う。IK/FKは単純な見た目Sliderに固定せず、PinやPose Matchと組み合わせ可能なKinematic Policyとして保存する。
 
+FKは`CHAIN_IK`内の公開Modeに加え、独立した`CHAIN_FK` stageとしても構築できる。自動Contactで接触を維持する場合は、公開ModeをFKのまま保ちつつ`CHAIN_IK`を内部overrideとして使用する。
+
 ### 8.4 `CONTACT_PIN`
 
-位置、向き、参照Space、Weight、開始・終了区間を持つ。IK/FKから独立し、`KINEMATIC_CHAIN`のTargetまたは評価後Poseへ合成できる。
+位置、向き、参照Space、Weight、開始・終了区間を持つ。`CHAIN_IK`の自動ContactはIK Targetへ合成し、公開FK/IK Modeと独立して接触を維持する。明示Driven Boneを指定する従来Pinは、変形chainに接続しないcontrolに限り利用できる。
 
 ### 8.5 `SPLINE_CHAIN`
 
@@ -733,3 +735,4 @@ Acceptance:
 - [Phase 5: Matrix DomainとRig Name表示](rig_control_phase5_matrix_domain.md)
 - [Phase 6: Character Posing Rig Components](rig_control_phase6_character_posing.md)
 - [Phase 6 キャラクターリグ現行実装資料](rig_control_phase6_current_implementation_inventory.md)
+- [B-Bone Bezier Character Rig](rig_control_bbone_bezier.md)
