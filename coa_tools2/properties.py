@@ -3,6 +3,7 @@ from bpy.props import BoolProperty, FloatVectorProperty, IntProperty, FloatPrope
 # from . functions import *
 from . import functions
 from . import outliner
+from .rig_control.blender import properties as rig_control_properties
 
 def hide_bone(self, context):
     self.hide = self.hide
@@ -445,6 +446,13 @@ class ObjectProperties(bpy.types.PropertyGroup):
             pass
 
     anim_collections: bpy.props.CollectionProperty(type=AnimationCollections)
+    rig_instance_id: StringProperty()
+    rig_controls: CollectionProperty(type=rig_control_properties.COATOOLS2_PG_RigControl)
+    rig_controls_index: IntProperty(default=0, min=0)
+    rig_validation_issues: CollectionProperty(
+        type=rig_control_properties.COATOOLS2_PG_RigValidationIssue
+    )
+    rig_validation_issues_index: IntProperty(default=0, min=0)
     uv_default_state: bpy.props.CollectionProperty(type=UVData)
     slot: bpy.props.CollectionProperty(type=SlotData)
     blend_mode: bpy.props.EnumProperty(name="Blend Mode", description="Defines the blend mode of a sprite", items=(
@@ -566,15 +574,33 @@ class WindowManagerProperties(bpy.types.PropertyGroup):
     show_help: BoolProperty(default=False, description="Hide Help")
 
 def register():
-    bpy.types.Object.coa_tools2 = PointerProperty(type=ObjectProperties)
-    bpy.types.Scene.coa_tools2 = PointerProperty(type=SceneProperties)
-    bpy.types.Mesh.coa_tools2 = PointerProperty(type=MeshProperties)
-    bpy.types.Bone.coa_tools2 = PointerProperty(type=BoneProperties)
-    bpy.types.WindowManager.coa_tools2 = PointerProperty(type=WindowManagerProperties)
+    property_types = (
+        (bpy.types.Object, ObjectProperties),
+        (bpy.types.Scene, SceneProperties),
+        (bpy.types.Mesh, MeshProperties),
+        (bpy.types.Bone, BoneProperties),
+        (bpy.types.WindowManager, WindowManagerProperties),
+    )
+    for owner_type, property_type in property_types:
+        if hasattr(owner_type, "coa_tools2"):
+            delattr(owner_type, "coa_tools2")
+        setattr(owner_type, "coa_tools2", PointerProperty(type=property_type))
+    if hasattr(bpy.types.Object, "coa_tools2_rig"):
+        del bpy.types.Object.coa_tools2_rig
+    bpy.types.Object.coa_tools2_rig = PointerProperty(
+        type=rig_control_properties.COATOOLS2_PG_RigObjectProperties
+    )
     print("COATools Properties have been registered")
 
 def unregister():
-    del bpy.types.Object.coa_tools2
-    del bpy.types.Scene.coa_tools2
-    del bpy.types.Mesh.coa_tools2
-    del bpy.types.Bone.coa_tools2
+    if hasattr(bpy.types.Object, "coa_tools2_rig"):
+        del bpy.types.Object.coa_tools2_rig
+    for owner_type in (
+        bpy.types.Object,
+        bpy.types.Scene,
+        bpy.types.Mesh,
+        bpy.types.Bone,
+        bpy.types.WindowManager,
+    ):
+        if hasattr(owner_type, "coa_tools2"):
+            delattr(owner_type, "coa_tools2")

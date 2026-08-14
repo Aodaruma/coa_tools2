@@ -23,7 +23,7 @@ bl_info = {
     "description": "This Addon provides a Toolset for a 2D Animation Workflow.",
     "author": "Aodaruma",
     "version": (2, 2, 1),
-    "blender": (5, 0, 0),
+    "blender": (4, 2, 0),
     "location": "View 3D > Tools > Cutout Animation Tools",
     "warning": "",
     "wiki_url": "https://github.com/aodaruma/coa_tools2/wiki",
@@ -82,6 +82,15 @@ from .operators import export_json
 
 from .operators.exporter import export_dragonbones
 from .operators.exporter import export_creature
+from .rig_control.blender import operators as rig_control_operators
+from .rig_control.blender import properties as rig_control_properties
+from .rig_control.blender import ui as rig_control_ui
+from .rig_control.blender import component_operators as rig_component_operators
+from .rig_control.blender import component_ui as rig_component_ui
+from .rig_control.blender import semantic_runtime as rig_semantic_runtime
+from .rig_control.blender import semantic_operators as rig_semantic_operators
+from .rig_control.blender import semantic_presentations as rig_semantic_presentations
+from .rig_control.blender import semantic_ui as rig_semantic_ui
 
 # register
 ##################################
@@ -218,6 +227,23 @@ classes = (
     props.Event,
     props.TimelineEvent,
     props.AnimationCollections,
+    rig_control_properties.COATOOLS2_PG_RigBinding,
+    rig_control_properties.COATOOLS2_PG_RigValidationIssue,
+    rig_control_properties.COATOOLS2_PG_RigStatePoint,
+    rig_control_properties.COATOOLS2_PG_RigStateCell,
+    rig_control_properties.COATOOLS2_PG_RigComponentBoneRef,
+    rig_control_properties.COATOOLS2_PG_RigWidgetPresentation,
+    rig_control_properties.COATOOLS2_PG_SemanticInputTerm,
+    rig_control_properties.COATOOLS2_PG_SemanticInputChannel,
+    rig_control_properties.COATOOLS2_PG_SemanticOutputChannel,
+    rig_control_properties.COATOOLS2_PG_SemanticSampleInput,
+    rig_control_properties.COATOOLS2_PG_SemanticSampleOutput,
+    rig_control_properties.COATOOLS2_PG_SemanticPoseSample,
+    rig_control_properties.COATOOLS2_PG_SemanticStage,
+    rig_control_properties.COATOOLS2_PG_RigComponentArtifact,
+    rig_control_properties.COATOOLS2_PG_RigComponent,
+    rig_control_properties.COATOOLS2_PG_RigControl,
+    rig_control_properties.COATOOLS2_PG_RigObjectProperties,
     props.ObjectProperties,
     props.SceneProperties,
     props.MeshProperties,
@@ -293,6 +319,35 @@ classes = (
     convert_from_old.COATOOLS2_OT_ConvertOldVersionCoatools,
     change_alpha_mode.COATOOLS2_OT_ChangeAlphaMode,
     change_alpha_mode.COATOOLS2_OT_ChangeTextureInterpolationMode,
+    # rig controls
+    rig_control_operators.COATOOLS2_OT_AddRigControl,
+    rig_control_operators.COATOOLS2_OT_AddLipSyncStateRig,
+    rig_control_operators.COATOOLS2_OT_AddRigBinding,
+    rig_control_operators.COATOOLS2_OT_RemoveRigBinding,
+    rig_control_operators.COATOOLS2_OT_SetupRigStates,
+    rig_control_operators.COATOOLS2_OT_SetRigStateMixPolicy,
+    rig_control_operators.COATOOLS2_OT_ToggleRigStateCell,
+    rig_control_operators.COATOOLS2_OT_AssignRigStatePoint,
+    rig_control_operators.COATOOLS2_OT_ClearRigStatePoint,
+    rig_control_operators.COATOOLS2_OT_SetRigStateFallback,
+    rig_control_operators.COATOOLS2_OT_SnapRigStatePoint,
+    rig_control_operators.COATOOLS2_OT_UpdateRigControl,
+    rig_control_operators.COATOOLS2_OT_ValidateRig,
+    rig_control_operators.COATOOLS2_OT_RepairRig,
+    rig_control_ui.COATOOLS2_UL_RigControls,
+    rig_control_ui.COATOOLS2_UL_RigBindings,
+    rig_control_ui.COATOOLS2_UL_RigStatePoints,
+    rig_control_ui.COATOOLS2_UL_RigStateCells,
+    rig_control_ui.COATOOLS2_PT_RigControls,
+    rig_component_operators.COATOOLS2_OT_AddRigComponent,
+    rig_component_operators.COATOOLS2_OT_UpdateRigComponent,
+    rig_component_operators.COATOOLS2_OT_AddComponentBinding,
+    rig_component_operators.COATOOLS2_OT_RemoveComponentBinding,
+    *rig_semantic_operators.CLASSES,
+    *rig_semantic_presentations.CLASSES,
+    rig_component_ui.COATOOLS2_UL_RigComponents,
+    rig_component_ui.COATOOLS2_PT_RigComponents,
+    *rig_semantic_ui.CLASSES,
     # exporter
     export_dragonbones.COATOOLS2_OT_DragonBonesExport,
     export_dragonbones.COATOOLS2_PT_ExportPanel,
@@ -464,7 +519,7 @@ def register():
         info = {
             "name": "COA Tools2",
             "version": (2, 2, 1),
-            "blender": (5, 0, 0),
+            "blender": (4, 2, 0),
         }
     addon_updater_ops.register(info)
 
@@ -483,6 +538,15 @@ def register():
 
     # register props and keymap
     props.register()
+    rig_control_properties.start_selection_sync()
+    rig_semantic_runtime.register_driver_namespace()
+    if (
+        rig_semantic_runtime.semantic_runtime_load_post
+        not in bpy.app.handlers.load_post
+    ):
+        bpy.app.handlers.load_post.append(
+            rig_semantic_runtime.semantic_runtime_load_post
+        )
     register_keymaps()
 
     # create handler
@@ -497,30 +561,50 @@ def register():
 
 
 def unregister():
-    addon_updater_ops.unregister()
+    rig_control_properties.cancel_auto_rebuild()
+    rig_semantic_presentations.cancel_semantic_presentation_update()
+    rig_control_properties.cancel_selection_sync()
+    # Remove callbacks before unregistering the classes and properties they use.
+    handlers = (
+        (bpy.app.handlers.depsgraph_update_pre, outliner.create_outliner_items),
+        (bpy.app.handlers.frame_change_post, update_properties),
+        (bpy.app.handlers.depsgraph_update_post, update_properties),
+        (
+            bpy.app.handlers.depsgraph_update_post,
+            redirect_direct_sprite_mesh_edit_mode,
+        ),
+        (bpy.app.handlers.load_post, check_view_2D_3D),
+        (bpy.app.handlers.load_post, check_for_deprecated_data),
+        (bpy.app.handlers.load_post, check_for_old_coatools),
+        (bpy.app.handlers.load_post, set_shading),
+        (
+            bpy.app.handlers.load_post,
+            rig_semantic_runtime.semantic_runtime_load_post,
+        ),
+    )
+    for handler_list, callback in handlers:
+        while callback in handler_list:
+            handler_list.remove(callback)
 
-    # unregister classes
-    for cls in classes:
-        bpy.utils.unregister_class(cls)
-
-    # unregister tools
-    bpy.utils.unregister_tool(edit_mesh.COATOOLS2_TO_DrawPolygon)
-
-    # unregisters props and keymap
-    props.unregister()
     unregister_keymaps()
 
-    # delete handler
-    bpy.app.handlers.depsgraph_update_pre.remove(outliner.create_outliner_items)
-    bpy.app.handlers.frame_change_post.remove(update_properties)
-    bpy.app.handlers.depsgraph_update_post.remove(update_properties)
-    if redirect_direct_sprite_mesh_edit_mode in bpy.app.handlers.depsgraph_update_post:
-        bpy.app.handlers.depsgraph_update_post.remove(
-            redirect_direct_sprite_mesh_edit_mode
-        )
-    bpy.app.handlers.load_post.remove(check_view_2D_3D)
-    bpy.app.handlers.load_post.remove(check_for_deprecated_data)
-    bpy.app.handlers.load_post.remove(check_for_old_coatools)
+    try:
+        bpy.utils.unregister_tool(edit_mesh.COATOOLS2_TO_DrawPolygon)
+    except RuntimeError:
+        pass
+
+    # RNA pointer properties must be removed before their PropertyGroup classes.
+    props.unregister()
+    rig_semantic_runtime.unregister_driver_namespace()
+
+    for cls in reversed(classes):
+        try:
+            bpy.utils.unregister_class(cls)
+        except RuntimeError:
+            # Supports cleanup after a partially registered older add-on version.
+            pass
+
+    addon_updater_ops.unregister()
 
 
 @persistent
@@ -575,7 +659,7 @@ def check_for_old_coatools(dummy):
             return
 
     for action in bpy.data.actions:
-        for fcurve in action.fcurves:
+        for fcurve in iter_action_fcurves(action):
             if data_path_has_old_coatools(fcurve.data_path):
                 bpy.context.scene.coa_tools2.old_coatools_found = True
                 return
