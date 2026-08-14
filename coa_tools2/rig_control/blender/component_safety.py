@@ -448,6 +448,50 @@ def _pose_bone_snapshot(pose_bone):
     ):
         if hasattr(pose_bone, name):
             snapshot[name] = tuple(getattr(pose_bone, name))
+    bbone_values = {}
+    for name in (
+        "bbone_segments",
+        "bbone_handle_type_start",
+        "bbone_handle_type_end",
+        "bbone_handle_use_ease_start",
+        "bbone_handle_use_ease_end",
+        "bbone_handle_use_scale_start",
+        "bbone_handle_use_scale_end",
+        "bbone_easein",
+        "bbone_easeout",
+        "bbone_rollin",
+        "bbone_rollout",
+        "bbone_scaleinx",
+        "bbone_scaleiny",
+        "bbone_scaleoutx",
+        "bbone_scaleouty",
+        "bbone_scalein",
+        "bbone_scaleout",
+    ):
+        owner = pose_bone if hasattr(pose_bone, name) else pose_bone.bone
+        if hasattr(owner, name):
+            value = getattr(owner, name)
+            try:
+                value = tuple(value)
+            except TypeError:
+                pass
+            bbone_values[name] = (
+                "POSE" if owner is pose_bone else "BONE",
+                value,
+            )
+    bbone_handles = {}
+    for name in ("bbone_custom_handle_start", "bbone_custom_handle_end"):
+        # Blender 5.1 exposes a read-only PoseBone proxy.  The writable
+        # custom-handle relationship belongs to the Armature data Bone.
+        owner = pose_bone.bone
+        if hasattr(owner, name):
+            target = getattr(owner, name)
+            bbone_handles[name] = (
+                "BONE",
+                target.name if target is not None else "",
+            )
+    snapshot["bbone_values"] = bbone_values
+    snapshot["bbone_handles"] = bbone_handles
     return snapshot
 
 
@@ -776,6 +820,118 @@ def _component_bone_names(component):
     return names
 
 
+def _driver_fcurve_snapshot(fcurve):
+    return {
+        "data_path": fcurve.data_path,
+        "array_index": fcurve.array_index,
+        "type": fcurve.driver.type,
+        "expression": fcurve.driver.expression,
+        "use_self": fcurve.driver.use_self,
+        "variables": tuple(
+            {
+                "name": variable.name,
+                "type": variable.type,
+                "targets": tuple(
+                    {
+                        name: getattr(target, name)
+                        for name in (
+                            "id",
+                            "id_type",
+                            "data_path",
+                            "bone_target",
+                            "transform_type",
+                            "transform_space",
+                            "rotation_mode",
+                        )
+                        if hasattr(target, name)
+                    }
+                    for target in variable.targets
+                ),
+            }
+            for variable in fcurve.driver.variables
+        ),
+    }
+
+
+def _find_armature_driver(armature, data_path, array_index):
+    animation_data = armature.animation_data
+    if animation_data is None:
+        return None
+    return next(
+        (
+            fcurve
+            for fcurve in animation_data.drivers
+            if fcurve.data_path == data_path
+            and fcurve.array_index == array_index
+        ),
+        None,
+    )
+
+
+def _remove_armature_driver(armature, fcurve):
+    try:
+        return bool(armature.driver_remove(fcurve.data_path, fcurve.array_index))
+    except (AttributeError, KeyError, RuntimeError, TypeError):
+        try:
+            return bool(armature.driver_remove(fcurve.data_path))
+        except (AttributeError, KeyError, RuntimeError, TypeError):
+            return False
+
+
+def _add_armature_driver(armature, data_path, array_index):
+    try:
+        created = armature.driver_add(data_path, array_index)
+    except (AttributeError, KeyError, RuntimeError, TypeError):
+        created = armature.driver_add(data_path)
+    if hasattr(created, "driver"):
+        return created
+    return next(
+        (
+            fcurve
+            for fcurve in created
+            if fcurve.array_index == array_index
+        ),
+        created[0],
+    )
+
+
+def _restore_armature_drivers(armature, snapshots):
+    """Restore the exact Armature-driver set captured for this transaction."""
+
+    expected = {
+        (snapshot["data_path"], snapshot["array_index"]): snapshot
+        for snapshot in snapshots
+    }
+    animation_data = armature.animation_data
+    if animation_data is not None:
+        for fcurve in tuple(animation_data.drivers):
+            if (fcurve.data_path, fcurve.array_index) not in expected:
+                _remove_armature_driver(armature, fcurve)
+    for identity, snapshot in expected.items():
+        fcurve = _find_armature_driver(armature, *identity)
+        if fcurve is None:
+            fcurve = _add_armature_driver(armature, *identity)
+        driver = fcurve.driver
+        driver.type = snapshot["type"]
+        driver.expression = snapshot["expression"]
+        driver.use_self = snapshot["use_self"]
+        while driver.variables:
+            driver.variables.remove(driver.variables[0])
+        for variable_state in snapshot["variables"]:
+            variable = driver.variables.new()
+            variable.name = variable_state["name"]
+            variable.type = variable_state["type"]
+            for target, target_state in zip(
+                variable.targets,
+                variable_state["targets"],
+            ):
+                for name, value in target_state.items():
+                    try:
+                        setattr(target, name, value)
+                    except (AttributeError, RuntimeError, TypeError):
+                        pass
+
+
 def capture_component_build_state(armature, component):
     instance_id = ensure_rig_instance_id(armature)
     widget_geometry = {}
@@ -854,6 +1010,14 @@ def capture_component_build_state(armature, component):
         "object_states": object_states,
         "curve_states": curve_states,
         "nodes_modifier_states": nodes_modifier_states,
+        "armature_drivers": tuple(
+            _driver_fcurve_snapshot(fcurve)
+            for fcurve in (
+                armature.animation_data.drivers
+                if armature.animation_data is not None
+                else ()
+            )
+        ),
         "artifacts": tuple(
             {
                 "artifact_uuid": artifact.artifact_uuid,
@@ -941,6 +1105,32 @@ def _restore_pose_bone(armature, name, snapshot):
     pose_bone.ik_stretch = snapshot["ik_stretch"]
     pose_bone.bone.hide_select = snapshot["hide_select"]
 
+    for attribute, (scope, value) in snapshot.get("bbone_values", {}).items():
+        owner = pose_bone if scope == "POSE" else pose_bone.bone
+        if not hasattr(owner, attribute):
+            continue
+        try:
+            setattr(owner, attribute, value)
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            pass
+    for attribute, (scope, target_name) in snapshot.get(
+        "bbone_handles", {}
+    ).items():
+        owner = pose_bone if scope == "POSE" else pose_bone.bone
+        if not hasattr(owner, attribute):
+            continue
+        target = None
+        if target_name:
+            target = (
+                armature.pose.bones.get(target_name)
+                if scope == "POSE"
+                else armature.data.bones.get(target_name)
+            )
+        try:
+            setattr(owner, attribute, target)
+        except (AttributeError, RuntimeError, TypeError):
+            pass
+
     for key in tuple(pose_bone.bone.keys()):
         if key.startswith("coa_rig_"):
             del pose_bone.bone[key]
@@ -964,6 +1154,14 @@ def rollback_component_build(armature, component, snapshot):
     bpy.context.view_layer.objects.active = armature
     armature.select_set(True)
     bpy.ops.object.mode_set(mode="POSE")
+
+    # Drivers may target generated bones or driven source RNA that this
+    # rollback is about to delete/restore.  Reconcile them first while every
+    # transaction-created target still exists.
+    _restore_armature_drivers(
+        armature,
+        snapshot.get("armature_drivers", ()),
+    )
 
     previous_constraints = snapshot["constraints"]
     instance_id = snapshot.get("instance_id") or ensure_rig_instance_id(armature)

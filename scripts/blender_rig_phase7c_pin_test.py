@@ -91,6 +91,9 @@ def main():
         "EXEC_DEFAULT", stage_type="CONTACT_PIN", label="World Pin"
     ) == {"FINISHED"}
     pin = component.semantic_stages[-1]
+    # Generic World Pin is an explicit unconnected-control workflow.  Leaving
+    # this empty opts into the integrated CHAIN_IK Contact override instead.
+    pin.pin_driven_bone = component.control_bone
     pin.pin_start = 5
     pin.pin_end = 10
     pin.blend_in = 2
@@ -98,6 +101,25 @@ def main():
     pin.pin_space = "WORLD"
     pin.pin_position = True
     pin.pin_orientation = False
+    generic_control_name = pin.pin_driven_bone
+    pin.pin_driven_bone = "hand"
+    unsafe_structure = (
+        len(armature.data.bones),
+        len(component.artifacts),
+        len(bpy.data.objects),
+    )
+    try:
+        result = bpy.ops.coa_tools2.update_rig_component("EXEC_DEFAULT")
+    except RuntimeError as exc:
+        assert "must be an unconnected control" in str(exc)
+    else:
+        assert result == {"CANCELLED"}
+    assert unsafe_structure == (
+        len(armature.data.bones),
+        len(component.artifacts),
+        len(bpy.data.objects),
+    )
+    pin.pin_driven_bone = generic_control_name
     assert bpy.ops.coa_tools2.update_rig_component("EXEC_DEFAULT") == {"FINISHED"}
     control = armature.pose.bones[pin.pin_driven_bone]
     constraint = control.constraints.get(
@@ -187,6 +209,7 @@ def main():
         "EXEC_DEFAULT", stage_type="CONTACT_PIN", label="Overlapping Pin"
     ) == {"FINISHED"}
     overlap = component.semantic_stages[-1]
+    overlap.pin_driven_bone = pin.pin_driven_bone
     overlap.pin_start = 34
     overlap.pin_end = 40
     overlap.blend_in = overlap.blend_out = 2

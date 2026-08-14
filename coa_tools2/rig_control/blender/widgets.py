@@ -7,11 +7,11 @@ from typing import Any, Callable
 
 import bpy
 
-from ..schema import WidgetBackend, WidgetLayout, WidgetSpec
+from ..schema import GraphPointShape, WidgetBackend, WidgetLayout, WidgetSpec
 
 
 WIDGET_COLLECTION_NAME = "COA Rig Widgets"
-NODE_GROUP_VERSION = 8
+NODE_GROUP_VERSION = 10
 LEGACY_NODE_GROUP_NAME = "COA_RigWidget_GN"
 NODE_GROUP_NAMES = {
     "TIP": "COA_RigWidget_Tip_GN",
@@ -19,8 +19,19 @@ NODE_GROUP_NAMES = {
     "RADIAL": "COA_RigWidget_Radial_GN",
     "RECTANGLE": "COA_RigWidget_Rectangle_GN",
     "MATRIX": "COA_RigWidget_Matrix_GN",
+    "GRAPH": "COA_RigWidget_Graph_GN",
 }
 _BOOLEAN_SOLID_DEPTH = 0.1
+_GRAPH_SHAPE_CODES = {
+    GraphPointShape.CIRCLE: 0,
+    GraphPointShape.TRIANGLE: 1,
+    GraphPointShape.SQUARE: 2,
+    GraphPointShape.DIAMOND: 3,
+    GraphPointShape.CUSTOM_OBJECT: 4,
+}
+_GRAPH_SHAPE_ATTRIBUTE = "coa_graph_shape"
+_GRAPH_RAIL_ATTRIBUTE = "coa_graph_rail"
+_GRAPH_OVERLAY_ATTRIBUTE = "coa_graph_overlay"
 
 
 def widget_family(layout: WidgetLayout) -> str:
@@ -34,6 +45,8 @@ def widget_family(layout: WidgetLayout) -> str:
         return "RECTANGLE"
     if layout == WidgetLayout.MATRIX:
         return "MATRIX"
+    if layout == WidgetLayout.GRAPH:
+        return "GRAPH"
     raise ValueError(f"Unsupported widget layout: {layout}")
 
 
@@ -161,15 +174,23 @@ def _solid_box_mesh(nodes, links, width_socket, height_socket, label):
     return box.outputs["Mesh"]
 
 
-def _solid_circle_mesh(nodes, links, radius_socket, label):
+def _solid_circle_mesh(nodes, links, radius_socket, label, vertices=48):
     cylinder = nodes.new("GeometryNodeMeshCylinder")
     cylinder.label = label
-    cylinder.inputs["Vertices"].default_value = 48
+    cylinder.inputs["Vertices"].default_value = max(3, int(vertices))
     cylinder.inputs["Side Segments"].default_value = 1
     cylinder.inputs["Fill Segments"].default_value = 1
     links.new(radius_socket, cylinder.inputs["Radius"])
     cylinder.inputs["Depth"].default_value = _BOOLEAN_SOLID_DEPTH
     return cylinder.outputs["Mesh"]
+
+
+def _rotated_geometry(nodes, links, geometry_socket, angle, label):
+    transform = nodes.new("GeometryNodeTransform")
+    transform.label = label
+    transform.inputs["Rotation"].default_value = (0.0, 0.0, float(angle))
+    links.new(geometry_socket, transform.inputs["Geometry"])
+    return transform.outputs["Geometry"]
 
 
 def _solid_rail_from_path(
@@ -860,12 +881,139 @@ def _build_matrix_group(name):
     return group
 
 
+def _build_graph_group(name):
+    """Build a shared named-point graph from a per-control source mesh."""
+
+    group = _new_group(name, "GRAPH")
+    _new_interface_socket(group, "Source", "INPUT", "NodeSocketGeometry")
+    _new_interface_socket(group, "Node Radius", "INPUT", "NodeSocketFloat", 0.34)
+    _new_interface_socket(group, "Bar Width", "INPUT", "NodeSocketFloat", 0.28)
+    nodes = group.nodes
+    links = group.links
+    group_input, group_output = _group_io(group)
+
+    rail_attribute = nodes.new("GeometryNodeInputNamedAttribute")
+    rail_attribute.data_type = "BOOLEAN"
+    rail_attribute.label = "Graph Rail Attribute"
+    rail_attribute.inputs["Name"].default_value = _GRAPH_RAIL_ATTRIBUTE
+
+    overlay_attribute = nodes.new("GeometryNodeInputNamedAttribute")
+    overlay_attribute.data_type = "BOOLEAN"
+    overlay_attribute.label = "Custom Overlay Attribute"
+    overlay_attribute.inputs["Name"].default_value = _GRAPH_OVERLAY_ATTRIBUTE
+
+    shape_attribute = nodes.new("GeometryNodeInputNamedAttribute")
+    shape_attribute.data_type = "INT"
+    shape_attribute.label = "Point Shape Attribute"
+    shape_attribute.inputs["Name"].default_value = _GRAPH_SHAPE_ATTRIBUTE
+
+    graph_curve = nodes.new("GeometryNodeMeshToCurve")
+    graph_curve.label = "Graph Fallback Edges"
+    links.new(group_input.outputs["Source"], graph_curve.inputs["Mesh"])
+    links.new(rail_attribute.outputs["Attribute"], graph_curve.inputs["Selection"])
+    rails = _solid_rail_from_path(
+        nodes,
+        links,
+        graph_curve.outputs["Curve"],
+        group_input.outputs["Bar Width"],
+        "Graph Rails",
+    )
+
+    circle = _solid_circle_mesh(
+        nodes,
+        links,
+        group_input.outputs["Node Radius"],
+        "Graph Circle Node",
+    )
+    triangle = _solid_circle_mesh(
+        nodes,
+        links,
+        group_input.outputs["Node Radius"],
+        "Graph Triangle Node",
+        vertices=3,
+    )
+    square = _solid_circle_mesh(
+        nodes,
+        links,
+        group_input.outputs["Node Radius"],
+        "Graph Square Node",
+        vertices=4,
+    )
+    diamond = _rotated_geometry(
+        nodes,
+        links,
+        square,
+        math.pi * 0.25,
+        "Graph Diamond Node",
+    )
+
+    marker_instances = []
+    for label, shape, code in (
+        ("Circle", circle, _GRAPH_SHAPE_CODES[GraphPointShape.CIRCLE]),
+        ("Triangle", triangle, _GRAPH_SHAPE_CODES[GraphPointShape.TRIANGLE]),
+        ("Square", square, _GRAPH_SHAPE_CODES[GraphPointShape.SQUARE]),
+        ("Diamond", diamond, _GRAPH_SHAPE_CODES[GraphPointShape.DIAMOND]),
+    ):
+        compare = nodes.new("FunctionNodeCompare")
+        compare.data_type = "INT"
+        compare.operation = "EQUAL"
+        compare.label = f"Is {label}"
+        links.new(
+            shape_attribute.outputs["Attribute"],
+            _compare_input(compare, "A", "INT"),
+        )
+        _compare_input(compare, "B", "INT").default_value = code
+
+        points = nodes.new("GeometryNodeMeshToPoints")
+        points.mode = "VERTICES"
+        points.label = f"{label} Graph Points"
+        links.new(group_input.outputs["Source"], points.inputs["Mesh"])
+        links.new(compare.outputs["Result"], points.inputs["Selection"])
+        marker_instances.append(
+            _instances_on_points(
+                nodes,
+                links,
+                points.outputs["Points"],
+                shape,
+                f"{label} Graph Nodes",
+            )
+        )
+
+    outline = _union_outline_mesh(
+        nodes,
+        links,
+        (rails, *marker_instances),
+        "Graph State Outline",
+    )
+
+    custom_curve = nodes.new("GeometryNodeMeshToCurve")
+    custom_curve.label = "Custom Point Overlays"
+    links.new(group_input.outputs["Source"], custom_curve.inputs["Mesh"])
+    links.new(
+        overlay_attribute.outputs["Attribute"],
+        custom_curve.inputs["Selection"],
+    )
+    custom_overlay = _curve_to_edge_mesh(
+        nodes,
+        links,
+        custom_curve.outputs["Curve"],
+        "Custom Point Overlay Edges",
+    )
+    joined = nodes.new("GeometryNodeJoinGeometry")
+    joined.label = "Graph with Custom Point Overlays"
+    links.new(outline, joined.inputs["Geometry"])
+    links.new(custom_overlay, joined.inputs["Geometry"])
+    links.new(joined.outputs["Geometry"], group_output.inputs["Geometry"])
+    return group
+
+
 _GROUP_BUILDERS: dict[str, Callable[[str], bpy.types.GeometryNodeTree]] = {
     "TIP": _build_tip_group,
     "SLIDER": _build_slider_group,
     "RADIAL": _build_radial_group,
     "RECTANGLE": _build_rectangle_group,
     "MATRIX": _build_matrix_group,
+    "GRAPH": _build_graph_group,
 }
 
 
@@ -910,6 +1058,7 @@ def ensure_widget_node_groups():
                 "RADIAL": WidgetLayout.CIRCLE,
                 "RECTANGLE": WidgetLayout.RECTANGLE,
                 "MATRIX": WidgetLayout.MATRIX,
+                "GRAPH": WidgetLayout.GRAPH,
             }[family]
         )
         for family in NODE_GROUP_NAMES
@@ -978,11 +1127,154 @@ def _append_solid_cell(vertices, faces, x_min, x_max, y_min, y_max):
     )
 
 
+def _custom_point_overlay(object_name, center, radius, source):
+    """Return normalized local XY edges without mutating the user object."""
+
+    custom = bpy.data.objects.get(str(object_name or ""))
+    if custom is None or custom == source:
+        return (), ()
+    try:
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        evaluated = custom.evaluated_get(depsgraph)
+        evaluated_mesh = evaluated.to_mesh()
+    except (AttributeError, RuntimeError, TypeError, ValueError):
+        return (), ()
+    if evaluated_mesh is None:
+        return (), ()
+    try:
+        coordinates = [
+            (float(vertex.co.x), float(vertex.co.y))
+            for vertex in evaluated_mesh.vertices
+        ]
+        edges = [tuple(int(index) for index in edge.vertices) for edge in evaluated_mesh.edges]
+    finally:
+        evaluated.to_mesh_clear()
+    if not coordinates or not edges:
+        return (), ()
+
+    min_x = min(point[0] for point in coordinates)
+    max_x = max(point[0] for point in coordinates)
+    min_y = min(point[1] for point in coordinates)
+    max_y = max(point[1] for point in coordinates)
+    origin_x = (min_x + max_x) * 0.5
+    origin_y = (min_y + max_y) * 0.5
+    extent = max(
+        math.hypot(x - origin_x, y - origin_y)
+        for x, y in coordinates
+    )
+    if extent <= 1.0e-9:
+        return (), ()
+    scale = max(float(radius), 1.0e-6) / extent
+    vertices = tuple(
+        (
+            float(center[0]) + (x - origin_x) * scale,
+            float(center[1]) + (y - origin_y) * scale,
+            0.0,
+        )
+        for x, y in coordinates
+    )
+    valid_edges = tuple(
+        (start, end)
+        for start, end in edges
+        if start != end
+        and 0 <= start < len(vertices)
+        and 0 <= end < len(vertices)
+    )
+    return vertices, valid_edges
+
+
 def _sync_widget_source_mesh(source: bpy.types.Object, spec: WidgetSpec):
     """Encode the variable-length matrix cell mask in the source geometry."""
 
     mesh = source.data
     mesh.clear_geometry()
+    if spec.layout == WidgetLayout.GRAPH:
+        point_count = len(spec.graph_points)
+        invalid_edges = [
+            edge
+            for edge in spec.graph_edges
+            if len(edge) != 2
+            or edge[0] == edge[1]
+            or not all(0 <= int(index) < point_count for index in edge)
+        ]
+        if invalid_edges:
+            raise ValueError(f"Graph widget has invalid edges: {invalid_edges!r}")
+        shapes = (
+            tuple(spec.graph_point_shapes)
+            if spec.graph_point_shapes
+            else tuple(GraphPointShape.CIRCLE for _index in range(point_count))
+        )
+        custom_names = (
+            tuple(spec.graph_custom_object_names)
+            if spec.graph_custom_object_names
+            else tuple("" for _index in range(point_count))
+        )
+        if len(shapes) != point_count or len(custom_names) != point_count:
+            raise ValueError("Graph marker metadata must match its point count.")
+
+        vertices = [(*point, 0.0) for point in spec.graph_points]
+        edges = [
+            (int(start), int(end)) for start, end in spec.graph_edges
+        ]
+        rail_edge_count = len(edges)
+        shape_codes = []
+        for index, (shape, object_name) in enumerate(zip(shapes, custom_names)):
+            shape = GraphPointShape(shape)
+            code = _GRAPH_SHAPE_CODES[shape]
+            if shape == GraphPointShape.CUSTOM_OBJECT:
+                overlay_vertices, overlay_edges = _custom_point_overlay(
+                    object_name,
+                    spec.graph_points[index],
+                    spec.node_radius,
+                    source,
+                )
+                if overlay_vertices and overlay_edges:
+                    offset = len(vertices)
+                    vertices.extend(overlay_vertices)
+                    edges.extend(
+                        (offset + start, offset + end)
+                        for start, end in overlay_edges
+                    )
+                else:
+                    # An unset or unsupported custom object stays operable and
+                    # visibly selectable as the standard circle marker.
+                    code = _GRAPH_SHAPE_CODES[GraphPointShape.CIRCLE]
+            shape_codes.append(code)
+
+        mesh.from_pydata(vertices, edges, ())
+        for attribute_name in (
+            _GRAPH_SHAPE_ATTRIBUTE,
+            _GRAPH_RAIL_ATTRIBUTE,
+            _GRAPH_OVERLAY_ATTRIBUTE,
+        ):
+            attribute = mesh.attributes.get(attribute_name)
+            if attribute is not None:
+                mesh.attributes.remove(attribute)
+
+        shape_attribute = mesh.attributes.new(
+            _GRAPH_SHAPE_ATTRIBUTE,
+            "INT",
+            "POINT",
+        )
+        for index, item in enumerate(shape_attribute.data):
+            item.value = shape_codes[index] if index < point_count else -1
+
+        rail_attribute = mesh.attributes.new(
+            _GRAPH_RAIL_ATTRIBUTE,
+            "BOOLEAN",
+            "EDGE",
+        )
+        overlay_attribute = mesh.attributes.new(
+            _GRAPH_OVERLAY_ATTRIBUTE,
+            "BOOLEAN",
+            "EDGE",
+        )
+        for index in range(len(mesh.edges)):
+            is_rail = index < rail_edge_count
+            rail_attribute.data[index].value = is_rail
+            overlay_attribute.data[index].value = not is_rail
+        mesh.update()
+        return
     if spec.layout != WidgetLayout.MATRIX:
         mesh.update()
         return

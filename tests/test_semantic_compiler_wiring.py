@@ -65,6 +65,14 @@ def _load_compiler_helpers():
             _owned_contact_constraints=lambda *_args, **_kwargs: (),
             _owned_pin_property_locations=lambda *_args, **_kwargs: (),
             _remove_pin_property_artifact=noop,
+            contact_uses_ik_override=lambda stage: (
+                not str(getattr(stage, "pin_driven_bone", "") or "").strip()
+                or bool(
+                    str(
+                        getattr(stage, "pin_driven_stage_uuid", "") or ""
+                    ).strip()
+                )
+            ),
             ensure_contact_pin_artifacts=noop,
             validate_pin_ranges=noop,
         ),
@@ -145,6 +153,38 @@ def stage(stage_uuid, stage_type, *, depends_on="", order=0, inputs=(), sources=
 
 
 class SemanticCompilerWiringTests(unittest.TestCase):
+    def test_pose_map_rejects_recorded_output_arity_mismatch(self):
+        output = SimpleNamespace(
+            output_uuid="output.vector",
+            label="Vector Output",
+            value_arity=3,
+            discrete=False,
+            enabled=True,
+        )
+        sample = SimpleNamespace(
+            sample_uuid="sample",
+            label="Legacy Scalar Sample",
+            inputs=(),
+            outputs=(
+                SimpleNamespace(
+                    output_uuid="output.vector",
+                    value_arity=1,
+                ),
+            ),
+        )
+        pose_map = SimpleNamespace(
+            stage_type="POSE_MAP",
+            samples=(sample,),
+            inputs=(),
+            outputs=(output,),
+        )
+
+        with self.assertRaisesRegex(
+            compiler.SemanticRigCompileError,
+            r"records Vec1, but the output expects Vec3.*Re-record or migrate",
+        ):
+            compiler._validate_pose_map_samples((pose_map,))
+
     def test_secondary_expected_roles_follow_compiled_spline_controls(self):
         secondary = stage(
             "secondary", "SECONDARY_MOTION", depends_on="pose_map"
@@ -225,7 +265,10 @@ class SemanticCompilerWiringTests(unittest.TestCase):
         pin.pin_driven_bone = "CTRL_Old"
         pin.pin_driven_stage_uuid = "old"
         replacement = compiler.SemanticStageBuildResult(
-            "new", "PROJECTED_TRANSFORM", primary_control_bone="CTRL_New"
+            "new",
+            "CHAIN_IK",
+            primary_control_bone="CTRL_New",
+            contact_output_bone="CTRL_New",
         )
 
         self.assertEqual(
@@ -234,9 +277,34 @@ class SemanticCompilerWiringTests(unittest.TestCase):
         )
         pin.pin_driven_stage_uuid = ""
         self.assertEqual(
-            ("", ""),
+            ("CTRL_New", "new"),
             compiler._contact_default_driven(pin, (replacement,)),
         )
+
+    def test_contact_requires_one_unique_chain_ik_provider(self):
+        ik = stage("ik", "CHAIN_IK")
+        pin = stage("pin", "CONTACT_PIN", depends_on="ik")
+        compiler._validate_contact_ik_dependencies((ik, pin))
+
+        standalone_fk = stage("fk", "CHAIN_FK")
+        invalid = stage("invalid", "CONTACT_PIN", depends_on="fk")
+        with self.assertRaisesRegex(
+            compiler.SemanticRigCompileError,
+            "dependency must be CHAIN_IK",
+        ):
+            compiler._validate_contact_ik_dependencies((standalone_fk, invalid))
+
+        explicit = stage("generic", "CONTACT_PIN", depends_on="fk")
+        explicit.pin_driven_bone = "CTRL_WorldPin"
+        explicit.pin_driven_stage_uuid = ""
+        compiler._validate_contact_ik_dependencies((standalone_fk, explicit))
+
+        second = stage("pin.second", "CONTACT_PIN", depends_on="ik")
+        with self.assertRaisesRegex(
+            compiler.SemanticRigCompileError,
+            "multiple automatic Contact",
+        ):
+            compiler._validate_contact_ik_dependencies((ik, pin, second))
 
     def test_chain_ik_definitions_exclusively_own_source_bones(self):
         first = stage("ik.a", "CHAIN_IK", sources=("Upper", "Lower"))

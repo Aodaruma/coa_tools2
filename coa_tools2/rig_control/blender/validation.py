@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 import bpy
 
@@ -66,7 +67,9 @@ def validate_rig(armature) -> list[BlenderValidationIssue]:
     layouts = {WidgetLayout.TIP}
     for control in controls:
         layouts.add(
-            WidgetLayout.MATRIX
+            WidgetLayout.GRAPH
+            if control.state_mode == "GRAPH_2D"
+            else WidgetLayout.MATRIX
             if control.state_mode == "MATRIX_2D"
             else {
                 "SLIDER_1D": WidgetLayout.LINEAR,
@@ -200,6 +203,10 @@ def validate_rig(armature) -> list[BlenderValidationIssue]:
                     and (
                         control.rectangle_mode == "GRID"
                         or control.state_mode == "MATRIX_2D"
+                        or (
+                            control.state_mode == "GRAPH_2D"
+                            and control.graph_interpolation == "NAMED_GRAPH"
+                        )
                     )
                 ):
                     expected_constraints.append(
@@ -277,6 +284,9 @@ def validate_rig(armature) -> list[BlenderValidationIssue]:
             ) or (
                 control.state_mode == "MATRIX_2D"
                 and control.control_type == "POINT_2D_RECT"
+            ) or (
+                control.state_mode == "GRAPH_2D"
+                and control.control_type == "POINT_2D_RECT"
             )
             if not compatible:
                 issues.append(
@@ -290,23 +300,72 @@ def validate_rig(armature) -> list[BlenderValidationIssue]:
                 continue
 
             columns, rows = state_dimensions(control)
-            expected = {
-                (column, row)
-                for row in range(rows)
-                for column in range(columns)
-            }
-            coordinates = [
-                (point.column, point.row) for point in control.state_points
-            ]
-            if set(coordinates) != expected or len(coordinates) != len(expected):
-                issues.append(
-                    BlenderValidationIssue(
-                        IssueSeverity.ERROR,
-                        "state.incomplete_grid",
-                        f"State grid must be rebuilt for {control.label}.",
-                        control.control_uuid,
+            if control.state_mode == "GRAPH_2D":
+                point_ids = {
+                    point.state_uuid
+                    for point in control.state_points
+                    if point.state_uuid
+                }
+                if len(control.state_points) < 2:
+                    issues.append(
+                        BlenderValidationIssue(
+                            IssueSeverity.ERROR,
+                            "state.graph_too_few_points",
+                            f"State graph needs at least two points for {control.label}.",
+                            control.control_uuid,
+                        )
                     )
-                )
+                if any(
+                    len(point.graph_position) != 2
+                    or not all(
+                        math.isfinite(float(value))
+                        for value in point.graph_position
+                    )
+                    for point in control.state_points
+                ):
+                    issues.append(
+                        BlenderValidationIssue(
+                            IssueSeverity.ERROR,
+                            "state.invalid_graph_position",
+                            f"State graph contains an invalid position for {control.label}.",
+                            control.control_uuid,
+                        )
+                    )
+                for point in control.state_points:
+                    if (
+                        point.fallback_state_uuid
+                        and point.fallback_state_uuid not in point_ids
+                    ):
+                        issues.append(
+                            BlenderValidationIssue(
+                                IssueSeverity.ERROR,
+                                "state.invalid_fallback",
+                                f"Fallback target is missing for {point.label or control.label}.",
+                                control.control_uuid,
+                                point.state_uuid,
+                            )
+                        )
+            else:
+                expected = {
+                    (column, row)
+                    for row in range(rows)
+                    for column in range(columns)
+                }
+                coordinates = [
+                    (point.column, point.row) for point in control.state_points
+                ]
+                if (
+                    set(coordinates) != expected
+                    or len(coordinates) != len(expected)
+                ):
+                    issues.append(
+                        BlenderValidationIssue(
+                            IssueSeverity.ERROR,
+                            "state.incomplete_grid",
+                            f"State grid must be rebuilt for {control.label}.",
+                            control.control_uuid,
+                        )
+                    )
 
             if control.state_mode == "MATRIX_2D" and control.state_cells:
                 expected_cells = {
@@ -359,12 +418,16 @@ def validate_rig(armature) -> list[BlenderValidationIssue]:
                     continue
                 target_key = state_target_key(point)
                 if not target_key[1] or not target_key[3]:
+                    point_name = (
+                        point.label
+                        if control.state_mode == "GRAPH_2D" and point.label
+                        else f"[{point.column + 1}, {point.row + 1}]"
+                    )
                     issues.append(
                         BlenderValidationIssue(
                             IssueSeverity.WARNING,
                             "state.unassigned_point",
-                            f"State [{point.column + 1}, {point.row + 1}] "
-                            f"is unassigned for {control.label}.",
+                            f"State {point_name} is unassigned for {control.label}.",
                             control.control_uuid,
                             point.state_uuid,
                         )

@@ -109,6 +109,17 @@ def _mark_control_dirty(self, _context):
     _schedule_auto_rebuild(self)
 
 
+def _mark_state_point_dirty(self, context):
+    """Route nested State Point edits to the owning control preview."""
+
+    armature = getattr(self, "id_data", None)
+    if armature is None or not getattr(self, "control_uuid", ""):
+        return
+    control = _find_control(armature, self.control_uuid)
+    if control is not None:
+        _mark_control_dirty(control, context)
+
+
 def _mark_component_dirty(self, _context):
     """Structural component changes are intentionally applied manually."""
 
@@ -289,12 +300,56 @@ class COATOOLS2_PG_RigStatePoint(bpy.types.PropertyGroup):
     schema_version: IntProperty(default=SCHEMA_VERSION)
     state_uuid: StringProperty()
     control_uuid: StringProperty()
-    label: StringProperty()
+    label: StringProperty(update=_mark_state_point_dirty)
     column: IntProperty(default=0, min=0)
     row: IntProperty(default=0, min=0)
     target_object: PointerProperty(type=bpy.types.Object)
     target_name: StringProperty()
+    target_name_candidates: StringProperty(
+        name="Shape Key Name Candidates",
+        description="Comma-separated names suggested by a preset; no Shape Key is created",
+    )
+    phoneme_aliases: StringProperty(
+        name="Phoneme Aliases",
+        description="Comma-separated external phoneme tokens mapped to this named state",
+    )
     generated_data_path: StringProperty()
+    graph_position: FloatVectorProperty(
+        name="Position",
+        description="Normalized position inside the Graph State control",
+        size=2,
+        min=0.0,
+        max=1.0,
+        default=(0.0, 0.0),
+        update=_mark_state_point_dirty,
+    )
+    point_shape: EnumProperty(
+        name="Point Shape",
+        items=(
+            ("CIRCLE", "Circle", "Use the standard circular State Rig node"),
+            ("DIAMOND", "Diamond", "Mark this named state with a diamond"),
+            ("TRIANGLE", "Triangle", "Mark this named state with a triangle"),
+            ("SQUARE", "Square", "Mark this named state with a square"),
+            (
+                "CUSTOM_OBJECT",
+                "Custom Object",
+                "Use an existing object as this point's presentation reference",
+            ),
+        ),
+        default="CIRCLE",
+        update=_mark_state_point_dirty,
+    )
+    custom_object: PointerProperty(
+        name="Point Object",
+        description="Optional custom presentation object for this named point",
+        type=bpy.types.Object,
+        update=_mark_state_point_dirty,
+    )
+    fallback_state_uuid: StringProperty(
+        name="Fallback State",
+        description="Stable UUID of the state joined by this point's fallback edge",
+        update=_mark_state_point_dirty,
+    )
     is_empty: BoolProperty(
         name="Empty State",
         description="Keep this point intentionally empty without a validation warning",
@@ -618,6 +673,11 @@ class COATOOLS2_PG_SemanticStage(bpy.types.PropertyGroup):
                 "Recorded Pose Map",
                 "Interpolate recorded outputs in an N-dimensional pose field",
             ),
+            (
+                "CHAIN_FK",
+                "FK Chain",
+                "Rotate a generated FK control chain as a composable solver stage",
+            ),
             ("CHAIN_IK", "Kinematic Chain", "Solve a managed IK mechanism chain"),
             (
                 "CONTACT_PIN",
@@ -625,6 +685,11 @@ class COATOOLS2_PG_SemanticStage(bpy.types.PropertyGroup):
                 "Constrain a control over an explicit frame range",
             ),
             ("SPLINE", "Spline Chain", "Solve a chain along a generated curve"),
+            (
+                "BBONE_BEZIER",
+                "B-Bone Bezier",
+                "Drive one B-Bone through point and tangent-handle controls",
+            ),
             (
                 "SECONDARY_MOTION",
                 "Secondary Motion",
@@ -641,7 +706,9 @@ class COATOOLS2_PG_SemanticStage(bpy.types.PropertyGroup):
     source_bones: CollectionProperty(type=COATOOLS2_PG_RigComponentBoneRef)
     source_bones_index: IntProperty(default=0, min=0)
     presentation: PointerProperty(type=COATOOLS2_PG_RigWidgetPresentation)
+    fk_presentation: PointerProperty(type=COATOOLS2_PG_RigWidgetPresentation)
     pole_presentation: PointerProperty(type=COATOOLS2_PG_RigWidgetPresentation)
+    handle_presentation: PointerProperty(type=COATOOLS2_PG_RigWidgetPresentation)
 
     projection_mode: EnumProperty(
         items=(
@@ -685,6 +752,25 @@ class COATOOLS2_PG_SemanticStage(bpy.types.PropertyGroup):
     pole_bone: StringProperty()
     chain_length: IntProperty(default=2, min=1, max=64)
     allow_stretch: BoolProperty(default=False)
+    fk_widget_defaults_initialized: BoolProperty(
+        default=False,
+        options={"HIDDEN"},
+    )
+    rig_mode: EnumProperty(
+        name="Mode",
+        description="Discrete animator-facing FK/IK state; switch through Pose Match",
+        items=(
+            ("FK", "FK", "Rotate the generated FK controls"),
+            ("IK", "IK", "Move the generated IK handle and optional pole"),
+        ),
+        default="IK",
+        options={"ANIMATABLE"},
+    )
+    switch_advanced_expanded: BoolProperty(
+        name="Advanced",
+        default=False,
+        options={"SKIP_SAVE"},
+    )
     pin_target_object: PointerProperty(type=bpy.types.Object)
     pin_target_bone: StringProperty()
     pin_driven_bone: StringProperty(update=_mark_pin_driven_explicit)
@@ -707,11 +793,62 @@ class COATOOLS2_PG_SemanticStage(bpy.types.PropertyGroup):
     blend_in: IntProperty(default=2, min=1)
     blend_out: IntProperty(default=2, min=1)
     pin_property: StringProperty()
+    contact_mode: EnumProperty(
+        name="Contact Pin",
+        description="Discrete animator-facing contact state",
+        items=(
+            ("OFF", "Off", "Release the contact with compensation"),
+            ("ON", "On", "Capture and maintain the current contact"),
+        ),
+        default="OFF",
+        options={"ANIMATABLE"},
+    )
+    contact_transition_frames: IntProperty(
+        name="Transition Frames",
+        description="Private compensation ramp length used by Contact Pin",
+        default=2,
+        min=1,
+        max=120,
+    )
 
     curve_object: PointerProperty(type=bpy.types.Object)
     spline_control_count: IntProperty(default=3, min=2, max=32)
     root_pin: BoolProperty(default=True)
     tip_pin: BoolProperty(default=False)
+
+    bbone_segments: IntProperty(default=8, min=2, max=32)
+    bbone_handle_length: FloatProperty(default=0.33, min=0.05, max=2.0)
+    bbone_use_mid_control: BoolProperty(default=False)
+    bbone_mid_influence: FloatProperty(default=0.5, min=0.0, max=1.0)
+    bbone_ease_in: FloatProperty(default=1.0, min=0.0, max=10.0)
+    bbone_ease_out: FloatProperty(default=1.0, min=0.0, max=10.0)
+    bbone_roll_in: FloatProperty(default=0.0, subtype="ANGLE")
+    bbone_roll_out: FloatProperty(default=0.0, subtype="ANGLE")
+    bbone_use_scale: BoolProperty(default=False)
+    bbone_scale_in: FloatVectorProperty(
+        size=3,
+        subtype="XYZ",
+        default=(1.0, 1.0, 1.0),
+        min=0.01,
+        max=10.0,
+    )
+    bbone_scale_out: FloatVectorProperty(
+        size=3,
+        subtype="XYZ",
+        default=(1.0, 1.0, 1.0),
+        min=0.01,
+        max=10.0,
+    )
+    bbone_start_bone: StringProperty(options={"HIDDEN"})
+    bbone_end_bone: StringProperty(options={"HIDDEN"})
+    bbone_handle_out_bone: StringProperty(options={"HIDDEN"})
+    bbone_handle_in_bone: StringProperty(options={"HIDDEN"})
+    bbone_mid_bone: StringProperty(options={"HIDDEN"})
+    bbone_widget_defaults_initialized: BoolProperty(
+        default=False,
+        options={"HIDDEN"},
+    )
+    bbone_show_advanced: BoolProperty(default=False, options={"SKIP_SAVE"})
 
     frequency_hz: FloatProperty(default=3.0, min=0.001)
     damping_ratio: FloatProperty(default=0.65, min=0.0)
@@ -1109,6 +1246,11 @@ class COATOOLS2_PG_RigControl(bpy.types.PropertyGroup):
                 "2D State Matrix",
                 "Interpolate Shape Key states on an arbitrary grid",
             ),
+            (
+                "GRAPH_2D",
+                "2D State Graph",
+                "Interpolate arbitrary named points and fallback edges",
+            ),
         ),
         default="NONE",
         update=_mark_control_dirty,
@@ -1132,6 +1274,58 @@ class COATOOLS2_PG_RigControl(bpy.types.PropertyGroup):
     state_points_index: IntProperty(default=0, min=0)
     state_cells: CollectionProperty(type=COATOOLS2_PG_RigStateCell)
     state_cells_index: IntProperty(default=0, min=0)
+    graph_interpolation: EnumProperty(
+        name="Graph Behavior",
+        items=(
+            (
+                "NAMED_GRAPH",
+                "Named Graph",
+                "Keep the manual handle on fallback edges and blend their endpoints",
+            ),
+            (
+                "MAP_2D",
+                "2D Mouth Map",
+                "Blend nearby named points anywhere inside the 2D control",
+            ),
+            (
+                "HYBRID",
+                "Hybrid",
+                "Use the 2D map inside the point hull and fallback edges outside it",
+            ),
+        ),
+        default="MAP_2D",
+        update=_mark_control_dirty,
+    )
+    graph_radius: FloatProperty(
+        name="Blend Radius",
+        description="Normalized influence radius used by 2D Graph State interpolation",
+        default=0.75,
+        min=0.01,
+        max=4.0,
+        update=_mark_control_dirty,
+    )
+    lip_sync_preset: EnumProperty(
+        name="Lip Sync Preset",
+        items=(
+            ("NONE", "None", "Generic named Graph State"),
+            ("MINIMAL", "Minimal", "REST, A/E, I, and U/O"),
+            ("JP_VOWELS", "JP Vowels", "REST plus A, I, U, E, O"),
+            ("JP_VOWELS_MBP", "JP Vowels + MBP", "Japanese vowels plus closed lips"),
+            ("STANDARD_2D", "Standard 2D", "Common seven-state 2D mouth map"),
+            (
+                "ADVANCED_PHONEME",
+                "Advanced Phoneme",
+                "Named visemes with phoneme aliases and safe fallbacks",
+            ),
+        ),
+        default="NONE",
+    )
+    graph_custom_object: PointerProperty(
+        name="Graph Base Object",
+        description="Optional object replacing the generated graph base custom shape",
+        type=bpy.types.Object,
+        update=_mark_control_dirty,
+    )
     origin: FloatVectorProperty(size=3, subtype="XYZ")
     needs_rebuild: BoolProperty(default=False)
     auto_rebuild_error: StringProperty()
@@ -1189,6 +1383,10 @@ _CONTROL_FIELDS = (
     "state_rows",
     "state_points_index",
     "state_cells_index",
+    "graph_interpolation",
+    "graph_radius",
+    "lip_sync_preset",
+    "graph_custom_object",
     "origin",
     "needs_rebuild",
     "auto_rebuild_error",
@@ -1226,7 +1424,13 @@ _STATE_POINT_FIELDS = (
     "row",
     "target_object",
     "target_name",
+    "target_name_candidates",
+    "phoneme_aliases",
     "generated_data_path",
+    "graph_position",
+    "point_shape",
+    "custom_object",
+    "fallback_state_uuid",
     "is_empty",
     "enabled",
 )
@@ -1330,8 +1534,14 @@ def _migrate_legacy_rig_data(obj, rig_data):
     rig_data.legacy_migration_checked = True
 
 
-def get_rig_data(obj):
-    """Return collision-free rig data and lazily migrate the legacy layout."""
+def get_rig_data(obj, *, migrate=True):
+    """Return collision-free rig data, optionally migrating the legacy layout.
+
+    Blender operator and panel ``poll`` callbacks run in a read-only RNA
+    context.  Callers in those callbacks must pass ``migrate=False``; the
+    corresponding ``execute`` path keeps the default and performs migration in
+    a writable context before it mutates rig definitions.
+    """
 
     rig_data = getattr(obj, "coa_tools2_rig", None)
     if rig_data is None:
@@ -1339,7 +1549,8 @@ def get_rig_data(obj):
             "COA Tools 2 rig properties are not registered. "
             "Disable duplicate add-on installations and reload the add-on."
         )
-    _migrate_legacy_rig_data(obj, rig_data)
+    if migrate:
+        _migrate_legacy_rig_data(obj, rig_data)
     return rig_data
 
 

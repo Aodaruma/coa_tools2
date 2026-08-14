@@ -11,6 +11,7 @@ from mathutils import Matrix, Vector
 
 from ... import functions
 from ..schema import (
+    GraphPointShape,
     WidgetBackend,
     WidgetLayout,
     WidgetSpec,
@@ -19,7 +20,7 @@ from ..schema import (
 )
 from .properties import get_rig_data
 from .rail_targets import ensure_rail_target
-from .states import state_mix_mask
+from .states import graph_state_edges, state_mix_mask
 from .widgets import ensure_widget
 
 
@@ -385,6 +386,10 @@ def ensure_control_constraints(armature, display_pose, control_pose, control):
         and (
             control.rectangle_mode == "GRID"
             or control.state_mode == "MATRIX_2D"
+            or (
+                control.state_mode == "GRAPH_2D"
+                and control.graph_interpolation == "NAMED_GRAPH"
+            )
         )
     ):
         expected.add(rail_constraint_name(control.control_uuid))
@@ -419,6 +424,10 @@ def ensure_control_constraints(armature, display_pose, control_pose, control):
         and (
             control.rectangle_mode == "GRID"
             or control.state_mode == "MATRIX_2D"
+            or (
+                control.state_mode == "GRAPH_2D"
+                and control.graph_interpolation == "NAMED_GRAPH"
+            )
         )
     ):
         ensure_rail_constraint(armature, control_pose, control)
@@ -445,7 +454,9 @@ def ensure_control_widgets(display_pose, control_pose, control):
         "DIAL": WidgetLayout.DIAL,
     }
     base_layout = (
-        WidgetLayout.MATRIX
+        WidgetLayout.GRAPH
+        if control.state_mode == "GRAPH_2D"
+        else WidgetLayout.MATRIX
         if control.state_mode == "MATRIX_2D"
         else WidgetLayout.RECTANGLE_GRID
         if control.control_type == "POINT_2D_RECT"
@@ -454,6 +465,46 @@ def ensure_control_widgets(display_pose, control_pose, control):
         if control.control_type == "POINT_2D_RECT"
         else layout_by_type[control.control_type]
     )
+    graph_points = ()
+    graph_edges = ()
+    graph_point_shapes = ()
+    graph_custom_object_names = ()
+    if control.state_mode == "GRAPH_2D":
+        enabled_indices = [
+            index
+            for index, point in enumerate(control.state_points)
+            if point.enabled
+        ]
+        remap = {
+            original_index: graph_index
+            for graph_index, original_index in enumerate(enabled_indices)
+        }
+        graph_points = tuple(
+            (
+                (float(control.state_points[index].graph_position[0]) - 0.5)
+                * control.width,
+                (float(control.state_points[index].graph_position[1]) - 0.5)
+                * control.height,
+            )
+            for index in enabled_indices
+        )
+        graph_edges = tuple(
+            (remap[start], remap[end])
+            for start, end in graph_state_edges(control)
+            if start in remap and end in remap
+        )
+        graph_point_shapes = tuple(
+            GraphPointShape(control.state_points[index].point_shape)
+            for index in enabled_indices
+        )
+        graph_custom_object_names = tuple(
+            (
+                control.state_points[index].custom_object.name
+                if control.state_points[index].custom_object is not None
+                else ""
+            )
+            for index in enabled_indices
+        )
     base_spec = WidgetSpec(
         widget_uuid=control.base_widget_uuid,
         layout=base_layout,
@@ -481,17 +532,26 @@ def ensure_control_widgets(display_pose, control_pose, control):
             if control.state_mode == "MATRIX_2D"
             else None
         ),
+        graph_points=graph_points,
+        graph_edges=graph_edges,
+        graph_point_shapes=graph_point_shapes,
+        graph_custom_object_names=graph_custom_object_names,
         arc_start=control.angle_min,
         arc_end=control.angle_max,
     )
     tip = ensure_widget(tip_spec, name=f"WGT_{control.semantic_id}_TIP", backend=backend)
-    base = ensure_widget(
-        base_spec,
-        name=f"WGT_{control.semantic_id}_BASE",
-        backend=backend,
+    base = (
+        control.graph_custom_object
+        if control.state_mode == "GRAPH_2D" and control.graph_custom_object
+        else ensure_widget(
+            base_spec,
+            name=f"WGT_{control.semantic_id}_BASE",
+            backend=backend,
+        )
     )
     tip.hide_set(True)
-    base.hide_set(True)
+    if base != control.graph_custom_object:
+        base.hide_set(True)
     control_pose.custom_shape = tip
     display_pose.custom_shape = base
     control_pose.use_custom_shape_bone_size = False

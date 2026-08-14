@@ -8,6 +8,7 @@ import bpy
 from mathutils import Matrix
 
 from ..schema import dial_point
+from .states import graph_state_edges
 from .widgets import ensure_widget_collection
 
 
@@ -157,6 +158,30 @@ def _matrix_domain_geometry(control):
     return vertices, faces
 
 
+def _graph_rail_geometry(control):
+    """Build centered vertical curtains for arbitrary fallback edges."""
+
+    vertices = []
+    faces = []
+    half_depth = max(control.stroke_radius, 0.01)
+    points = tuple(control.state_points)
+    for start, end in graph_state_edges(control):
+        start_point = points[start]
+        end_point = points[end]
+        start_xy = (
+            (float(start_point.graph_position[0]) - 0.5) * control.width,
+            (float(start_point.graph_position[1]) - 0.5) * control.height,
+        )
+        end_xy = (
+            (float(end_point.graph_position[0]) - 0.5) * control.width,
+            (float(end_point.graph_position[1]) - 0.5) * control.height,
+        )
+        _append_curtain(vertices, faces, start_xy, end_xy, half_depth)
+    if not faces:
+        raise ValueError("Named Graph requires at least one fallback edge.")
+    return vertices, faces
+
+
 def ensure_rail_target(armature, control):
     if control.control_type == "DIAL":
         vertices, faces = _dial_rail_geometry(control)
@@ -167,6 +192,13 @@ def ensure_rail_target(armature, control):
     ):
         vertices, faces = _matrix_domain_geometry(control)
         rail_kind = "MATRIX_DOMAIN"
+    elif (
+        control.control_type == "POINT_2D_RECT"
+        and control.state_mode == "GRAPH_2D"
+        and control.graph_interpolation == "NAMED_GRAPH"
+    ):
+        vertices, faces = _graph_rail_geometry(control)
+        rail_kind = "GRAPH"
     elif (
         control.control_type == "POINT_2D_RECT"
         and control.rectangle_mode == "GRID"

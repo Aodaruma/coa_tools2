@@ -26,8 +26,12 @@ if "bpy" not in sys.modules:
 
 from rig_control.pose_field import evaluate_pose_field  # noqa: E402
 from rig_control.blender.semantic_runtime import (  # noqa: E402
+    _FIELD_CACHE,
     _rig_data,
+    PoseFieldRuntimeKey,
+    evaluate_continuous_component,
     evaluate_live_input_term,
+    pose_field_driver_expression,
     pose_field_spec_from_property_group,
 )
 
@@ -204,6 +208,41 @@ class SemanticRuntimeAdapterTests(unittest.TestCase):
                 array_index=-1,
             )
             self.assertEqual(expected, evaluate_live_input_term(term, armature))
+
+    def test_vector_driver_expression_selects_one_component(self):
+        expression = pose_field_driver_expression(
+            "instance-1234567890",
+            "component-1234567890",
+            "stage-1234567890",
+            "output-1234567890",
+            (),
+            component_index=2,
+        )
+
+        self.assertTrue(expression.startswith("coa_pose_field_component("))
+        self.assertIn(",2)", expression)
+
+    def test_vector_runtime_returns_requested_component(self):
+        spec = pose_field_spec_from_property_group(self.make_stage())
+        key = PoseFieldRuntimeKey("instance", "component", "stage", "outputvector")
+        _FIELD_CACHE[key] = spec
+        try:
+            self.assertEqual(
+                15.0,
+                evaluate_continuous_component(
+                    "instance", "component", "stage", "outputvector", 1,
+                    0.5, 0.5, 0.5,
+                ),
+            )
+            self.assertEqual(
+                0.0,
+                evaluate_continuous_component(
+                    "instance", "component", "stage", "outputvector", 9,
+                    0.5, 0.5, 0.5,
+                ),
+            )
+        finally:
+            _FIELD_CACHE.pop(key, None)
 
 
 if __name__ == "__main__":

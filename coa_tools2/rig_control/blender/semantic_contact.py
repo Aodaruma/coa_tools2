@@ -9,6 +9,10 @@ import re
 import bpy
 
 from ... import functions
+from ..semantic_transition import (
+    discrete_state_key,
+    smooth_compensation_keys,
+)
 from .artifacts import ensure_rig_instance_id
 from .component_artifacts import (
     ComponentArtifactConflict,
@@ -20,6 +24,20 @@ from .semantic_artifacts import semantic_stage_role
 
 class SemanticContactError(RuntimeError):
     pass
+
+
+def contact_uses_ik_override(stage):
+    """Return whether a Contact stage owns the integrated CHAIN_IK override.
+
+    A non-empty driven bone with no durable provider UUID is an explicit
+    generic Pin, even when ``depends_on`` still names a CHAIN_IK stage from the
+    Add Stage default.  Only automatic stages participate in FK/IK driver
+    composition and the discrete Contact switch UI.
+    """
+
+    return not str(getattr(stage, "pin_driven_bone", "") or "").strip() or bool(
+        str(getattr(stage, "pin_driven_stage_uuid", "") or "").strip()
+    )
 
 
 @dataclass(frozen=True)
@@ -34,9 +52,10 @@ def _short(value):
     return re.sub(r"[^0-9A-Za-z]", "", str(value or ""))[:8]
 
 
-def _driver_marker(stage_uuid):
+def _driver_marker(stage_uuid, channel="primary"):
     token = re.sub(r"[^0-9A-Za-z]", "", str(stage_uuid or ""))
-    return f"cp_{token}"
+    suffix = "" if channel == "primary" else f"_{channel}"
+    return f"cp_{token}{suffix}"
 
 
 def _mechanism_collection(scene):
@@ -63,12 +82,23 @@ def _tag_object(armature, component, obj, role):
     obj["coa_rig_managed"] = True
 
 
-def _ensure_anchor(armature, component, stage, driven_pose):
-    role = semantic_stage_role(stage.stage_uuid, "pin_anchor")
+def _ensure_anchor(
+    armature,
+    component,
+    stage,
+    driven_pose,
+    *,
+    role_detail="pin_anchor",
+    name_tag="PIN",
+):
+    role = semantic_stage_role(stage.stage_uuid, role_detail)
     anchor = find_component_object(armature, component.component_uuid, role)
     created = anchor is None
     if anchor is None:
-        name = f"MCH_PIN_{_short(component.component_uuid)}_{_short(stage.stage_uuid)}"
+        name = (
+            f"MCH_{name_tag}_{_short(component.component_uuid)}_"
+            f"{_short(stage.stage_uuid)}"
+        )
         if bpy.data.objects.get(name) is not None:
             raise ComponentArtifactConflict(f"Object '{name}' already exists and is unmanaged.")
         anchor = bpy.data.objects.new(name, None)
@@ -117,8 +147,6 @@ def _ensure_anchor(armature, component, stage, driven_pose):
 
 
 def _constraint_type(stage):
-    if stage.pin_position and stage.pin_orientation:
-        return "COPY_TRANSFORMS"
     if stage.pin_position:
         return "COPY_LOCATION"
     if stage.pin_orientation:
@@ -164,16 +192,30 @@ def _owned_contact_constraints(armature, component, role):
     """
 
     prefix = "semantic:"
-    suffix = ":pin_constraint"
-    if not role.startswith(prefix) or not role.endswith(suffix):
+    details = {
+        ":pin_constraint": "primary",
+        ":pin_orientation_constraint": "orientation",
+    }
+    suffix = next(
+        (candidate for candidate in details if role.endswith(candidate)),
+        "",
+    )
+    if not role.startswith(prefix) or not suffix:
         return ()
     stage_uuid = role[len(prefix) : -len(suffix)]
+    marker = _driver_marker(stage_uuid, details[suffix])
     animation_data = armature.animation_data
     if animation_data is None:
         return ()
     result = []
     for fcurve in animation_data.drivers:
-        if not _driver_is_owned(fcurve, armature, stage_uuid, fcurve.data_path):
+        if not _driver_is_owned(
+            fcurve,
+            armature,
+            stage_uuid,
+            fcurve.data_path,
+            marker=marker,
+        ):
             continue
         for pose_bone in armature.pose.bones:
             for constraint in pose_bone.constraints:
@@ -255,13 +297,23 @@ def _claim_pin_property(pose_bone, component, stage_uuid, property_name, *, lega
     pose_bone[marker_name] = marker_value
 
 
-def _driver_is_owned(fcurve, armature, stage_uuid, valid_path):
+def _driver_is_owned(
+    fcurve,
+    armature,
+    stage_uuid,
+    valid_path,
+    *,
+    marker=None,
+):
     if fcurve is None or fcurve.data_path != valid_path:
         return False
-    marker = _driver_marker(stage_uuid)
+    marker = marker or _driver_marker(stage_uuid)
     legacy_marker = f"cp_{_short(stage_uuid)}"
+    accepted_markers = {marker}
+    if marker == _driver_marker(stage_uuid):
+        accepted_markers.add(legacy_marker)
     return any(
-        variable.name in {marker, legacy_marker}
+        variable.name in accepted_markers
         and any(target.id == armature for target in variable.targets)
         for variable in fcurve.driver.variables
     )
@@ -572,6 +624,12 @@ def _ensure_pin_constraint(
             )
         constraint = driven_pose.constraints.new(constraint_type)
         constraint.name = constraint_name
+    # Contact is a post-solver operation.  Keep it after this endpoint's own
+    # projection/follow constraints when reconciling an existing stage too.
+    constraints = driven_pose.constraints
+    constraint_index = tuple(constraints).index(constraint)
+    if constraint_index != len(constraints) - 1 and hasattr(constraints, "move"):
+        constraints.move(constraint_index, len(constraints) - 1)
     _mark_pin_constraint(
         armature,
         component,
@@ -621,7 +679,104 @@ def _ensure_influence_driver(armature, component, stage, driven_pose, constraint
     )
 
 
-def ensure_contact_pin_artifacts(armature, component, stage, *, default_driven_bone=""):
+def _ensure_orientation_pin_artifacts(
+    armature,
+    component,
+    stage,
+    property_pose,
+    orientation_pose,
+    property_name,
+):
+    """Build the second, rotation-only destination for a combined Pin."""
+
+    role = semantic_stage_role(stage.stage_uuid, "pin_orientation_constraint")
+    tagged = _owned_contact_constraints(armature, component, role)
+    if len(tagged) > 1:
+        raise ComponentArtifactConflict(
+            f"Multiple managed constraints use role '{role}'."
+        )
+    constraint_name = (
+        f"COA_PIN_ROT_{_short(component.component_uuid)}_"
+        f"{_short(stage.stage_uuid)}"
+    )
+    if tagged:
+        owner, constraint = tagged[0]
+        if owner != orientation_pose or constraint.type != "COPY_ROTATION":
+            raise ComponentArtifactConflict(
+                "The resolved orientation Pin does not match its requested owner."
+            )
+    else:
+        collision = orientation_pose.constraints.get(constraint_name)
+        if collision is not None:
+            raise ComponentArtifactConflict(
+                f"Constraint '{constraint_name}' has no live owned orientation Pin driver."
+            )
+        constraint = orientation_pose.constraints.new("COPY_ROTATION")
+        constraint.name = constraint_name
+    anchor = _ensure_anchor(
+        armature,
+        component,
+        stage,
+        orientation_pose,
+        role_detail="pin_orientation_anchor",
+        name_tag="PIN_ROT",
+    )
+    constraint.target = anchor
+    constraint.owner_space = "WORLD"
+    constraint.target_space = "WORLD"
+    constraint.mix_mode = "REPLACE"
+    constraints = orientation_pose.constraints
+    index = tuple(constraints).index(constraint)
+    if index != len(constraints) - 1 and hasattr(constraints, "move"):
+        constraints.move(index, len(constraints) - 1)
+    _record_artifact(
+        component,
+        role,
+        "CONSTRAINT",
+        bone_name=orientation_pose.name,
+        constraint_name=constraint.name,
+        owned=True,
+    )
+
+    fcurve = constraint.driver_add("influence")
+    driver = fcurve.driver
+    driver.type = "SCRIPTED"
+    while driver.variables:
+        driver.variables.remove(driver.variables[0])
+    variable = driver.variables.new()
+    variable.name = _driver_marker(stage.stage_uuid, "orientation")
+    variable.type = "SINGLE_PROP"
+    target = variable.targets[0]
+    target.id = armature
+    target.data_path = property_pose.path_from_id(
+        _property_data_path(property_name)
+    )
+    driver.expression = variable.name
+    _record_artifact(
+        component,
+        semantic_stage_role(
+            stage.stage_uuid,
+            "pin_orientation_influence_driver",
+        ),
+        "DRIVER",
+        object_name=armature.name,
+        bone_name=orientation_pose.name,
+        constraint_name=constraint.name,
+        data_path=constraint.path_from_id("influence"),
+        binding_uuid=stage.stage_uuid,
+        owned=True,
+    )
+    return orientation_pose, anchor, constraint
+
+
+def ensure_contact_pin_artifacts(
+    armature,
+    component,
+    stage,
+    *,
+    default_driven_bone="",
+    orientation_driven_bone="",
+):
     driven_name = stage.pin_driven_bone or default_driven_bone
     driven_pose = armature.pose.bones.get(driven_name)
     if driven_pose is None:
@@ -683,6 +838,20 @@ def ensure_contact_pin_artifacts(armature, component, stage, *, default_driven_b
     _ensure_influence_driver(
         armature, component, stage, driven_pose, constraint, property_name
     )
+    if stage.pin_position and stage.pin_orientation:
+        orientation_pose = armature.pose.bones.get(orientation_driven_bone)
+        if orientation_pose is None:
+            raise SemanticContactError(
+                "Combined Contact requires the CHAIN_IK orientation carrier."
+            )
+        _ensure_orientation_pin_artifacts(
+            armature,
+            component,
+            stage,
+            driven_pose,
+            orientation_pose,
+            property_name,
+        )
     return ContactPinArtifacts(
         driven_bone=driven_pose.name,
         anchor_object=anchor.name,
@@ -937,10 +1106,408 @@ def key_pin_range(armature, component, stage):
     return values
 
 
+def _set_transition_interpolation(
+    armature,
+    data_path,
+    frames,
+    interpolation,
+):
+    action = armature.animation_data.action if armature.animation_data else None
+    requested = {float(frame) for frame in frames}
+    for fcurve in _iter_action_fcurves_for_armature(armature, action):
+        if fcurve.data_path != data_path:
+            continue
+        for point in fcurve.keyframe_points:
+            if not any(abs(float(point.co.x) - frame) <= 1.0e-5 for frame in requested):
+                continue
+            point.interpolation = interpolation
+            if interpolation == "BEZIER":
+                point.handle_left_type = "AUTO_CLAMPED"
+                point.handle_right_type = "AUTO_CLAMPED"
+        fcurve.update()
+
+
+def _next_public_key_frame(armature, data_path, frame):
+    """Return the next authored public switch after ``frame``, if any."""
+
+    action = armature.animation_data.action if armature.animation_data else None
+    candidates = [
+        float(point.co.x)
+        for fcurve in _iter_action_fcurves_for_armature(armature, action)
+        if fcurve.data_path == data_path
+        for point in fcurve.keyframe_points
+        if float(point.co.x) > float(frame) + 1.0e-5
+    ]
+    return min(candidates) if candidates else None
+
+
+def _remove_future_transition_keys(
+    armature,
+    data_path,
+    frame,
+    *,
+    next_public_frame=None,
+):
+    """Discard a superseded private ramp after a mid-transition reversal.
+
+    The Pin influence property is component-owned implementation state.  Once
+    the animator requests a new public Contact state, its former future ramp
+    must not become authoritative again midway through the new transition.
+    Past keys and the evaluated switch-frame value are retained.  All future
+    keys before the next public Contact switch are removed rather than only
+    the new ramp interval: the prior ramp may have been authored with a longer
+    transition duration.  Keys at and after the next public switch belong to
+    a separate authored event and remain intact when editing an earlier ramp.
+    """
+
+    action = armature.animation_data.action if armature.animation_data else None
+    for fcurve in _iter_action_fcurves_for_armature(armature, action):
+        if fcurve.data_path != data_path:
+            continue
+        for point in tuple(fcurve.keyframe_points):
+            point_frame = float(point.co.x)
+            if (
+                point_frame > float(frame) + 1.0e-5
+                and (
+                    next_public_frame is None
+                    or point_frame < float(next_public_frame) - 1.0e-5
+                )
+            ):
+                fcurve.keyframe_points.remove(point, fast=True)
+        fcurve.update()
+
+
+def _contact_ik_provider(component, stage):
+    """Resolve the single CHAIN_IK stage whose hidden solver Contact owns."""
+
+    provider_uuid = str(getattr(stage, "pin_driven_stage_uuid", "") or "")
+    if not provider_uuid:
+        dependencies = tuple(
+            value.strip()
+            for value in str(getattr(stage, "depends_on", "") or "").split(",")
+            if value.strip()
+        )
+        if len(dependencies) == 1:
+            provider_uuid = dependencies[0]
+    provider = next(
+        (
+            candidate
+            for candidate in component.semantic_stages
+            if candidate.stage_uuid == provider_uuid
+        ),
+        None,
+    )
+    if provider is None or provider.stage_type != "CHAIN_IK":
+        raise SemanticContactError(
+            "Contact / Pin requires exactly one compiled CHAIN_IK dependency."
+        )
+    return provider
+
+
+def switch_contact_pin(
+    armature,
+    component,
+    stage,
+    mode,
+    *,
+    frame=None,
+    key=True,
+):
+    """Capture/release contact through a discrete public state.
+
+    ``contact_mode`` receives only a CONSTANT key.  The existing owned Pin
+    property remains private and receives the smooth influence ramp.
+    """
+
+    mode = str(mode).upper()
+    if mode not in {"OFF", "ON"}:
+        raise SemanticContactError(f"Unsupported Contact Pin state: {mode}")
+    if not contact_uses_ik_override(stage):
+        raise SemanticContactError(
+            "Explicit generic Contact uses Capture & Key Pin Range, not the "
+            "FK/IK Contact switch."
+        )
+    pose_bone = armature.pose.bones.get(stage.pin_driven_bone)
+    if pose_bone is None or not stage.pin_property:
+        raise SemanticContactError("Build the Contact / Pin layer before switching it.")
+    constraint_role = semantic_stage_role(stage.stage_uuid, "pin_constraint")
+    tagged = _owned_contact_constraints(armature, component, constraint_role)
+    if len(tagged) != 1 or tagged[0][0] != pose_bone:
+        raise SemanticContactError("The Contact Pin destination is not owned by this stage.")
+    if not _pin_property_is_owned(
+        pose_bone,
+        component,
+        stage.stage_uuid,
+        stage.pin_property,
+    ):
+        raise SemanticContactError("The Contact Pin property is not owned by this stage.")
+    anchor = find_component_object(
+        armature,
+        component.component_uuid,
+        semantic_stage_role(stage.stage_uuid, "pin_anchor"),
+    )
+    if anchor is None:
+        raise SemanticContactError("The Contact Pin anchor is missing.")
+
+    from . import semantic_fk
+
+    provider = _contact_ik_provider(component, stage)
+    layer = semantic_fk.resolve_fk_solver_layer(armature, component, provider)
+    expected_primary = (
+        layer.ik_control_bone if stage.pin_position else layer.orientation_bone
+    )
+    if pose_bone.name != expected_primary:
+        raise SemanticContactError(
+            "Contact Pin destination no longer matches its CHAIN_IK provider."
+        )
+    follows, ik, end_rotation, contact_end_rotation = (
+        semantic_fk._layer_constraints(armature, layer)
+    )
+    orientation_anchor = None
+    if stage.pin_position and stage.pin_orientation:
+        orientation_role = semantic_stage_role(
+            stage.stage_uuid,
+            "pin_orientation_constraint",
+        )
+        orientation_tagged = _owned_contact_constraints(
+            armature,
+            component,
+            orientation_role,
+        )
+        orientation_pose = armature.pose.bones[layer.orientation_bone]
+        if (
+            len(orientation_tagged) != 1
+            or orientation_tagged[0][0] != orientation_pose
+        ):
+            raise SemanticContactError(
+                "The Contact orientation destination is not owned by this stage."
+            )
+        orientation_anchor = find_component_object(
+            armature,
+            component.component_uuid,
+            semantic_stage_role(stage.stage_uuid, "pin_orientation_anchor"),
+        )
+        if orientation_anchor is None:
+            raise SemanticContactError("The Contact orientation anchor is missing.")
+    elif stage.pin_orientation:
+        orientation_pose = pose_bone
+        orientation_anchor = anchor
+    else:
+        orientation_pose = None
+
+    scene = bpy.context.scene
+    frame = float(scene.frame_current if frame is None else frame)
+    property_name = stage.pin_property
+    property_path = _property_data_path(property_name)
+    full_property_path = pose_bone.path_from_id(property_path)
+    mode_path = stage.path_from_id("contact_mode")
+    previous_mode = stage.contact_mode
+    previous_property = float(pose_bone.get(property_name, 0.0))
+    previous_anchor = anchor.matrix_world.copy()
+    previous_orientation_anchor = (
+        orientation_anchor.matrix_world.copy()
+        if orientation_anchor is not None and orientation_anchor != anchor
+        else None
+    )
+    control_names = layer.fk_control_bones + (
+        layer.ik_control_bone,
+        layer.orientation_bone,
+    ) + ((layer.pole_bone,) if layer.pole_bone else ())
+    previous_control_matrices = {
+        name: armature.pose.bones[name].matrix.copy() for name in control_names
+    }
+    pose_paths = tuple(
+        armature.pose.bones[name].path_from_id(path)
+        for name in control_names
+        for path in (
+            "location",
+            semantic_fk._rotation_path(armature.pose.bones[name]),
+            "scale",
+        )
+    )
+    previous_action = armature.animation_data.action if armature.animation_data else None
+    curve_snapshots = {
+        path: _snapshot_action_curves(armature, previous_action, path)
+        for path in (full_property_path, mode_path) + pose_paths
+    }
+    try:
+        bpy.context.view_layer.update()
+        mechanism_matrices = tuple(
+            armature.pose.bones[name].matrix.copy()
+            for name in layer.mechanism_bones
+        )
+
+        # Validate both independent public timelines before changing controls,
+        # anchors or animation.  A compensation ramp may not straddle a later
+        # FK/IK switch because that event owns a different Pose Match.
+        start_value = min(max(previous_property, 0.0), 1.0)
+        end_value = 1.0 if mode == "ON" else 0.0
+        internal_keys = smooth_compensation_keys(
+            frame,
+            start_value,
+            end_value,
+            int(stage.contact_transition_frames),
+        )
+        next_contact_frame = _next_public_key_frame(
+            armature,
+            mode_path,
+            frame,
+        )
+        next_mode_frame = _next_public_key_frame(
+            armature,
+            provider.path_from_id("rig_mode"),
+            frame,
+        )
+        boundaries = tuple(
+            value
+            for value in (next_contact_frame, next_mode_frame)
+            if value is not None
+        )
+        next_public_frame = min(boundaries) if boundaries else None
+        if (
+            key
+            and next_public_frame is not None
+            and float(internal_keys[-1].frame)
+            >= float(next_public_frame) - 1.0e-5
+        ):
+            raise SemanticContactError(
+                "Contact transition would reach or cross the next authored "
+                f"Contact/Mode switch at frame {next_public_frame:g}. Shorten "
+                "the transition or move that future switch."
+            )
+
+        matched = ()
+        if mode == "ON":
+            matched = (
+                armature.pose.bones[layer.ik_control_bone],
+                armature.pose.bones[layer.orientation_bone],
+            )
+            if layer.pole_bone:
+                matched += (armature.pose.bones[layer.pole_bone],)
+        keyed_paths = []
+        with semantic_fk._mute_action_paths(
+            armature,
+            semantic_fk._pose_transform_paths(matched),
+        ):
+            if mode == "ON":
+                # Match and key the hidden IK controls atomically.  Existing
+                # control Action curves must remain muted through pole fitting
+                # because its dependency updates would otherwise restore the
+                # old target before the Contact anchor can capture it.
+                semantic_fk._match_ik_controls(
+                    armature,
+                    provider,
+                    layer,
+                    mechanism_matrices,
+                    follows,
+                    ik,
+                    end_rotation,
+                )
+            if key:
+                for matched_bone in matched:
+                    keyed_paths.extend(semantic_fk._key_pose(matched_bone, frame))
+            if mode == "ON":
+                if stage.pin_position:
+                    anchor.matrix_world = (
+                        armature.matrix_world
+                        @ armature.pose.bones[layer.ik_control_bone].matrix
+                    )
+                if stage.pin_orientation and orientation_anchor is not None:
+                    orientation_anchor.matrix_world = (
+                        armature.matrix_world
+                        @ armature.pose.bones[layer.orientation_bone].matrix
+                    )
+        if key:
+            scene.frame_set(scene.frame_current)
+            bpy.context.view_layer.update()
+        stage.contact_mode = mode
+        if not key:
+            pose_bone[property_name] = 1.0 if mode == "ON" else 0.0
+            bpy.context.view_layer.update()
+            return mode
+        _remove_future_transition_keys(
+            armature,
+            full_property_path,
+            frame,
+            next_public_frame=next_contact_frame,
+        )
+        for planned in internal_keys:
+            pose_bone[property_name] = planned.value
+            if not _insert_pin_key(pose_bone, property_path, planned.frame):
+                raise SemanticContactError(
+                    f"Could not key Contact Pin compensation at frame {planned.frame:g}."
+                )
+        public_key = discrete_state_key(
+            frame,
+            1.0 if mode == "ON" else 0.0,
+        )
+        if not stage.keyframe_insert(data_path="contact_mode", frame=public_key.frame):
+            raise SemanticContactError("Could not key the public Contact Pin state.")
+        _set_transition_interpolation(
+            armature,
+            full_property_path,
+            tuple(item.frame for item in internal_keys),
+            "BEZIER",
+        )
+        _set_transition_interpolation(
+            armature,
+            mode_path,
+            (public_key.frame,),
+            public_key.interpolation,
+        )
+        for path in keyed_paths:
+            _set_transition_interpolation(
+                armature,
+                path,
+                (frame,),
+                "BEZIER",
+            )
+        # Re-evaluate at the switch frame rather than leaving the RNA value at
+        # the end of the just-created private transition.
+        scene.frame_set(scene.frame_current)
+        bpy.context.view_layer.update()
+    except Exception:
+        current_action = armature.animation_data.action if armature.animation_data else None
+        if previous_action is not None:
+            if armature.animation_data is None:
+                armature.animation_data_create()
+            armature.animation_data.action = previous_action
+            for path, snapshots in curve_snapshots.items():
+                _restore_action_curves(
+                    armature,
+                    previous_action,
+                    path,
+                    snapshots,
+                )
+        elif armature.animation_data is not None:
+            armature.animation_data.action = None
+        if (
+            current_action is not None
+            and current_action != previous_action
+            and current_action.users == 0
+        ):
+            bpy.data.actions.remove(current_action)
+        stage.contact_mode = previous_mode
+        pose_bone[property_name] = previous_property
+        anchor.matrix_world = previous_anchor
+        if (
+            orientation_anchor is not None
+            and previous_orientation_anchor is not None
+        ):
+            orientation_anchor.matrix_world = previous_orientation_anchor
+        for name, matrix in previous_control_matrices.items():
+            armature.pose.bones[name].matrix = matrix
+        bpy.context.view_layer.update()
+        raise
+    return mode
+
+
 __all__ = [
     "ContactPinArtifacts",
     "SemanticContactError",
+    "contact_uses_ik_override",
     "ensure_contact_pin_artifacts",
     "key_pin_range",
+    "switch_contact_pin",
     "validate_pin_ranges",
 ]

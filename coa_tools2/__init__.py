@@ -321,6 +321,7 @@ classes = (
     change_alpha_mode.COATOOLS2_OT_ChangeTextureInterpolationMode,
     # rig controls
     rig_control_operators.COATOOLS2_OT_AddRigControl,
+    rig_control_operators.COATOOLS2_OT_AddLipSyncStateRig,
     rig_control_operators.COATOOLS2_OT_AddRigBinding,
     rig_control_operators.COATOOLS2_OT_RemoveRigBinding,
     rig_control_operators.COATOOLS2_OT_SetupRigStates,
@@ -328,6 +329,7 @@ classes = (
     rig_control_operators.COATOOLS2_OT_ToggleRigStateCell,
     rig_control_operators.COATOOLS2_OT_AssignRigStatePoint,
     rig_control_operators.COATOOLS2_OT_ClearRigStatePoint,
+    rig_control_operators.COATOOLS2_OT_SetRigStateFallback,
     rig_control_operators.COATOOLS2_OT_SnapRigStatePoint,
     rig_control_operators.COATOOLS2_OT_UpdateRigControl,
     rig_control_operators.COATOOLS2_OT_ValidateRig,

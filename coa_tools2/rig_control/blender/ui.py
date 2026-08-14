@@ -78,11 +78,16 @@ class COATOOLS2_UL_RigStatePoints(bpy.types.UIList):
         _active_propname,
         _index,
     ):
-        coordinate = (
-            f"{item.column + 1}"
-            if item.row == 0 and getattr(_data, "state_rows", 1) == 1
-            else f"{item.column + 1}, {item.row + 1}"
-        )
+        if getattr(_data, "state_mode", "") == "GRAPH_2D":
+            coordinate = item.label or f"State {item.column + 1}"
+            prefix = f"{coordinate} ({item.graph_position[0]:.2f}, {item.graph_position[1]:.2f})"
+        else:
+            coordinate = (
+                f"{item.column + 1}"
+                if item.row == 0 and getattr(_data, "state_rows", 1) == 1
+                else f"{item.column + 1}, {item.row + 1}"
+            )
+            prefix = f"[{coordinate}]"
         if item.is_empty:
             target = "Empty"
             icon = "RADIOBUT_OFF"
@@ -92,7 +97,7 @@ class COATOOLS2_UL_RigStatePoints(bpy.types.UIList):
         else:
             target = "Unassigned"
             icon = "QUESTION"
-        layout.label(text=f"[{coordinate}] {target}", icon=icon)
+        layout.label(text=f"{prefix} · {target}", icon=icon)
 
 
 class COATOOLS2_UL_RigStateCells(bpy.types.UIList):
@@ -133,9 +138,14 @@ class COATOOLS2_PT_RigControls(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         armature = functions.get_sprite_object(context.active_object)
-        rig_data = get_rig_data(armature)
+        rig_data = get_rig_data(armature, migrate=False)
         row = layout.row(align=True)
         row.operator("coa_tools2.add_rig_control", icon="ADD")
+        row.operator(
+            "coa_tools2.add_lip_sync_state_rig",
+            text="Lip Sync",
+            icon="SPEAKER",
+        )
         row.operator("coa_tools2.validate_rig", text="", icon="CHECKMARK")
         row.operator("coa_tools2.repair_rig", text="", icon="FILE_REFRESH")
 
@@ -163,6 +173,8 @@ class COATOOLS2_PT_RigControls(bpy.types.Panel):
         elif control.control_type == "POINT_2D_RECT":
             if control.state_mode == "MATRIX_2D":
                 box.label(text="Rectangle Mode: State Matrix", icon="MESH_GRID")
+            elif control.state_mode == "GRAPH_2D":
+                box.label(text="Rectangle Mode: State Graph", icon="NODETREE")
             else:
                 box.prop(control, "rectangle_mode")
         elif control.control_type == "DIAL":
@@ -200,6 +212,8 @@ class COATOOLS2_PT_RigControls(bpy.types.Panel):
             row.prop(control, "node_radius")
             display_body.prop(control, "bar_width")
             display_body.prop(control, "widget_backend")
+            if control.state_mode == "GRAPH_2D":
+                display_body.prop(control, "graph_custom_object")
             display_body.separator()
             display_body.prop(control, "show_name")
             if control.show_name:
@@ -293,7 +307,7 @@ class COATOOLS2_PT_RigControls(bpy.types.Panel):
             else:
                 dimensions = (
                     f"{control.state_columns} points"
-                    if control.state_mode == "LINEAR_1D"
+                    if control.state_mode in {"LINEAR_1D", "GRAPH_2D"}
                     else f"{control.state_columns} x {control.state_rows}"
                 )
                 row = states_box.row(align=True)
@@ -380,6 +394,19 @@ class COATOOLS2_PT_RigControls(bpy.types.Panel):
                             text="Update Rig Control to initialize matrix cells.",
                             icon="INFO",
                         )
+                elif control.state_mode == "GRAPH_2D":
+                    graph_box = states_box.box()
+                    graph_box.label(text="Graph Behavior", icon="NODETREE")
+                    graph_box.prop(control, "graph_interpolation", expand=True)
+                    if control.graph_interpolation in {"MAP_2D", "HYBRID"}:
+                        graph_box.prop(control, "graph_radius")
+                    if control.lip_sync_preset != "NONE":
+                        graph_box.label(
+                            text=f"Preset: {control.lip_sync_preset.replace('_', ' ').title()}"
+                        )
+                    graph_box.label(
+                        text="The viewport handle is always available for manual animation."
+                    )
                 states_box.template_list(
                     "COATOOLS2_UL_RigStatePoints",
                     "",
@@ -389,6 +416,43 @@ class COATOOLS2_PT_RigControls(bpy.types.Panel):
                     "state_points_index",
                     rows=min(8, max(2, len(control.state_points))),
                 )
+                if control.state_mode == "GRAPH_2D" and control.state_points:
+                    point = control.state_points[
+                        min(control.state_points_index, len(control.state_points) - 1)
+                    ]
+                    point_box = states_box.box()
+                    point_box.prop(point, "label", text="Point Name")
+                    point_box.prop(point, "graph_position")
+                    point_box.prop(point, "point_shape")
+                    if point.point_shape == "CUSTOM_OBJECT":
+                        point_box.prop(point, "custom_object")
+                    fallback = next(
+                        (
+                            candidate
+                            for candidate in control.state_points
+                            if candidate.state_uuid == point.fallback_state_uuid
+                        ),
+                        None,
+                    )
+                    fallback_row = point_box.row(align=True)
+                    fallback_row.label(
+                        text=f"Fallback: {fallback.label if fallback else 'Automatic Nearest'}"
+                    )
+                    fallback_row.operator(
+                        "coa_tools2.set_rig_state_fallback",
+                        text="Choose",
+                        icon="LINKED",
+                    )
+                    if point.target_name_candidates:
+                        point_box.label(
+                            text=f"Shape Key candidates: {point.target_name_candidates}",
+                            icon="INFO",
+                        )
+                    if point.phoneme_aliases:
+                        point_box.label(
+                            text=f"Phoneme aliases: {point.phoneme_aliases}",
+                            icon="SPEAKER",
+                        )
                 row = states_box.row(align=True)
                 row.operator(
                     "coa_tools2.assign_rig_state_point",

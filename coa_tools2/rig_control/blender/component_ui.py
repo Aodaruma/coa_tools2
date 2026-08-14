@@ -196,7 +196,7 @@ class COATOOLS2_PT_RigComponents(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         armature = functions.get_sprite_object(context.active_object)
-        rig_data = get_rig_data(armature)
+        rig_data = get_rig_data(armature, migrate=False)
         row = layout.row(align=True)
         row.operator("coa_tools2.add_rig_component", icon="ADD")
         row.operator(

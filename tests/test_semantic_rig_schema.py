@@ -196,6 +196,46 @@ class SemanticRigSchemaTests(unittest.TestCase):
             WidgetPresentationRef.from_dict(presentation.to_dict()),
         )
 
+    def test_vector_output_round_trip_preserves_arity_and_start_index(self):
+        output = SemanticOutputSpec(
+            "output.vector",
+            "pinned.pose",
+            OutputTargetSpec(
+                OutputTargetKind.BONE_TRANSFORM,
+                "CharacterRig",
+                "hand.L",
+                bone_name="hand.L",
+                array_index=0,
+            ),
+            OutputPolicy.HYBRID,
+            art_frame_id="frame.art",
+            value_arity=3,
+        )
+        self.assertEqual(output, SemanticOutputSpec.from_dict(output.to_dict()))
+
+        invalid = SemanticOutputSpec(
+            "output.invalid-discrete",
+            "pinned.pose",
+            output.target,
+            value_arity=3,
+            discrete=True,
+        )
+        spec = self._valid_spec()
+        bad = SemanticRigSpec(
+            spec.rig_uuid,
+            spec.semantic_id,
+            spec.display_name,
+            spec.frames,
+            spec.channels,
+            spec.nodes,
+            spec.outputs + (invalid,),
+            spec.presentations,
+        )
+        self.assertIn(
+            "semantic.vector_discrete_output",
+            {item.code for item in validate_semantic_rig(bad)},
+        )
+
     def test_legacy_presentation_dict_gets_additive_defaults(self):
         restored = WidgetPresentationRef.from_dict(
             {

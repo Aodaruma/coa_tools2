@@ -431,7 +431,7 @@ def _find_owned_bone(armature, component, role: str):
 
 
 def _semantic_stage_targets(armature, component, stage, result=None):
-    if stage.stage_type in {"PROJECTED_TRANSFORM", "CHAIN_IK"}:
+    if stage.stage_type == "PROJECTED_TRANSFORM":
         name = result.primary_control_bone if result is not None else ""
         if not name:
             bone = _find_owned_bone(
@@ -441,6 +441,43 @@ def _semantic_stage_targets(armature, component, stage, result=None):
             )
             name = bone.name if bone is not None else stage.control_bone
         return (("PRIMARY", stage.presentation, (name,) if name else ()),)
+    if stage.stage_type in {"CHAIN_FK", "CHAIN_IK"}:
+        targets = []
+        if stage.stage_type == "CHAIN_IK":
+            name = result.primary_control_bone if result is not None else ""
+            if not name:
+                bone = _find_owned_bone(
+                    armature,
+                    component,
+                    semantic_stage_role(stage.stage_uuid, "control_bone"),
+                )
+                name = bone.name if bone is not None else stage.control_bone
+            targets.append(
+                ("PRIMARY", stage.presentation, (name,) if name else ())
+            )
+        count = len(stage.source_bones) or len(component.source_bones)
+        fk_names = tuple(
+            bone.name
+            for index in range(count)
+            if (
+                bone := _find_owned_bone(
+                    armature,
+                    component,
+                    semantic_stage_role(
+                        stage.stage_uuid,
+                        f"fk_control:{index}",
+                    ),
+                )
+            )
+            is not None
+        )
+        presentation = (
+            stage.presentation
+            if stage.stage_type == "CHAIN_FK"
+            else stage.fk_presentation
+        )
+        targets.append(("FK_CONTROL", presentation, fk_names))
+        return tuple(targets)
     if stage.stage_type == "SPLINE":
         names = ()
         spline = result.spline_info if result is not None else None
@@ -461,6 +498,46 @@ def _semantic_stage_targets(armature, component, stage, result=None):
                     resolved.append(bone.name)
             names = tuple(resolved)
         return (("SPLINE_CONTROL", stage.presentation, names),)
+    if stage.stage_type == "BBONE_BEZIER":
+        point_names = ()
+        handle_names = ()
+        bbone = result.bbone_info if result is not None else None
+        if bbone is not None:
+            point_names = tuple(bbone.point_control_bones)
+            handle_names = tuple(bbone.handle_control_bones)
+        if not point_names:
+            point_roles = ["bbone_point:start", "bbone_point:end"]
+            if stage.bbone_use_mid_control:
+                point_roles.append("bbone_point:mid")
+            point_names = tuple(
+                bone.name
+                for leaf in point_roles
+                if (
+                    bone := _find_owned_bone(
+                        armature,
+                        component,
+                        semantic_stage_role(stage.stage_uuid, leaf),
+                    )
+                )
+                is not None
+            )
+        if not handle_names:
+            handle_names = tuple(
+                bone.name
+                for leaf in ("bbone_handle:out", "bbone_handle:in")
+                if (
+                    bone := _find_owned_bone(
+                        armature,
+                        component,
+                        semantic_stage_role(stage.stage_uuid, leaf),
+                    )
+                )
+                is not None
+            )
+        return (
+            ("BBONE_POINT", stage.presentation, point_names),
+            ("BBONE_HANDLE", stage.handle_presentation, handle_names),
+        )
     return ()
 
 
@@ -489,10 +566,21 @@ def _stage_presentations(armature, component, stage, result=None):
 
 def _expected_stage_roles_without_bones(stage) -> tuple[tuple[str, object], ...]:
     values = []
-    if stage.stage_type in {"PROJECTED_TRANSFORM", "CHAIN_IK"}:
+    if stage.stage_type == "CHAIN_FK":
+        values.append(("FK_CONTROL", stage.presentation))
+    elif stage.stage_type in {"PROJECTED_TRANSFORM", "CHAIN_IK"}:
         values.append(("PRIMARY", stage.presentation))
+        if stage.stage_type == "CHAIN_IK":
+            values.append(("FK_CONTROL", stage.fk_presentation))
     elif stage.stage_type == "SPLINE":
         values.append(("SPLINE_CONTROL", stage.presentation))
+    elif stage.stage_type == "BBONE_BEZIER":
+        values.extend(
+            (
+                ("BBONE_POINT", stage.presentation),
+                ("BBONE_HANDLE", stage.handle_presentation),
+            )
+        )
     if stage.stage_type == "CHAIN_IK" and stage.use_pole:
         values.append(("POLE", stage.pole_presentation))
     return tuple(values)
@@ -691,11 +779,11 @@ def cleanup_component_presentation_artifacts(
     )
 
 
-def _active_component(context):
+def _active_component(context, *, migrate=True):
     armature = functions.get_sprite_object(context.active_object)
     if armature is None or armature.type != "ARMATURE":
         return None, None
-    rig_data = get_rig_data(armature)
+    rig_data = get_rig_data(armature, migrate=migrate)
     if not rig_data.rig_components:
         return armature, None
     index = min(rig_data.rig_components_index, len(rig_data.rig_components) - 1)
@@ -777,11 +865,23 @@ def _presentation_owner(presentation):
                 target_role = (
                     "SPLINE_CONTROL"
                     if stage.stage_type == "SPLINE"
-                    else "PRIMARY"
+                    else (
+                        "BBONE_POINT"
+                        if stage.stage_type == "BBONE_BEZIER"
+                        else (
+                            "FK_CONTROL"
+                            if stage.stage_type == "CHAIN_FK"
+                            else "PRIMARY"
+                        )
+                    )
                 )
                 return armature, component, stage.stage_uuid, target_role
+            if stage.fk_presentation.as_pointer() == pointer:
+                return armature, component, stage.stage_uuid, "FK_CONTROL"
             if stage.pole_presentation.as_pointer() == pointer:
                 return armature, component, stage.stage_uuid, "POLE"
+            if stage.handle_presentation.as_pointer() == pointer:
+                return armature, component, stage.stage_uuid, "BBONE_HANDLE"
     return None
 
 
@@ -828,7 +928,13 @@ def _presentation_from_target(component, stage_uuid: str, target_role: str):
     )
     if stage is None:
         return None
-    return stage.pole_presentation if target_role == "POLE" else stage.presentation
+    if target_role == "POLE":
+        return stage.pole_presentation
+    if target_role == "FK_CONTROL" and stage.stage_type == "CHAIN_IK":
+        return stage.fk_presentation
+    if target_role == "BBONE_HANDLE":
+        return stage.handle_presentation
+    return stage.presentation
 
 
 def _flush_semantic_presentation_updates():
@@ -903,7 +1009,7 @@ class COATOOLS2_OT_UpdateRigPresentation(_OperatorBase):
 
     @classmethod
     def poll(cls, context):
-        _armature, component = _active_component(context)
+        _armature, component = _active_component(context, migrate=False)
         return component is not None
 
     def execute(self, context):

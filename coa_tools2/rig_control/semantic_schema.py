@@ -16,7 +16,7 @@ from .component_validation import validate_widget_presentation
 from .schema import StringEnum
 
 
-SEMANTIC_RIG_SCHEMA_VERSION = 1
+SEMANTIC_RIG_SCHEMA_VERSION = 2
 
 
 class FrameRole(StringEnum):
@@ -57,9 +57,11 @@ class OutputTargetKind(StringEnum):
 class SolverType(StringEnum):
     PROJECTED_TRANSFORM = "PROJECTED_TRANSFORM"
     POSE_MAP = "POSE_MAP"
+    CHAIN_FK = "CHAIN_FK"
     CHAIN_IK = "CHAIN_IK"
     CONTACT_PIN = "CONTACT_PIN"
     SPLINE = "SPLINE"
+    BBONE_BEZIER = "BBONE_BEZIER"
     SECONDARY_MOTION = "SECONDARY_MOTION"
 
 
@@ -75,12 +77,25 @@ class ContactSpace(StringEnum):
     TARGET = "TARGET"
 
 
+class RigMode(StringEnum):
+    FK = "FK"
+    IK = "IK"
+
+
+class ContactMode(StringEnum):
+    OFF = "OFF"
+    ON = "ON"
+
+
 class WidgetTargetRole(StringEnum):
     """Which stage-owned control receives one presentation."""
 
     PRIMARY = "PRIMARY"
+    FK_CONTROL = "FK_CONTROL"
     POLE = "POLE"
     SPLINE_CONTROL = "SPLINE_CONTROL"
+    BBONE_POINT = "BBONE_POINT"
+    BBONE_HANDLE = "BBONE_HANDLE"
 
 
 @dataclass(frozen=True)
@@ -165,6 +180,15 @@ class PoseMapSolverSpec:
 
 
 @dataclass(frozen=True)
+class ChainFKSolverSpec:
+    """Independent or shared FK controls exported as a composable DAG node."""
+
+    mechanism_frame_id: str
+    chain_bones: tuple[str, ...]
+    solver_type: SolverType = field(default=SolverType.CHAIN_FK, init=False)
+
+
+@dataclass(frozen=True)
 class ChainIKSolverSpec:
     mechanism_frame_id: str
     effector_frame_id: str
@@ -197,6 +221,28 @@ class SplineSolverSpec:
 
 
 @dataclass(frozen=True)
+class BboneBezierSolverSpec:
+    """One B-Bone segment driven through semantic Bezier controls.
+
+    The deform bone remains the Blender B-Bone owner.  Start/end points,
+    tangent handles and an optional midpoint are compiler-owned controls, so
+    presentation and Secondary Motion may be replaced independently.
+    """
+
+    mechanism_frame_id: str
+    deform_bone: str
+    segments: int = 8
+    use_mid_control: bool = False
+    ease_in: float = 1.0
+    ease_out: float = 1.0
+    roll_in: float = 0.0
+    roll_out: float = 0.0
+    scale_in: tuple[float, float, float] = (1.0, 1.0, 1.0)
+    scale_out: tuple[float, float, float] = (1.0, 1.0, 1.0)
+    solver_type: SolverType = field(default=SolverType.BBONE_BEZIER, init=False)
+
+
+@dataclass(frozen=True)
 class SecondaryMotionSolverSpec:
     mechanism_frame_id: str
     stiffness_channel_id: str = ""
@@ -211,9 +257,11 @@ class SecondaryMotionSolverSpec:
 SolverSpec = Union[
     ProjectedTransformSolverSpec,
     PoseMapSolverSpec,
+    ChainFKSolverSpec,
     ChainIKSolverSpec,
     ContactPinSolverSpec,
     SplineSolverSpec,
+    BboneBezierSolverSpec,
     SecondaryMotionSolverSpec,
 ]
 
@@ -221,9 +269,11 @@ SolverSpec = Union[
 _SOLVER_CLASSES = {
     SolverType.PROJECTED_TRANSFORM: ProjectedTransformSolverSpec,
     SolverType.POSE_MAP: PoseMapSolverSpec,
+    SolverType.CHAIN_FK: ChainFKSolverSpec,
     SolverType.CHAIN_IK: ChainIKSolverSpec,
     SolverType.CONTACT_PIN: ContactPinSolverSpec,
     SolverType.SPLINE: SplineSolverSpec,
+    SolverType.BBONE_BEZIER: BboneBezierSolverSpec,
     SolverType.SECONDARY_MOTION: SecondaryMotionSolverSpec,
 }
 
@@ -250,8 +300,15 @@ def _solver_from_dict(data: Mapping[str, Any]) -> SolverSpec:
         values["contact_space"] = ContactSpace(
             values.get("contact_space", "WORLD")
         )
-    elif solver_type in {SolverType.CHAIN_IK, SolverType.SPLINE}:
+    elif solver_type in {
+        SolverType.CHAIN_FK,
+        SolverType.CHAIN_IK,
+        SolverType.SPLINE,
+    }:
         values["chain_bones"] = tuple(values.get("chain_bones", ()))
+    elif solver_type is SolverType.BBONE_BEZIER:
+        values["scale_in"] = tuple(values.get("scale_in", (1.0, 1.0, 1.0)))
+        values["scale_out"] = tuple(values.get("scale_out", (1.0, 1.0, 1.0)))
     return _SOLVER_CLASSES[solver_type](**values)
 
 
@@ -294,6 +351,7 @@ class OutputTargetSpec:
     target_name: str
     bone_name: str = ""
     data_path: str = ""
+    array_index: int = -1
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -314,6 +372,8 @@ class SemanticOutputSpec:
     target: OutputTargetSpec
     policy: OutputPolicy = OutputPolicy.PARAMETRIC
     art_frame_id: str = ""
+    value_arity: int = 1
+    discrete: bool = False
     enabled: bool = True
 
     def to_dict(self) -> dict[str, Any]:
@@ -323,6 +383,8 @@ class SemanticOutputSpec:
             "target": self.target.to_dict(),
             "policy": self.policy.value,
             "art_frame_id": self.art_frame_id,
+            "value_arity": self.value_arity,
+            "discrete": self.discrete,
             "enabled": self.enabled,
         }
 
@@ -466,9 +528,14 @@ def _solver_frame_ids(solver: SolverSpec) -> tuple[str, ...]:
             )
             if value
         )
+    if isinstance(solver, ChainFKSolverSpec):
+        return (solver.mechanism_frame_id,)
     if isinstance(solver, ContactPinSolverSpec):
         return (solver.mechanism_frame_id, solver.target_frame_id)
-    if isinstance(solver, (SplineSolverSpec, SecondaryMotionSolverSpec)):
+    if isinstance(
+        solver,
+        (SplineSolverSpec, BboneBezierSolverSpec, SecondaryMotionSolverSpec),
+    ):
         return (solver.mechanism_frame_id,)
     return ()
 
@@ -609,17 +676,51 @@ def validate_semantic_rig(
                 )
         if isinstance(node.solver, PoseMapSolverSpec) and not node.solver.pose_field_id:
             issue("semantic.missing_pose_field", node.node_uuid, "Pose field ID is required.")
-        if isinstance(node.solver, (ChainIKSolverSpec, SplineSolverSpec)) and len(node.solver.chain_bones) < 2:
+        if isinstance(
+            node.solver,
+            (ChainFKSolverSpec, ChainIKSolverSpec, SplineSolverSpec),
+        ) and len(node.solver.chain_bones) < 2:
             issue(
                 "semantic.insufficient_chain_bones",
                 node.node_uuid,
                 "A chain solver requires at least two bones.",
             )
+        if isinstance(node.solver, BboneBezierSolverSpec):
+            if not node.solver.deform_bone:
+                issue(
+                    "semantic.missing_bbone_deform_bone",
+                    node.node_uuid,
+                    "A B-Bone Bezier solver requires one deform bone.",
+                )
+            if node.solver.segments < 2:
+                issue(
+                    "semantic.invalid_bbone_segments",
+                    node.node_uuid,
+                    "B-Bone segments must be at least two.",
+                )
+            if any(value <= 0.0 for value in node.solver.scale_in + node.solver.scale_out):
+                issue(
+                    "semantic.invalid_bbone_scale",
+                    node.node_uuid,
+                    "B-Bone start/end scale components must be positive.",
+                )
     node_edges = {item.node_uuid: item.depends_on for item in spec.nodes}
     if _has_cycle(node_edges):
         issue("semantic.node_cycle", spec.rig_uuid, "Solver graph has a cycle.")
 
     for output in spec.outputs:
+        if not 1 <= output.value_arity <= 4:
+            issue(
+                "semantic.invalid_output_arity",
+                output.output_uuid,
+                "Output arity must be between one and four.",
+            )
+        if output.discrete and output.value_arity != 1:
+            issue(
+                "semantic.vector_discrete_output",
+                output.output_uuid,
+                "Discrete outputs must be scalar.",
+            )
         if output.channel_id not in channel_set:
             issue(
                 "semantic.unknown_output_channel",

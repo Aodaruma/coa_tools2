@@ -25,12 +25,18 @@ from .semantic_artifacts import (
     ensure_projected_transform_artifacts,
     semantic_stage_role,
 )
+from .semantic_bbone import (
+    ensure_bbone_bezier_artifacts,
+    restore_bbone_stage_state,
+    retarget_bbone_handles,
+)
 from .semantic_contact import (
     _clear_pin_constraint_marker,
     _owned_contact_constraints,
     _owned_pin_property_locations,
     _remove_pin_property_artifact,
     SemanticContactError,
+    contact_uses_ik_override,
     ensure_contact_pin_artifacts,
     validate_pin_ranges,
 )
@@ -70,9 +76,14 @@ class SemanticStageBuildResult:
     art_frame_bone: str = ""
     display_frame_bone: str = ""
     mechanism_frame_bone: str = ""
+    # Hidden-solver input exported for downstream contact.  CHAIN_IK exposes
+    # its animator-facing IK handle here; Contact Pose Matches it before the
+    # private compensation weight acquires the world pin.
+    contact_output_bone: str = ""
     projection_source_bone: str = ""
     projection_stage_uuid: str = ""
     spline_info: object | None = None
+    bbone_info: object | None = None
 
 
 def _stage_dependencies(stage):
@@ -162,6 +173,63 @@ def _preflight_stage_wiring(stages):
                     )
 
 
+def _validate_contact_ik_dependencies(stages):
+    """Automatic Contact is one hidden IK override per CHAIN_IK solver.
+
+    Legacy/generic World Pin remains available when the author explicitly
+    selects an unconnected control bone.  That path keys the Pin range directly
+    and does not participate in the public FK/IK Contact override.
+    """
+
+    by_uuid = {stage.stage_uuid: stage for stage in stages}
+    claims = {}
+    for stage in stages:
+        if stage.stage_type != "CONTACT_PIN":
+            continue
+        if not contact_uses_ik_override(stage):
+            continue
+        dependencies = tuple(_stage_dependencies(stage))
+        if len(dependencies) != 1:
+            raise SemanticRigCompileError(
+                f"Contact / Pin '{stage.label}' requires exactly one CHAIN_IK dependency."
+            )
+        provider = by_uuid.get(dependencies[0])
+        if provider is None or provider.stage_type != "CHAIN_IK":
+            raise SemanticRigCompileError(
+                f"Contact / Pin '{stage.label}' dependency must be CHAIN_IK."
+            )
+        previous = claims.get(provider.stage_uuid)
+        if previous is not None:
+            raise SemanticRigCompileError(
+                f"CHAIN_IK '{provider.label}' has multiple automatic Contact / Pin "
+                f"stages ('{previous.label}', '{stage.label}')."
+            )
+        claims[provider.stage_uuid] = stage
+
+
+def _validate_explicit_contact_driven_bones(armature, component, stages):
+    """Keep generic Pin off connected/source deformation chains."""
+
+    source_names = {
+        item.bone_name for item in component.source_bones if item.bone_name
+    }
+    for stage in stages:
+        if stage.stage_type != "CONTACT_PIN" or contact_uses_ik_override(stage):
+            continue
+        driven_name = str(stage.pin_driven_bone or "").strip()
+        pose_bone = armature.pose.bones.get(driven_name)
+        if pose_bone is None:
+            # The artifact builder reports the existing focused missing-bone
+            # error; this preflight only owns the unsafe-chain distinction.
+            continue
+        if driven_name in source_names or pose_bone.bone.use_connect:
+            raise SemanticRigCompileError(
+                f"Contact / Pin '{stage.label}' explicit Driven Bone "
+                f"'{driven_name}' must be an unconnected control, not a "
+                "source or connected deformation-chain bone."
+            )
+
+
 def _validate_sources(armature, component):
     if not component.source_bones:
         raise SemanticRigCompileError("A semantic rig needs at least one source bone.")
@@ -201,15 +269,36 @@ def _validate_pose_map_samples(stages):
                     f"Pose sample '{sample.label}' is missing dimension(s): "
                     + ", ".join(missing_channels)
                 )
-            recorded_outputs = {
-                item.output_uuid for item in sample.outputs if item.output_uuid
+            recorded_output_items = {
+                item.output_uuid: item
+                for item in sample.outputs
+                if item.output_uuid
             }
+            recorded_outputs = set(recorded_output_items)
             missing_outputs = enabled_outputs - recorded_outputs
             if missing_outputs:
                 raise SemanticRigCompileError(
                     f"Pose sample '{sample.label}' is missing {len(missing_outputs)} "
                     "enabled output value(s). Re-record or migrate the sample."
                 )
+            for output in stage.outputs:
+                if not output.enabled or output.output_uuid not in recorded_output_items:
+                    continue
+                recorded_output = recorded_output_items[output.output_uuid]
+                expected_arity = int(output.value_arity)
+                recorded_arity = int(recorded_output.value_arity)
+                if recorded_arity != expected_arity:
+                    raise SemanticRigCompileError(
+                        f"Pose sample '{sample.label}' output '{output.label}' "
+                        f"records Vec{recorded_arity}, but the output expects "
+                        f"Vec{expected_arity}. Re-record or migrate the sample."
+                    )
+                if output.discrete and recorded_arity != 1:
+                    raise SemanticRigCompileError(
+                        f"Pose sample '{sample.label}' output '{output.label}' "
+                        "is discrete and must be scalar. Re-record or migrate "
+                        "the sample."
+                    )
         spec = pose_field_spec_from_property_group(stage)
         issues = validate_pose_field(spec)
         if issues:
@@ -268,7 +357,11 @@ def validate_chain_ik_source_ownership(armature, component, stages):
         )
         stage_ids = set()
         for stage in candidate_stages:
-            if not stage.enabled or stage.stage_type not in {"CHAIN_IK", "SPLINE"}:
+            if (
+                not stage.enabled
+                or stage.stage_type
+                not in {"CHAIN_FK", "CHAIN_IK", "SPLINE", "BBONE_BEZIER"}
+            ):
                 continue
             stage_ids.add(stage.stage_uuid)
             owner = (component_index, stage.stage_uuid)
@@ -338,8 +431,23 @@ def _ensure_projected_stage(armature, component, stage):
     )
 
 
+def _initialize_fk_widget(stage, presentation):
+    if stage.fk_widget_defaults_initialized:
+        return
+    presentation.live_preview = False
+    presentation.shape = "ELLIPSE"
+    presentation.width = 0.8
+    presentation.height = 0.8
+    presentation.segments = 64
+    stage.fk_widget_defaults_initialized = True
+
+
 def _ensure_ik_stage(armature, component, stage):
+    from .semantic_fk import ensure_fk_solver_layer
+
+    _initialize_fk_widget(stage, stage.fk_presentation)
     result = ensure_projected_ik_artifacts(armature, component, stage)
+    layer = ensure_fk_solver_layer(armature, component, stage, result)
     return SemanticStageBuildResult(
         stage_uuid=stage.stage_uuid,
         stage_type=stage.stage_type,
@@ -347,7 +455,25 @@ def _ensure_ik_stage(armature, component, stage):
         art_frame_bone=result.frames.art_frame_bone,
         display_frame_bone=result.frames.display_frame_bone,
         mechanism_frame_bone=(result.mechanism_bones[0] if result.mechanism_bones else ""),
+        # Contact pins the matched IK handle.  Pinning a post-solver bone
+        # cannot reposition the upstream joints of a connected source chain.
+        contact_output_bone=result.frames.control_bone,
         projection_source_bone=result.frames.control_bone,
+        projection_stage_uuid=stage.stage_uuid,
+    )
+
+
+def _ensure_fk_stage(armature, component, stage):
+    from .semantic_fk import ensure_standalone_fk_solver_layer
+
+    _initialize_fk_widget(stage, stage.presentation)
+    result = ensure_standalone_fk_solver_layer(armature, component, stage)
+    return SemanticStageBuildResult(
+        stage_uuid=stage.stage_uuid,
+        stage_type=stage.stage_type,
+        primary_control_bone=result.primary_control_bone,
+        mechanism_frame_bone=result.mechanism_frame_bone,
+        projection_source_bone=result.primary_control_bone,
         projection_stage_uuid=stage.stage_uuid,
     )
 
@@ -371,6 +497,9 @@ def _passthrough_stage_result(stage, dependencies):
     spline_infos = [
         result.spline_info for result in dependencies if result.spline_info is not None
     ]
+    bbone_infos = [
+        result.bbone_info for result in dependencies if result.bbone_info is not None
+    ]
     return SemanticStageBuildResult(
         stage_uuid=stage.stage_uuid,
         stage_type=stage.stage_type,
@@ -384,6 +513,9 @@ def _passthrough_stage_result(stage, dependencies):
         mechanism_frame_bone=_unique_result_value(
             dependencies, "mechanism_frame_bone"
         ),
+        contact_output_bone=_unique_result_value(
+            dependencies, "contact_output_bone"
+        ),
         projection_source_bone=_unique_result_value(
             dependencies, "projection_source_bone"
         ),
@@ -391,6 +523,7 @@ def _passthrough_stage_result(stage, dependencies):
             dependencies, "projection_stage_uuid"
         ),
         spline_info=spline_infos[0] if len(spline_infos) == 1 else None,
+        bbone_info=bbone_infos[0] if len(bbone_infos) == 1 else None,
     )
 
 
@@ -498,30 +631,18 @@ def _bind_pose_map_inputs(armature, stage, built_stages, stages_by_uuid):
 
 
 def _contact_default_driven(stage, dependencies):
-    auto_wired = bool(getattr(stage, "pin_driven_stage_uuid", ""))
-    if stage.pin_driven_bone and not auto_wired:
-        return "", ""
-    controls = {
-        result.primary_control_bone
-        for result in dependencies
-        if result.primary_control_bone
-    }
-    if len(controls) == 1:
-        control = next(iter(controls))
-        provider = next(
-            result.stage_uuid
-            for result in dependencies
-            if result.primary_control_bone == control
-        )
-        return control, provider
-    if not controls:
+    if len(dependencies) != 1 or dependencies[0].stage_type != "CHAIN_IK":
         raise SemanticRigCompileError(
-            f"Contact / Pin '{stage.label}' dependencies do not export a primary control."
+            f"Contact / Pin '{stage.label}' requires exactly one CHAIN_IK dependency."
         )
-    raise SemanticRigCompileError(
-        f"Contact / Pin '{stage.label}' dependencies export multiple controls; "
-        "set Driven Bone explicitly."
-    )
+    provider = dependencies[0]
+    control = provider.contact_output_bone or provider.primary_control_bone
+    if not control:
+        raise SemanticRigCompileError(
+            f"Contact / Pin '{stage.label}' CHAIN_IK dependency does not export "
+            "an IK control."
+        )
+    return control, provider.stage_uuid
 
 
 def _contact_stage_result(stage, pin, dependencies):
@@ -533,9 +654,11 @@ def _contact_stage_result(stage, pin, dependencies):
         art_frame_bone=inherited.art_frame_bone,
         display_frame_bone=inherited.display_frame_bone,
         mechanism_frame_bone=inherited.mechanism_frame_bone,
+        contact_output_bone=pin.driven_bone,
         projection_source_bone=inherited.projection_source_bone,
         projection_stage_uuid=inherited.projection_stage_uuid,
         spline_info=inherited.spline_info,
+        bbone_info=inherited.bbone_info,
     )
 
 
@@ -570,21 +693,57 @@ def _ensure_spline_stage(armature, component, stage, dependencies):
     )
 
 
+def _ensure_bbone_stage(armature, component, stage):
+    if not stage.bbone_widget_defaults_initialized:
+        stage.presentation.live_preview = False
+        stage.presentation.shape = "ELLIPSE"
+        stage.presentation.width = 0.68
+        stage.presentation.height = 0.68
+        stage.presentation.segments = 64
+        stage.handle_presentation.live_preview = False
+        stage.handle_presentation.shape = "TRIANGLE"
+        stage.handle_presentation.width = 0.72
+        stage.handle_presentation.height = 0.72
+        stage.handle_presentation.corner_radius = 0.08
+        stage.handle_presentation.segments = 64
+        stage.bbone_widget_defaults_initialized = True
+    bbone = ensure_bbone_bezier_artifacts(armature, component, stage)
+    return SemanticStageBuildResult(
+        stage_uuid=stage.stage_uuid,
+        stage_type=stage.stage_type,
+        primary_control_bone=bbone.primary_control_bone,
+        mechanism_frame_bone=bbone.effective_handle_bones[0],
+        projection_source_bone=bbone.primary_control_bone,
+        projection_stage_uuid=stage.stage_uuid,
+        bbone_info=bbone,
+    )
+
+
 def _ensure_secondary_stage(armature, component, stage, dependencies):
     spline_results = [
         result for result in dependencies if result.spline_info is not None
     ]
-    if len(spline_results) != 1:
+    bbone_results = [
+        result for result in dependencies if result.bbone_info is not None
+    ]
+    if len(spline_results) + len(bbone_results) != 1:
         raise SemanticRigCompileError(
-            f"Secondary Motion '{stage.label}' needs exactly one Spline dependency."
+            f"Secondary Motion '{stage.label}' needs exactly one Spline or "
+            "B-Bone Bezier dependency."
         )
     inherited = _passthrough_stage_result(stage, dependencies)
-    spline = spline_results[0].spline_info
+    spline = spline_results[0].spline_info if spline_results else None
+    bbone = bbone_results[0].bbone_info if bbone_results else None
+    default_sources = (
+        tuple(spline.control_bones)
+        if spline is not None
+        else tuple(bbone.secondary_control_bones)
+    )
     configured_sources = tuple(
         reference.bone_name
         for reference in stage.source_bones
         if reference.bone_name
-    ) or tuple(spline.control_bones)
+    ) or default_sources
     source_signature = "\n".join(configured_sources)
     if (
         stage.secondary_baked
@@ -598,28 +757,36 @@ def _ensure_secondary_stage(armature, component, stage, dependencies):
         armature,
         component,
         stage,
-        default_source_bones=spline.control_bones,
+        default_source_bones=default_sources,
     )
-    if len(secondary.output_bones) != len(spline.hook_bindings):
+    expected_count = (
+        len(spline.hook_bindings)
+        if spline is not None
+        else len(bbone.secondary_control_bones)
+    )
+    if len(secondary.output_bones) != expected_count:
         raise SemanticRigCompileError(
             f"Secondary Motion '{stage.label}' has {len(secondary.output_bones)} "
-            f"outputs for {len(spline.hook_bindings)} Spline points."
+            f"outputs for {expected_count} upstream controls."
         )
     # Pinned endpoints stay authored controls; every movable point receives
     # the corresponding deterministic SIM output.  This keeps root/tip pin
     # policy independent from the spring layer.
-    hook_targets = tuple(
-        binding.bone_name if binding.pinned else output_bone
-        for binding, output_bone in zip(
-            spline.hook_bindings, secondary.output_bones
+    if spline is not None:
+        hook_targets = tuple(
+            binding.bone_name if binding.pinned else output_bone
+            for binding, output_bone in zip(
+                spline.hook_bindings, secondary.output_bones
+            )
         )
-    )
-    retarget_spline_hooks(
-        spline.curve_object,
-        hook_targets,
-        armature=armature,
-        hook_names=spline.hook_modifiers,
-    )
+        retarget_spline_hooks(
+            spline.curve_object,
+            hook_targets,
+            armature=armature,
+            hook_names=spline.hook_modifiers,
+        )
+    else:
+        retarget_bbone_handles(armature, bbone, secondary.output_bones)
     return SemanticStageBuildResult(
         stage_uuid=stage.stage_uuid,
         stage_type=stage.stage_type,
@@ -631,9 +798,11 @@ def _ensure_secondary_stage(armature, component, stage, dependencies):
             if secondary.output_bones
             else inherited.mechanism_frame_bone
         ),
+        contact_output_bone=inherited.contact_output_bone,
         projection_source_bone=inherited.projection_source_bone,
         projection_stage_uuid=inherited.projection_stage_uuid,
         spline_info=spline,
+        bbone_info=bbone,
     )
 
 
@@ -653,14 +822,29 @@ def _expected_presentation_roles(stages):
         if not getattr(stage, "enabled", True):
             continue
         presentations = []
-        if stage.stage_type in {"PROJECTED_TRANSFORM", "CHAIN_IK"}:
+        if stage.stage_type == "CHAIN_FK":
+            presentation = getattr(stage, "presentation", None)
+            if presentation is not None:
+                presentations.append(("FK_CONTROL", presentation))
+        elif stage.stage_type in {"PROJECTED_TRANSFORM", "CHAIN_IK"}:
             presentation = getattr(stage, "presentation", None)
             if presentation is not None:
                 presentations.append(("PRIMARY", presentation))
+            if stage.stage_type == "CHAIN_IK":
+                fk_presentation = getattr(stage, "fk_presentation", None)
+                if fk_presentation is not None:
+                    presentations.append(("FK_CONTROL", fk_presentation))
         elif stage.stage_type == "SPLINE":
             presentation = getattr(stage, "presentation", None)
             if presentation is not None:
                 presentations.append(("SPLINE_CONTROL", presentation))
+        elif stage.stage_type == "BBONE_BEZIER":
+            point_presentation = getattr(stage, "presentation", None)
+            handle_presentation = getattr(stage, "handle_presentation", None)
+            if point_presentation is not None:
+                presentations.append(("BBONE_POINT", point_presentation))
+            if handle_presentation is not None:
+                presentations.append(("BBONE_HANDLE", handle_presentation))
         if stage.stage_type == "CHAIN_IK" and stage.use_pole:
             pole_presentation = getattr(stage, "pole_presentation", None)
             if pole_presentation is not None:
@@ -697,12 +881,37 @@ def _expected_stage_roles(component, stages, built_stages=None):
                     role("display_plane_limit"),
                 }
             )
-        if stage.stage_type == "CHAIN_IK":
+        if stage.stage_type == "CHAIN_FK":
             count = len(stage.source_bones) or len(component.source_bones)
-            expected.add(role("ik_constraint"))
             for index in range(count):
                 expected.update(
                     {
+                        role(f"fk_control:{index}"),
+                        role(f"source_bone:{index}"),
+                        role(f"source_presentation:{index}"),
+                    }
+                )
+            expected.update(
+                {
+                    role("fk_output"),
+                    role("fk_output_follow"),
+                }
+            )
+        elif stage.stage_type == "CHAIN_IK":
+            count = len(stage.source_bones) or len(component.source_bones)
+            expected.update(
+                {
+                    role("ik_constraint"),
+                    role("ik_orientation"),
+                    role("ik_end_rotation"),
+                    role("fk_contact_end_rotation"),
+                }
+            )
+            for index in range(count):
+                expected.update(
+                    {
+                        role(f"fk_control:{index}"),
+                        role(f"fk_follow:{index}"),
                         role(f"mechanism_bone:{index}"),
                         role(f"presentation_bone:{index}"),
                         role(f"presentation_copy:{index}"),
@@ -736,6 +945,14 @@ def _expected_stage_roles(component, stages, built_stages=None):
                     role("pin_property"),
                 }
             )
+            if stage.pin_position and stage.pin_orientation:
+                expected.update(
+                    {
+                        role("pin_orientation_anchor"),
+                        role("pin_orientation_constraint"),
+                        role("pin_orientation_influence_driver"),
+                    }
+                )
         elif stage.stage_type == "SPLINE":
             source_count = len(stage.source_bones) or len(component.source_bones)
             control_count = int(stage.spline_control_count)
@@ -770,13 +987,42 @@ def _expected_stage_roles(component, stages, built_stages=None):
                         role(f"spline_hook:{index}"),
                     }
                 )
+        elif stage.stage_type == "BBONE_BEZIER":
+            expected.update(
+                {
+                    role("bbone_source_state"),
+                    role("bbone_point:start"),
+                    role("bbone_point:end"),
+                    role("bbone_handle:out"),
+                    role("bbone_handle:in"),
+                    role("bbone_effective_handle:start"),
+                    role("bbone_effective_handle:end"),
+                    role("bbone_start_follow"),
+                    role("bbone_end_stretch"),
+                    role("bbone_handle_follow:start"),
+                    role("bbone_handle_follow:end"),
+                    role("bbone_roll_driver:in"),
+                    role("bbone_roll_driver:out"),
+                }
+            )
+            if stage.bbone_use_mid_control:
+                expected.update(
+                    {
+                        role("bbone_point:mid"),
+                        role("bbone_mid_pull:start"),
+                        role("bbone_mid_pull:end"),
+                    }
+                )
         elif stage.stage_type == "SECONDARY_MOTION":
             built = (built_stages or {}).get(stage.stage_uuid)
             spline = built.spline_info if built is not None else None
+            bbone = built.bbone_info if built is not None else None
             # A successful Secondary build is required to match the Spline's
             # Hook/control count.  Use that reconciled result when available,
             # including through pass-through Pose Map or Contact stages.
             source_count = len(spline.control_bones) if spline is not None else 0
+            if not source_count and bbone is not None:
+                source_count = len(bbone.secondary_control_bones)
             if not source_count:
                 source_count = len(stage.source_bones)
             if not source_count:
@@ -786,15 +1032,16 @@ def _expected_stage_roles(component, stages, built_stages=None):
                         candidate
                         for candidate in stages
                         if candidate.stage_uuid in dependencies
-                        and candidate.stage_type == "SPLINE"
+                        and candidate.stage_type in {"SPLINE", "BBONE_BEZIER"}
                     ),
                     None,
                 )
-                source_count = (
-                    int(dependency.spline_control_count)
-                    if dependency is not None
-                    else len(component.source_bones)
-                )
+                if dependency is not None and dependency.stage_type == "SPLINE":
+                    source_count = int(dependency.spline_control_count)
+                elif dependency is not None:
+                    source_count = 2 + int(dependency.bbone_use_mid_control)
+                else:
+                    source_count = len(component.source_bones)
             for index in range(source_count):
                 expected.update(
                     {
@@ -896,21 +1143,34 @@ def _semantic_constraint_type(role):
     detail = ":".join(str(role).split(":")[2:])
     if detail == "ik_constraint":
         return "IK"
+    if detail == "ik_end_rotation":
+        return "COPY_ROTATION"
     if detail == "pole_distance_constraint":
         return "LIMIT_DISTANCE"
     if detail == "spline_ik_constraint":
         return "SPLINE_IK"
-    if detail == "display_follow":
+    if detail in {"display_follow", "bbone_start_follow"}:
         return "COPY_LOCATION"
-    if detail.startswith(("joint_copy:", "presentation_copy:")):
+    if detail.startswith(
+        ("joint_copy:", "presentation_copy:", "bbone_mid_pull:")
+    ):
         return "COPY_LOCATION"
     if detail == "display_plane_limit":
         return "LIMIT_LOCATION"
     if detail.startswith("joint_plane_limit:"):
         return "LIMIT_LOCATION"
-    if detail.startswith("presentation_stretch:"):
+    if detail == "bbone_end_stretch" or detail.startswith(
+        "presentation_stretch:"
+    ):
         return "STRETCH_TO"
-    if detail.startswith(("source_presentation:", "secondary_follow:")):
+    if detail.startswith(
+        (
+            "source_presentation:",
+            "secondary_follow:",
+            "fk_follow:",
+            "bbone_handle_follow:",
+        )
+    ):
         return "COPY_TRANSFORMS"
     return ""
 
@@ -1070,6 +1330,25 @@ def _cleanup_obsolete_stage_artifacts(armature, component, expected_roles):
         if artifact.role.startswith("semantic:")
         and artifact.role not in expected_roles
     ]
+    # Restore raw source B-Bone settings before deleting its generated custom
+    # handles.  The live marker on the source bone is authoritative; the
+    # serialized artifact name is only a cleanup index.
+    restored_bbone_stages = set()
+    for item in obsolete:
+        if not item["owned"] or item["data_type"] != "BBONE_STATE":
+            continue
+        prefix, _separator, _leaf = item["role"].rpartition(":")
+        stage_uuid = item["binding_uuid"] or prefix.removeprefix("semantic:")
+        if stage_uuid and stage_uuid not in restored_bbone_stages:
+            restored = restore_bbone_stage_state(
+                armature, component, stage_uuid
+            )
+            if not restored and item["bone_name"] in armature.data.bones:
+                raise SemanticRigCompileError(
+                    "B-Bone source ownership marker is missing; refusing to "
+                    "delete its custom handles."
+                )
+            restored_bbone_stages.add(stage_uuid)
     # NLA tracks own users of their Actions, so remove them before Actions.
     for item in obsolete:
         if item["owned"] and item["data_type"] == "NLA_TRACK":
@@ -1183,6 +1462,10 @@ def _cleanup_obsolete_stage_artifacts(armature, component, expected_roles):
         if data_type == "DRIVER":
             if role.endswith(":pin_influence_driver"):
                 # Removed from the cached live constraint in the Pin pre-pass.
+                continue
+            if ":bbone_roll_driver:" in role:
+                # ``restore_bbone_stage_state`` removed this before restoring
+                # the driven source RNA in the B-Bone pre-pass above.
                 continue
             prefix, _separator, _leaf = role.rpartition(":")
             constraint_role = f"{prefix}:pin_constraint"
@@ -1305,6 +1588,8 @@ def compile_semantic_component(armature, component):
     _validate_sources(armature, component)
     _validate_pose_map_samples(stages)
     _preflight_stage_wiring(stages)
+    _validate_contact_ik_dependencies(stages)
+    _validate_explicit_contact_driven_bones(armature, component, stages)
     validate_chain_ik_source_ownership(armature, component, stages)
     try:
         validate_pin_ranges(component)
@@ -1336,6 +1621,17 @@ def compile_semantic_component(armature, component):
                 "curve_object": stage.curve_object,
                 "secondary_baked": stage.secondary_baked,
                 "secondary_source_signature": stage.secondary_source_signature,
+                "bbone_start_bone": stage.bbone_start_bone,
+                "bbone_end_bone": stage.bbone_end_bone,
+                "bbone_handle_out_bone": stage.bbone_handle_out_bone,
+                "bbone_handle_in_bone": stage.bbone_handle_in_bone,
+                "bbone_mid_bone": stage.bbone_mid_bone,
+                "bbone_widget_defaults_initialized": (
+                    stage.bbone_widget_defaults_initialized
+                ),
+                "fk_widget_defaults_initialized": (
+                    stage.fk_widget_defaults_initialized
+                ),
             }
             for stage in component.semantic_stages
         }
@@ -1354,28 +1650,72 @@ def compile_semantic_component(armature, component):
                         stages_by_uuid,
                     )
                     result = _passthrough_stage_result(stage, dependencies)
+                elif stage.stage_type == "CHAIN_FK":
+                    result = _ensure_fk_stage(armature, component, stage)
                 elif stage.stage_type == "CHAIN_IK":
                     result = _ensure_ik_stage(armature, component, stage)
                 elif stage.stage_type == "CONTACT_PIN":
-                    default_driven, provider_uuid = _contact_default_driven(
-                        stage, dependencies
-                    )
-                    if provider_uuid:
-                        # Remove the prior compiled default so the contact
-                        # builder cannot accidentally prefer a stale field.
-                        stage.pin_driven_bone = ""
-                    pin = ensure_contact_pin_artifacts(
-                        armature,
-                        component,
-                        stage,
-                        default_driven_bone=default_driven,
-                    )
-                    stage.pin_driven_stage_uuid = provider_uuid
+                    if contact_uses_ik_override(stage):
+                        default_driven, provider_uuid = _contact_default_driven(
+                            stage, dependencies
+                        )
+                        if provider_uuid:
+                            # Remove the prior compiled default so the contact
+                            # builder cannot accidentally prefer a stale field.
+                            stage.pin_driven_bone = ""
+                        from .semantic_fk import (
+                            ensure_fk_solver_drivers,
+                            resolve_fk_solver_layer,
+                        )
+
+                        provider_stage = stages_by_uuid[provider_uuid]
+                        provider_layer = resolve_fk_solver_layer(
+                            armature,
+                            component,
+                            provider_stage,
+                        )
+                        default_driven = (
+                            provider_layer.ik_control_bone
+                            if stage.pin_position
+                            else provider_layer.orientation_bone
+                        )
+                        pin = ensure_contact_pin_artifacts(
+                            armature,
+                            component,
+                            stage,
+                            default_driven_bone=default_driven,
+                            orientation_driven_bone=provider_layer.orientation_bone,
+                        )
+                        # ``pin_driven_bone`` intentionally clears this identity
+                        # through its UI-edit callback.  The builder assigns that
+                        # same RNA property while resolving the dependency, so
+                        # restore the proven automatic provider only after the
+                        # concrete IK control name has settled.  A later user edit
+                        # still runs the callback and takes ownership explicitly.
+                        stage.pin_driven_stage_uuid = provider_uuid
+                        ensure_fk_solver_drivers(
+                            armature,
+                            component,
+                            provider_stage,
+                            contact_stage=stage,
+                        )
+                    else:
+                        # Explicit generic Pin is a legacy range-keyed world /
+                        # character / target-space constraint on an unconnected
+                        # control.  It intentionally has no hidden IK override.
+                        pin = ensure_contact_pin_artifacts(
+                            armature,
+                            component,
+                            stage,
+                            default_driven_bone=stage.pin_driven_bone,
+                        )
                     result = _contact_stage_result(stage, pin, dependencies)
                 elif stage.stage_type == "SPLINE":
                     result = _ensure_spline_stage(
                         armature, component, stage, dependencies
                     )
+                elif stage.stage_type == "BBONE_BEZIER":
+                    result = _ensure_bbone_stage(armature, component, stage)
                 elif stage.stage_type == "SECONDARY_MOTION":
                     result = _ensure_secondary_stage(
                         armature, component, stage, dependencies
@@ -1408,7 +1748,8 @@ def compile_semantic_component(armature, component):
             )
             if primary_result is None:
                 raise SemanticRigCompileError(
-                    "Add a Projected Transform, Kinematic Chain, or Spline input stage."
+                    "Add a Projected Transform, FK/IK Chain, Spline, or "
+                    "B-Bone Bezier input stage."
                 )
             # Backwards-compatible summary fields only.  DAG connections above
             # always resolve through ``built_stages`` and never read these.
@@ -1435,6 +1776,12 @@ def compile_semantic_component(armature, component):
                 ):
                     candidate.secondary_baked = False
                     candidate.secondary_source_signature = ""
+            # Legacy versions keyed solver constraint influences directly.
+            # Remove those curves only after every failure-prone compile step
+            # has succeeded, so a failed migration leaves animator data exact.
+            from .semantic_fk import finalize_fk_solver_action_migration
+
+            finalize_fk_solver_action_migration(armature, component, stages)
         except Exception as exc:
             structural_error = None
             try:

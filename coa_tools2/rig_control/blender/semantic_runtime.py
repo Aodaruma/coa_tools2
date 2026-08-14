@@ -31,6 +31,7 @@ from ..pose_field import (
 
 
 CONTINUOUS_NAMESPACE_NAME = "coa_pose_field_scalar"
+CONTINUOUS_COMPONENT_NAMESPACE_NAME = "coa_pose_field_component"
 DISCRETE_NAMESPACE_NAME = "coa_pose_field_discrete"
 
 
@@ -713,6 +714,47 @@ def evaluate_continuous_scalar(
     return result if math.isfinite(result) else 0.0
 
 
+def evaluate_continuous_component(
+    rig_instance_uuid: str,
+    component_uuid: str,
+    stage_uuid: str,
+    output_id: str,
+    component_index: int,
+    *query_values: float,
+) -> float:
+    """Driver-safe lookup for one component of a vector pose-field output.
+
+    Blender stores one FCurve per RNA array component.  Keeping the vector as
+    one semantic output preserves atomic authoring and rollback while this
+    adapter exposes the requested scalar to each generated FCurve.
+    """
+
+    key = PoseFieldRuntimeKey(
+        str(rig_instance_uuid), str(component_uuid), str(stage_uuid), str(output_id)
+    )
+    spec = _resolve_spec(key)
+    query = _runtime_query(key, spec, query_values) if spec is not None else None
+    if spec is None or query is None:
+        return 0.0
+    try:
+        evaluated = evaluate_pose_field(spec, query).outputs
+        resolved_id = next(
+            (
+                item.output_id
+                for item in evaluated.continuous
+                if _id_matches(item.output_id, key.output_id)
+            ),
+            key.output_id,
+        )
+        output = evaluated.continuous_value(resolved_id)
+        values = output if isinstance(output, tuple) else (output,)
+        value = values[int(component_index)]
+        result = float(value)
+    except (ArithmeticError, IndexError, KeyError, TypeError, ValueError):
+        return 0.0
+    return result if math.isfinite(result) else 0.0
+
+
 def evaluate_discrete_scalar(
     rig_instance_uuid: str,
     component_uuid: str,
@@ -753,12 +795,16 @@ def pose_field_driver_expression(
     input_expressions: Sequence[str],
     *,
     discrete: bool = False,
+    component_index: int | None = None,
 ) -> str:
     """Return a rename-safe scripted-driver expression for a scalar output."""
 
-    function_name = (
-        DISCRETE_NAMESPACE_NAME if discrete else CONTINUOUS_NAMESPACE_NAME
-    )
+    if discrete:
+        function_name = DISCRETE_NAMESPACE_NAME
+    elif component_index is not None:
+        function_name = CONTINUOUS_COMPONENT_NAMESPACE_NAME
+    else:
+        function_name = CONTINUOUS_NAMESPACE_NAME
     identifiers = tuple(_stable_token(value) for value in (
         rig_instance_uuid,
         component_uuid,
@@ -766,6 +812,8 @@ def pose_field_driver_expression(
         output_id,
     ))
     arguments = [json.dumps(str(value)) for value in identifiers]
+    if component_index is not None and not discrete:
+        arguments.append(str(int(component_index)))
     arguments.extend(str(expression) for expression in input_expressions)
     return f"{function_name}({','.join(arguments)})"
 
@@ -773,15 +821,25 @@ def pose_field_driver_expression(
 def register_driver_namespace() -> None:
     """Install runtime callables into Blender's scripted-driver namespace."""
 
+    from .state_runtime import register_graph_driver_namespace
+
     bpy.app.driver_namespace[CONTINUOUS_NAMESPACE_NAME] = evaluate_continuous_scalar
+    bpy.app.driver_namespace[CONTINUOUS_COMPONENT_NAMESPACE_NAME] = (
+        evaluate_continuous_component
+    )
     bpy.app.driver_namespace[DISCRETE_NAMESPACE_NAME] = evaluate_discrete_scalar
+    register_graph_driver_namespace()
 
 
 def unregister_driver_namespace() -> None:
     """Remove runtime callables and all cached RNA references/specifications."""
 
+    from .state_runtime import unregister_graph_driver_namespace
+
     bpy.app.driver_namespace.pop(CONTINUOUS_NAMESPACE_NAME, None)
+    bpy.app.driver_namespace.pop(CONTINUOUS_COMPONENT_NAMESPACE_NAME, None)
     bpy.app.driver_namespace.pop(DISCRETE_NAMESPACE_NAME, None)
+    unregister_graph_driver_namespace()
     clear_pose_field_cache()
 
 

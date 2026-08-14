@@ -13,6 +13,9 @@ from rig_control.schema import (  # noqa: E402
     ControlAxis,
     ControlSpec,
     ControlType,
+    GraphInterpolation,
+    GraphPointShape,
+    LipSyncPreset,
     StateCellSpec,
     StateDataSpec,
     StateMixPolicy,
@@ -23,10 +26,15 @@ from rig_control.schema import (  # noqa: E402
     WidgetSpec,
     dial_point,
     dial_rest_angle,
+    graph_fallback_edges,
+    graph_state_weights,
+    lip_sync_preset_points,
+    resolve_phoneme_viseme,
     state_point_position,
     summarize_state_mix,
     state_weights,
     validate_state_cells,
+    validate_graph_state_points,
     validate_state_points,
 )
 from rig_control.component_schema import (  # noqa: E402
@@ -64,6 +72,19 @@ class RigControlSchemaTests(unittest.TestCase):
             stroke_radius=0.05,
         )
         self.assertEqual(spec, WidgetSpec.from_dict(spec.to_dict()))
+
+        graph = WidgetSpec(
+            widget_uuid="widget-graph",
+            layout=WidgetLayout.GRAPH,
+            graph_points=((0.0, 0.0), (1.0, 1.0)),
+            graph_edges=((0, 1),),
+            graph_point_shapes=(
+                GraphPointShape.CIRCLE,
+                GraphPointShape.CUSTOM_OBJECT,
+            ),
+            graph_custom_object_names=("", "WGT_CustomMouth"),
+        )
+        self.assertEqual(graph, WidgetSpec.from_dict(graph.to_dict()))
 
     def test_tip_radius_defaults_to_twice_node_radius(self):
         spec = WidgetSpec(widget_uuid="widget-tip", layout=WidgetLayout.TIP)
@@ -291,6 +312,103 @@ class RigControlSchemaTests(unittest.TestCase):
         self.assertEqual(
             ("state.unassigned_point",),
             validate_state_points(points, 2, 1),
+        )
+
+    def test_graph_state_round_trip_edges_and_weights(self):
+        points = (
+            StatePointSpec(
+                "rest",
+                "mouth",
+                0,
+                0,
+                display_name="REST",
+                target_object_name="Face",
+                target_name="Mouth_REST",
+                position=(0.5, 0.0),
+                point_shape=GraphPointShape.DIAMOND,
+            ),
+            StatePointSpec(
+                "wide",
+                "mouth",
+                1,
+                0,
+                display_name="WIDE",
+                target_object_name="Face",
+                target_name="Mouth_WIDE",
+                position=(0.0, 1.0),
+                fallback_state_uuid="rest",
+            ),
+            StatePointSpec(
+                "round",
+                "mouth",
+                2,
+                0,
+                display_name="ROUND",
+                target_object_name="Face",
+                target_name="Mouth_ROUND",
+                position=(1.0, 1.0),
+                fallback_state_uuid="rest",
+                target_name_candidates=("Mouth_ROUND", "mouth_round"),
+                phoneme_aliases=("O", "U"),
+            ),
+        )
+        spec = StateDataSpec(
+            control_uuid="mouth",
+            mode=StateMode.GRAPH_2D,
+            columns=3,
+            rows=1,
+            points=points,
+            graph_interpolation=GraphInterpolation.HYBRID,
+            graph_radius=0.8,
+            lip_sync_preset=LipSyncPreset.STANDARD_2D,
+        )
+        self.assertEqual(spec, StateDataSpec.from_dict(spec.to_dict()))
+        self.assertEqual(((0, 1), (0, 2)), graph_fallback_edges(points))
+        self.assertEqual((), validate_graph_state_points(points))
+
+        at_round = graph_state_weights(
+            1.0,
+            1.0,
+            points,
+            GraphInterpolation.MAP_2D,
+            0.8,
+        )
+        self.assertEqual((0.0, 0.0, 1.0), at_round)
+        on_rest_round = graph_state_weights(
+            0.75,
+            0.5,
+            points,
+            GraphInterpolation.NAMED_GRAPH,
+        )
+        self.assertAlmostEqual(1.0, sum(on_rest_round))
+        self.assertAlmostEqual(0.5, on_rest_round[0])
+        self.assertAlmostEqual(0.5, on_rest_round[2])
+
+    def test_lip_sync_presets_are_target_agnostic_and_have_alias_fallbacks(self):
+        self.assertEqual(
+            ("REST", "A_E", "I", "U_O"),
+            tuple(
+                point.name
+                for point in lip_sync_preset_points(LipSyncPreset.MINIMAL)
+            ),
+        )
+        self.assertEqual(
+            ("REST", "A", "I", "U", "E", "O", "MBP"),
+            tuple(
+                point.name
+                for point in lip_sync_preset_points(LipSyncPreset.JP_VOWELS_MBP)
+            ),
+        )
+        advanced = lip_sync_preset_points(LipSyncPreset.ADVANCED_PHONEME)
+        self.assertEqual(10, len(advanced))
+        self.assertTrue(all(point.target_name_candidates for point in advanced))
+        self.assertEqual(
+            "FV",
+            resolve_phoneme_viseme("f", LipSyncPreset.ADVANCED_PHONEME),
+        )
+        self.assertEqual(
+            "ETC",
+            resolve_phoneme_viseme("unknown", LipSyncPreset.ADVANCED_PHONEME),
         )
 
     def test_invalid_specs_produce_structured_issues(self):

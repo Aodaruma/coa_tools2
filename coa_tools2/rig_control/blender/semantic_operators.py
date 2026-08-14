@@ -23,7 +23,13 @@ from .semantic_outputs import (
     set_semantic_output_value,
 )
 from .semantic_runtime import clear_pose_field_cache
-from .semantic_contact import key_pin_range
+from .semantic_contact import (
+    contact_uses_ik_override,
+    key_pin_range,
+    switch_contact_pin,
+)
+from .semantic_bbone import retarget_bbone_handles
+from .semantic_fk import switch_ik_fk_mode
 from .semantic_secondary import bake_secondary_motion
 from .semantic_spline import retarget_spline_hooks
 
@@ -33,19 +39,19 @@ def _armature(context):
     return obj if obj is not None and obj.type == "ARMATURE" else None
 
 
-def _active_component(context):
+def _active_component(context, *, migrate=True):
     armature = _armature(context)
     if armature is None:
         return None, None
-    rig_data = get_rig_data(armature)
+    rig_data = get_rig_data(armature, migrate=migrate)
     if not rig_data.rig_components:
         return armature, None
     index = min(rig_data.rig_components_index, len(rig_data.rig_components) - 1)
     return armature, rig_data.rig_components[index]
 
 
-def _active_stage(context, *, stage_type=None):
-    armature, component = _active_component(context)
+def _active_stage(context, *, stage_type=None, migrate=True):
+    armature, component = _active_component(context, migrate=migrate)
     if component is None or component.component_type != "SEMANTIC":
         return armature, component, None
     if not component.semantic_stages:
@@ -115,6 +121,18 @@ def _restore_sample(stage, snapshot, index):
 def _slug(value):
     value = re.sub(r"[^0-9A-Za-z_]+", "_", value.strip().lower()).strip("_")
     return value or "semantic_rig"
+
+
+def _semantic_sample_payload(output, captured):
+    values = tuple(captured) if isinstance(captured, (tuple, list)) else (captured,)
+    arity = int(output.value_arity)
+    if len(values) != arity:
+        raise SemanticOutputError(
+            f"Output '{output.label}' expected {arity} values, got {len(values)}."
+        )
+    padded = tuple(float(value) for value in values) + (0.0,) * (4 - arity)
+    discrete_value = str(int(round(values[0]))) if output.discrete else ""
+    return padded[:4], arity, discrete_value
 
 
 def _selected_chain(context):
@@ -188,7 +206,11 @@ def _constraint_items(self, _context):
 
 
 def _dependency_stage_items(self, context):
-    _armature, component, stage = _active_stage(context, stage_type="POSE_MAP")
+    _armature, component, stage = _active_stage(
+        context,
+        stage_type="POSE_MAP",
+        migrate=False,
+    )
     items = [
         (
             "AUTO",
@@ -298,9 +320,11 @@ class COATOOLS2_OT_AddSemanticStage(bpy.types.Operator):
         items=(
             ("PROJECTED_TRANSFORM", "Projected Transform", ""),
             ("POSE_MAP", "Recorded Pose Map", ""),
+            ("CHAIN_FK", "FK Chain", ""),
             ("CHAIN_IK", "Kinematic Chain", ""),
             ("CONTACT_PIN", "Contact / Pin", ""),
             ("SPLINE", "Spline Chain", ""),
+            ("BBONE_BEZIER", "B-Bone Bezier", ""),
             ("SECONDARY_MOTION", "Secondary Motion", ""),
         ),
         default="POSE_MAP",
@@ -309,7 +333,7 @@ class COATOOLS2_OT_AddSemanticStage(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        _arm, component = _active_component(context)
+        _arm, component = _active_component(context, migrate=False)
         return component is not None and component.component_type == "SEMANTIC"
 
     def invoke(self, context, _event):
@@ -326,10 +350,26 @@ class COATOOLS2_OT_AddSemanticStage(bpy.types.Operator):
         # secondary layers inherit their inputs through ``depends_on`` instead;
         # copying the component chain into those layers would silently bypass
         # the graph connection (notably Spline -> Secondary).
-        if self.stage_type in {"PROJECTED_TRANSFORM", "CHAIN_IK", "SPLINE"}:
-            for source in component.source_bones:
+        if self.stage_type in {
+            "PROJECTED_TRANSFORM",
+            "CHAIN_FK",
+            "CHAIN_IK",
+            "SPLINE",
+            "BBONE_BEZIER",
+        }:
+            sources = tuple(component.source_bones)
+            if self.stage_type == "BBONE_BEZIER":
+                active = context.active_pose_bone
+                if active is not None:
+                    sources = (active,)
+                elif len(sources) != 1:
+                    sources = ()
+            for source in sources:
                 reference = stage.source_bones.add()
-                reference.bone_name = source.bone_name
+                reference.bone_name = (
+                    getattr(source, "bone_name", "")
+                    or getattr(source, "name", "")
+                )
         if component.semantic_stages:
             predecessors = [item for item in component.semantic_stages if item != stage]
             if predecessors:
@@ -352,12 +392,18 @@ class COATOOLS2_OT_AssignSemanticStageChain(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        _armature, _component, stage = _active_stage(context)
+        _armature, _component, stage = _active_stage(context, migrate=False)
         return (
             context.mode == "POSE"
             and stage is not None
             and stage.stage_type
-            in {"PROJECTED_TRANSFORM", "CHAIN_IK", "SPLINE"}
+            in {
+                "PROJECTED_TRANSFORM",
+                "CHAIN_FK",
+                "CHAIN_IK",
+                "SPLINE",
+                "BBONE_BEZIER",
+            }
             and bool(_selected_chain(context))
         )
 
@@ -366,6 +412,9 @@ class COATOOLS2_OT_AssignSemanticStageChain(bpy.types.Operator):
         chain = _selected_chain(context)
         if component is None or stage is None or not chain:
             self.report({"ERROR"}, "Select one connected source chain in Pose Mode.")
+            return {"CANCELLED"}
+        if stage.stage_type == "BBONE_BEZIER" and len(chain) != 1:
+            self.report({"ERROR"}, "B-Bone Bezier requires exactly one selected bone.")
             return {"CANCELLED"}
         stage.source_bones.clear()
         for bone_name in chain:
@@ -402,7 +451,11 @@ class COATOOLS2_OT_AddSemanticInput(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        return _active_stage(context, stage_type="POSE_MAP")[2] is not None
+        return _active_stage(
+            context,
+            stage_type="POSE_MAP",
+            migrate=False,
+        )[2] is not None
 
     def invoke(self, context, _event):
         _armature, _component, stage = _active_stage(
@@ -486,11 +539,22 @@ class COATOOLS2_OT_AddSemanticOutput(bpy.types.Operator):
     target_constraint: StringProperty()
     data_path: StringProperty()
     array_index: IntProperty(default=0, min=-1, max=3)
+    value_arity: IntProperty(
+        name="Components",
+        description="Record and drive one logical scalar or vector output",
+        default=1,
+        min=1,
+        max=4,
+    )
     discrete: BoolProperty(default=False)
 
     @classmethod
     def poll(cls, context):
-        return _active_stage(context, stage_type="POSE_MAP")[2] is not None
+        return _active_stage(
+            context,
+            stage_type="POSE_MAP",
+            migrate=False,
+        )[2] is not None
 
     def invoke(self, context, _event):
         armature, _component, _stage = _active_stage(context, stage_type="POSE_MAP")
@@ -537,9 +601,11 @@ class COATOOLS2_OT_AddSemanticOutput(bpy.types.Operator):
                     layout.prop(self, "target_constraint", text="Constraint")
             else:
                 layout.prop(self, "array_index", text="Axis")
+                layout.prop(self, "value_arity")
         elif self.target_kind == "CUSTOM_PROPERTY":
             layout.prop(self, "data_path")
             layout.prop(self, "array_index")
+            layout.prop(self, "value_arity")
         layout.prop(self, "discrete")
 
     def execute(self, context):
@@ -559,16 +625,26 @@ class COATOOLS2_OT_AddSemanticOutput(bpy.types.Operator):
         output.data_path = self.data_path
         output.array_index = self.array_index
         output.discrete = self.discrete or self.target_kind in {"SLOT_INDEX", "Z_VALUE"}
+        output.value_arity = (
+            min(3, self.value_arity)
+            if self.target_kind in {"BONE_LOCATION", "BONE_ROTATION"}
+            else self.value_arity
+        )
+        if output.discrete or self.target_kind in {
+            "SHAPE_KEY", "CONSTRAINT_INFLUENCE", "SLOT_INDEX", "Z_VALUE"
+        }:
+            output.value_arity = 1
         try:
             captured = capture_semantic_output_value(armature, output)
+            payload, arity, discrete_value = _semantic_sample_payload(
+                output, captured
+            )
             for sample in stage.samples:
                 value = sample.outputs.add()
                 value.output_uuid = output.output_uuid
-                value.value = (captured, 0.0, 0.0, 0.0)
-                value.value_arity = 1
-                value.discrete_value = (
-                    str(int(round(captured))) if output.discrete else ""
-                )
+                value.value = payload
+                value.value_arity = arity
+                value.discrete_value = discrete_value
             compile_component(armature, component)
         except Exception as exc:
             traceback.print_exc()
@@ -594,7 +670,11 @@ class COATOOLS2_OT_BeginSemanticSample(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        _arm, component, stage = _active_stage(context, stage_type="POSE_MAP")
+        _arm, component, stage = _active_stage(
+            context,
+            stage_type="POSE_MAP",
+            migrate=False,
+        )
         return stage is not None and bool(stage.outputs) and not component.semantic_edit_sample_uuid
 
     def execute(self, context):
@@ -616,11 +696,14 @@ class COATOOLS2_OT_BeginSemanticSample(bpy.types.Operator):
                 value.channel_id = channel.channel_uuid or channel.channel_id
                 value.value = capture_semantic_input_value(armature, channel)
             for output, captured in captured_outputs:
+                payload, arity, discrete_value = _semantic_sample_payload(
+                    output, captured
+                )
                 value = sample.outputs.add()
                 value.output_uuid = output.output_uuid
-                value.value = (captured, 0.0, 0.0, 0.0)
-                value.value_arity = 1
-                value.discrete_value = str(int(round(captured))) if output.discrete else ""
+                value.value = payload
+                value.value_arity = arity
+                value.discrete_value = discrete_value
                 remove_semantic_output_drivers(armature, output.output_uuid)
                 set_semantic_output_value(armature, output, captured)
         except Exception as exc:
@@ -649,7 +732,7 @@ class COATOOLS2_OT_CommitSemanticSample(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        _arm, component = _active_component(context)
+        _arm, component = _active_component(context, migrate=False)
         return (
             component is not None
             and bool(component.semantic_edit_sample_uuid)
@@ -678,11 +761,14 @@ class COATOOLS2_OT_CommitSemanticSample(bpy.types.Operator):
             )
             sample.outputs.clear()
             for output, captured in captured_outputs:
+                payload, arity, discrete_value = _semantic_sample_payload(
+                    output, captured
+                )
                 value = sample.outputs.add()
                 value.output_uuid = output.output_uuid
-                value.value = (captured, 0.0, 0.0, 0.0)
-                value.value_arity = 1
-                value.discrete_value = str(int(round(captured))) if output.discrete else ""
+                value.value = payload
+                value.value_arity = arity
+                value.discrete_value = discrete_value
             component.semantic_edit_sample_uuid = ""
             component.semantic_edit_stage_uuid = ""
             compile_component(armature, component)
@@ -721,7 +807,7 @@ class COATOOLS2_OT_CancelSemanticSample(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        _arm, component = _active_component(context)
+        _arm, component = _active_component(context, migrate=False)
         return (
             component is not None
             and bool(component.semantic_edit_sample_uuid)
@@ -757,10 +843,10 @@ class COATOOLS2_OT_CancelSemanticSample(bpy.types.Operator):
             self.report({"ERROR"}, str(exc))
             return {"CANCELLED"}
         try:
-            restored_values = {
-                output_uuid: float(captured[0])
-                for output_uuid, captured, _arity, _discrete in sample_state["outputs"]
-            }
+            restored_values = {}
+            for output_uuid, captured, arity, _discrete in sample_state["outputs"]:
+                values = tuple(float(value) for value in captured[:arity])
+                restored_values[output_uuid] = values[0] if arity == 1 else values
             for output in stage.outputs:
                 if output.output_uuid in restored_values:
                     set_semantic_output_value(
@@ -800,7 +886,11 @@ class COATOOLS2_OT_ApplySemanticPinRange(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        return _active_stage(context, stage_type="CONTACT_PIN")[2] is not None
+        return _active_stage(
+            context,
+            stage_type="CONTACT_PIN",
+            migrate=False,
+        )[2] is not None
 
     def execute(self, context):
         armature, component, stage = _active_stage(context, stage_type="CONTACT_PIN")
@@ -820,13 +910,17 @@ class COATOOLS2_OT_BakeSemanticSecondary(bpy.types.Operator):
     bl_label = "Bake Secondary Motion"
     bl_description = (
         "Bake deterministic secondary motion and feed it into the preceding "
-        "Spline Chain"
+        "Spline or B-Bone Bezier controls"
     )
     bl_options = {"REGISTER", "UNDO"}
 
     @classmethod
     def poll(cls, context):
-        return _active_stage(context, stage_type="SECONDARY_MOTION")[2] is not None
+        return _active_stage(
+            context,
+            stage_type="SECONDARY_MOTION",
+            migrate=False,
+        )[2] is not None
 
     def execute(self, context):
         armature, component, stage = _active_stage(
@@ -845,33 +939,53 @@ class COATOOLS2_OT_BakeSemanticSecondary(bpy.types.Operator):
                 for result in dependency_results
                 if result.spline_info is not None
             ]
-            if len(spline_results) != 1:
+            bbone_results = [
+                result.bbone_info
+                for result in dependency_results
+                if result.bbone_info is not None
+            ]
+            if len(spline_results) + len(bbone_results) != 1:
                 raise SemanticOutputError(
-                    "Secondary Motion needs exactly one upstream Spline result."
+                    "Secondary Motion needs exactly one upstream Spline or "
+                    "B-Bone Bezier result."
                 )
-            spline = spline_results[0]
+            spline = spline_results[0] if spline_results else None
+            bbone = bbone_results[0] if bbone_results else None
+            default_sources = (
+                tuple(spline.control_bones)
+                if spline is not None
+                else tuple(bbone.secondary_control_bones)
+            )
             result = bake_secondary_motion(
                 armature,
                 component,
                 stage,
-                default_source_bones=spline.control_bones,
+                default_source_bones=default_sources,
             )
-            if len(result.output_bones) != len(spline.hook_modifiers):
+            expected_count = (
+                len(spline.hook_modifiers)
+                if spline is not None
+                else len(bbone.secondary_control_bones)
+            )
+            if len(result.output_bones) != expected_count:
                 raise SemanticOutputError(
-                    "Secondary outputs must match the Spline control count."
+                    "Secondary outputs must match the upstream control count."
                 )
-            hook_targets = tuple(
-                binding.bone_name if binding.pinned else output_bone
-                for binding, output_bone in zip(
-                    spline.hook_bindings, result.output_bones
+            if spline is not None:
+                hook_targets = tuple(
+                    binding.bone_name if binding.pinned else output_bone
+                    for binding, output_bone in zip(
+                        spline.hook_bindings, result.output_bones
+                    )
                 )
-            )
-            retarget_spline_hooks(
-                spline.curve_object,
-                hook_targets,
-                armature=armature,
-                hook_names=spline.hook_modifiers,
-            )
+                retarget_spline_hooks(
+                    spline.curve_object,
+                    hook_targets,
+                    armature=armature,
+                    hook_names=spline.hook_modifiers,
+                )
+            else:
+                retarget_bbone_handles(armature, bbone, result.output_bones)
         except Exception as exc:
             traceback.print_exc()
             self.report({"ERROR"}, str(exc))
@@ -880,6 +994,88 @@ class COATOOLS2_OT_BakeSemanticSecondary(bpy.types.Operator):
             {"INFO"},
             f"Baked {result.sample_count} frames of Secondary Motion.",
         )
+        return {"FINISHED"}
+
+
+class COATOOLS2_OT_SwitchSemanticIKFK(bpy.types.Operator):
+    bl_idname = "coa_tools2.switch_semantic_ik_fk"
+    bl_label = "Switch FK/IK with Pose Match"
+    bl_description = "Match the visible chain pose, then key a discrete FK/IK Mode"
+    bl_options = {"REGISTER", "UNDO"}
+
+    mode: EnumProperty(
+        items=(
+            ("FK", "FK", "Match and switch to FK controls"),
+            ("IK", "IK", "Match and switch to IK controls"),
+        ),
+        default="IK",
+    )
+
+    @classmethod
+    def poll(cls, context):
+        return _active_stage(
+            context,
+            stage_type="CHAIN_IK",
+            migrate=False,
+        )[2] is not None
+
+    def execute(self, context):
+        armature, component, stage = _active_stage(
+            context,
+            stage_type="CHAIN_IK",
+        )
+        try:
+            # Pose Match is a pose-time operation.  A structural compile
+            # enters Edit mode and forces animation re-evaluation, which can
+            # discard the animator's current unkeyed pose before it is
+            # captured.  The switch resolver validates that the required
+            # compiled artifacts exist and reports a focused error otherwise.
+            switch_ik_fk_mode(armature, component, stage, self.mode)
+        except Exception as exc:
+            traceback.print_exc()
+            self.report({"ERROR"}, str(exc))
+            return {"CANCELLED"}
+        self.report({"INFO"}, f"Pose matched and switched to {self.mode}.")
+        return {"FINISHED"}
+
+
+class COATOOLS2_OT_SwitchSemanticContact(bpy.types.Operator):
+    bl_idname = "coa_tools2.switch_semantic_contact"
+    bl_label = "Switch Contact Pin"
+    bl_description = "Key a discrete Contact state and a private smooth compensation ramp"
+    bl_options = {"REGISTER", "UNDO"}
+
+    mode: EnumProperty(
+        items=(
+            ("OFF", "Off", "Release contact smoothly"),
+            ("ON", "On", "Capture and acquire contact smoothly"),
+        ),
+        default="ON",
+    )
+
+    @classmethod
+    def poll(cls, context):
+        stage = _active_stage(
+            context,
+            stage_type="CONTACT_PIN",
+            migrate=False,
+        )[2]
+        return stage is not None and contact_uses_ik_override(stage)
+
+    def execute(self, context):
+        armature, component, stage = _active_stage(
+            context,
+            stage_type="CONTACT_PIN",
+        )
+        try:
+            # Capturing a live contact must not run an Edit-mode structural
+            # compile first; doing so can invalidate the pose being pinned.
+            switch_contact_pin(armature, component, stage, self.mode)
+        except Exception as exc:
+            traceback.print_exc()
+            self.report({"ERROR"}, str(exc))
+            return {"CANCELLED"}
+        self.report({"INFO"}, f"Contact Pin switched {self.mode}.")
         return {"FINISHED"}
 
 
@@ -894,4 +1090,6 @@ CLASSES = (
     COATOOLS2_OT_CancelSemanticSample,
     COATOOLS2_OT_ApplySemanticPinRange,
     COATOOLS2_OT_BakeSemanticSecondary,
+    COATOOLS2_OT_SwitchSemanticIKFK,
+    COATOOLS2_OT_SwitchSemanticContact,
 )

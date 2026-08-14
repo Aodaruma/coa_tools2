@@ -33,11 +33,11 @@ def _armature(context):
     return None
 
 
-def _active_component(context):
+def _active_component(context, *, migrate=True):
     armature = _armature(context)
     if armature is None:
         return None, None
-    rig_data = get_rig_data(armature)
+    rig_data = get_rig_data(armature, migrate=migrate)
     if not rig_data.rig_components:
         return armature, None
     index = min(rig_data.rig_components_index, len(rig_data.rig_components) - 1)
@@ -470,7 +470,7 @@ class COATOOLS2_OT_UpdateRigComponent(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        _armature_object, component = _active_component(context)
+        _armature_object, component = _active_component(context, migrate=False)
         return component is not None
 
     def execute(self, context):
@@ -516,7 +516,7 @@ class COATOOLS2_OT_AddComponentBinding(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        _armature_object, component = _active_component(context)
+        _armature_object, component = _active_component(context, migrate=False)
         return (
             component is not None
             and component.component_type != "SEMANTIC"
@@ -622,7 +622,7 @@ class COATOOLS2_OT_RemoveComponentBinding(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        _armature_object, component = _active_component(context)
+        _armature_object, component = _active_component(context, migrate=False)
         return component is not None and bool(component.bindings)
 
     def execute(self, context):

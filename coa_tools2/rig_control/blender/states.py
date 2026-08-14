@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import math
 import uuid
 
 from ..schema import (
+    GraphPointShape,
+    StatePointSpec,
     StateMixPolicy,
+    graph_fallback_edges,
     state_cell_grid_size,
     state_grid_size,
     state_point_position,
@@ -16,9 +20,12 @@ from .drivers import (
     driver_uses_control,
     find_driver,
 )
+from .state_runtime import graph_state_driver_expression as runtime_expression
 
 
 def state_dimensions(control) -> tuple[int, int]:
+    if control.state_mode == "GRAPH_2D":
+        return max(1, len(control.state_points)), 1
     return state_grid_size(
         control.state_mode,
         control.state_columns,
@@ -134,7 +141,18 @@ def _hat_expression(variable: str, span: float, index: int, count: int) -> str:
     return f"max(1.0-abs(({coordinate})-({index})),0.0)"
 
 
-def state_driver_expression(control, point) -> str:
+def state_driver_expression(control, point, armature=None) -> str:
+    if control.state_mode == "GRAPH_2D":
+        if armature is None:
+            armature = getattr(control, "id_data", None)
+        rig_data = getattr(armature, "coa_tools2_rig", None)
+        if rig_data is None or not rig_data.rig_instance_id:
+            raise ValueError("Graph State requires a persisted rig instance ID.")
+        return runtime_expression(
+            rig_data.rig_instance_id,
+            control.control_uuid,
+            point.state_uuid,
+        )
     columns, rows = state_dimensions(control)
     if not (0 <= point.column < columns and 0 <= point.row < rows):
         raise ValueError(
@@ -145,6 +163,47 @@ def state_driver_expression(control, point) -> str:
         return x
     y = _hat_expression("state_y", control.height, point.row, rows)
     return f"({x})*({y})"
+
+
+def graph_state_point_specs(control) -> tuple[StatePointSpec, ...]:
+    """Convert persisted Blender points to the pure Graph State ABI."""
+
+    result = []
+    for index, point in enumerate(control.state_points):
+        target_object = point.target_object.name if point.target_object else ""
+        custom_object = point.custom_object.name if point.custom_object else ""
+        result.append(
+            StatePointSpec(
+                state_uuid=point.state_uuid,
+                control_uuid=control.control_uuid,
+                column=index,
+                row=0,
+                display_name=point.label,
+                target_object_name=target_object,
+                target_name=point.target_name,
+                is_empty=point.is_empty,
+                enabled=point.enabled,
+                position=tuple(float(value) for value in point.graph_position),
+                point_shape=GraphPointShape(point.point_shape),
+                custom_object_name=custom_object,
+                fallback_state_uuid=point.fallback_state_uuid,
+                target_name_candidates=tuple(
+                    value.strip()
+                    for value in point.target_name_candidates.split(",")
+                    if value.strip()
+                ),
+                phoneme_aliases=tuple(
+                    value.strip()
+                    for value in point.phoneme_aliases.split(",")
+                    if value.strip()
+                ),
+            )
+        )
+    return tuple(result)
+
+
+def graph_state_edges(control) -> tuple[tuple[int, int], ...]:
+    return graph_fallback_edges(graph_state_point_specs(control))
 
 
 def ensure_state_driver(armature, control, point):
@@ -189,7 +248,7 @@ def ensure_state_driver(armature, control, point):
         control.control_bone,
         transform_x,
     )
-    if control.state_mode == "MATRIX_2D":
+    if control.state_mode in {"MATRIX_2D", "GRAPH_2D"}:
         _add_transform_variable(
             driver,
             "state_y",
@@ -197,7 +256,7 @@ def ensure_state_driver(armature, control, point):
             control.control_bone,
             "LOC_Y",
         )
-    driver.expression = state_driver_expression(control, point)
+    driver.expression = state_driver_expression(control, point, armature)
     return fcurve
 
 
@@ -232,17 +291,37 @@ def sync_state_control_geometry(control):
         control.grid_columns = control.state_columns
         control.grid_rows = control.state_rows
         ensure_state_cells(control)
+    elif control.state_mode == "GRAPH_2D":
+        if control.control_type != "POINT_2D_RECT":
+            raise ValueError("2D State Graph requires a 2D Rectangle control.")
+        if len(control.state_points) < 2:
+            raise ValueError("2D State Graph requires at least two named points.")
+        control.rectangle_mode = "FREE"
+        control.state_columns = max(2, len(control.state_points))
+        control.state_rows = 1
+        control.state_cells.clear()
 
 
 def ensure_state_drivers(armature, control) -> int:
     if control.state_mode == "NONE":
         return 0
     sync_state_control_geometry(control)
-    columns, rows = state_dimensions(control)
-    expected = {(column, row) for row in range(rows) for column in range(columns)}
-    actual = {(point.column, point.row) for point in control.state_points}
-    if actual != expected or len(actual) != len(control.state_points):
-        raise ValueError("StateData grid must be rebuilt before compiling.")
+    if control.state_mode == "GRAPH_2D":
+        ids = [point.state_uuid for point in control.state_points]
+        if any(not state_uuid for state_uuid in ids) or len(ids) != len(set(ids)):
+            raise ValueError("Graph State point IDs must be present and unique.")
+        if any(
+            len(point.graph_position) != 2
+            or not all(math.isfinite(float(value)) for value in point.graph_position)
+            for point in control.state_points
+        ):
+            raise ValueError("Graph State point positions must be finite.")
+    else:
+        columns, rows = state_dimensions(control)
+        expected = {(column, row) for row in range(rows) for column in range(columns)}
+        actual = {(point.column, point.row) for point in control.state_points}
+        if actual != expected or len(actual) != len(control.state_points):
+            raise ValueError("StateData grid must be rebuilt before compiling.")
 
     seen = {
         binding_target_key(binding)
@@ -267,6 +346,11 @@ def ensure_state_drivers(armature, control) -> int:
 
 
 def state_point_local_position(control, point) -> tuple[float, float]:
+    if control.state_mode == "GRAPH_2D":
+        return (
+            float(point.graph_position[0]) * control.width,
+            float(point.graph_position[1]) * control.height,
+        )
     columns, rows = state_dimensions(control)
     u, v = state_point_position(
         point.column,

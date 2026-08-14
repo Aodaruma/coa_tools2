@@ -78,6 +78,52 @@ def validate_widget_spec(spec: WidgetSpec) -> list[ValidationIssue]:
                 spec.widget_uuid,
             )
         )
+    if spec.layout == WidgetLayout.GRAPH:
+        if len(spec.graph_points) < 2:
+            issues.append(
+                ValidationIssue(
+                    IssueSeverity.ERROR,
+                    "widget.graph_too_few_points",
+                    "Graph widgets require at least two named points.",
+                    spec.widget_uuid,
+                )
+            )
+        if any(
+            len(edge) != 2
+            or edge[0] == edge[1]
+            or not all(0 <= index < len(spec.graph_points) for index in edge)
+            for edge in spec.graph_edges
+        ):
+            issues.append(
+                ValidationIssue(
+                    IssueSeverity.ERROR,
+                    "widget.invalid_graph_edge",
+                    "Graph widget edges must reference two different points.",
+                    spec.widget_uuid,
+                )
+            )
+        if spec.graph_point_shapes and len(spec.graph_point_shapes) != len(
+            spec.graph_points
+        ):
+            issues.append(
+                ValidationIssue(
+                    IssueSeverity.ERROR,
+                    "widget.invalid_graph_point_shapes",
+                    "Graph point shapes must match the named point count.",
+                    spec.widget_uuid,
+                )
+            )
+        if spec.graph_custom_object_names and len(
+            spec.graph_custom_object_names
+        ) != len(spec.graph_points):
+            issues.append(
+                ValidationIssue(
+                    IssueSeverity.ERROR,
+                    "widget.invalid_graph_custom_objects",
+                    "Graph custom marker references must match the point count.",
+                    spec.widget_uuid,
+                )
+            )
     return issues
 
 
