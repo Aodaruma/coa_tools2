@@ -8,8 +8,137 @@ from .component_schema import (
     RigComponentType,
     RigDepthMode,
     RigOrientationMode,
+    RigWidgetPresentationSpec,
+    RigWidgetShape,
 )
 from .validation import IssueSeverity, ValidationIssue
+
+
+_WIDTH_HEIGHT_SHAPES = {
+    RigWidgetShape.ARROW_1D,
+    RigWidgetShape.ARROW_2D,
+    RigWidgetShape.TOMBSTONE,
+    RigWidgetShape.ELLIPSE,
+    RigWidgetShape.TRIANGLE,
+    RigWidgetShape.RECTANGLE,
+    RigWidgetShape.DIAMOND,
+}
+_ARROW_SHAPES = {
+    RigWidgetShape.ARROW_1D,
+    RigWidgetShape.ARROW_2D,
+    RigWidgetShape.CYLINDER_ARROW_1D,
+    RigWidgetShape.SPHERE_ARROW_2D,
+}
+_SEGMENT_SHAPES = {
+    RigWidgetShape.CYLINDER_ARROW_1D,
+    RigWidgetShape.SPHERE_ARROW_2D,
+    RigWidgetShape.TOMBSTONE,
+    RigWidgetShape.ELLIPSE,
+    RigWidgetShape.TRIANGLE,
+    RigWidgetShape.RECTANGLE,
+    RigWidgetShape.DIAMOND,
+    RigWidgetShape.SECTOR,
+}
+
+
+def validate_widget_presentation(
+    presentation: RigWidgetPresentationSpec,
+    subject_id: str,
+) -> list[ValidationIssue]:
+    """Validate only parameters consumed by the selected presentation shape."""
+
+    issues: list[ValidationIssue] = []
+
+    def error(code: str, message: str) -> None:
+        issues.append(
+            ValidationIssue(
+                IssueSeverity.ERROR,
+                code,
+                message,
+                subject_id,
+            )
+        )
+
+    shape = presentation.shape
+    if shape == RigWidgetShape.NONE:
+        return issues
+    if not 0.5 <= presentation.wire_width <= 16.0:
+        error(
+            "component.presentation_invalid_wire_width",
+            "Viewport wire width must be between 0.5 and 16.0.",
+        )
+    if shape == RigWidgetShape.CUSTOM_OBJECT:
+        if not presentation.custom_object_name.strip():
+            error(
+                "component.presentation_missing_custom_object",
+                "A custom presentation object is required.",
+            )
+        return issues
+    if shape in _WIDTH_HEIGHT_SHAPES:
+        if presentation.width <= 0.0 or (
+            shape != RigWidgetShape.ARROW_1D and presentation.height <= 0.0
+        ):
+            error(
+                "component.presentation_invalid_size",
+                "Presentation width and height must be greater than zero.",
+            )
+    if shape in {
+        RigWidgetShape.TOMBSTONE,
+        RigWidgetShape.TRIANGLE,
+        RigWidgetShape.RECTANGLE,
+        RigWidgetShape.DIAMOND,
+    }:
+        maximum = min(presentation.width, presentation.height) * 0.5
+        if not 0.0 <= presentation.corner_radius <= maximum:
+            error(
+                "component.presentation_invalid_corner_radius",
+                "Corner radius must fit inside half of the smaller dimension.",
+            )
+    if shape in _ARROW_SHAPES:
+        if presentation.bar_width <= 0.0:
+            error(
+                "component.presentation_invalid_bar_width",
+                "Arrow bar width must be greater than zero.",
+            )
+        if presentation.head_length <= 0.0 or presentation.head_width <= 0.0:
+            error(
+                "component.presentation_invalid_arrow_head",
+                "Arrow head length and width must be greater than zero.",
+            )
+    if shape in {
+        RigWidgetShape.CYLINDER_ARROW_1D,
+        RigWidgetShape.SPHERE_ARROW_2D,
+    }:
+        if presentation.radius <= 0.0:
+            error(
+                "component.presentation_invalid_radius",
+                "Curved arrow radius must be greater than zero.",
+            )
+        if not 0.0 < presentation.arc_angle <= 6.283185307179586:
+            error(
+                "component.presentation_invalid_arc_angle",
+                "Arc angle must be greater than zero and at most one turn.",
+            )
+    if shape == RigWidgetShape.SECTOR:
+        if not (
+            0.0 <= presentation.sector_inner_radius
+            < presentation.sector_outer_radius
+        ):
+            error(
+                "component.presentation_invalid_sector_radius",
+                "Sector radii must satisfy 0 <= inner < outer.",
+            )
+        if not 0.0 < abs(presentation.sector_sweep_angle) <= 6.283185307179586:
+            error(
+                "component.presentation_invalid_sector_sweep",
+                "Sector sweep must be non-zero and at most one turn.",
+            )
+    if shape in _SEGMENT_SHAPES and not 3 <= presentation.segments <= 256:
+        error(
+            "component.presentation_invalid_segments",
+            "Presentation segments must be between 3 and 256.",
+        )
+    return issues
 
 
 def validate_component_spec(spec: RigComponentSpec) -> list[ValidationIssue]:
@@ -95,6 +224,7 @@ def validate_component_spec(spec: RigComponentSpec) -> list[ValidationIssue]:
                 spec.component_uuid,
             )
         )
+    issues.extend(validate_widget_presentation(spec.presentation, spec.component_uuid))
     binding_ids = set()
     for binding in spec.bindings:
         if not binding.binding_uuid.strip():

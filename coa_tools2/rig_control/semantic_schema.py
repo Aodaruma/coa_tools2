@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any, Mapping, Union
 
+from .component_schema import RigWidgetPresentationSpec, RigWidgetShape
+from .component_validation import validate_widget_presentation
 from .schema import StringEnum
 
 
@@ -71,6 +73,14 @@ class ContactSpace(StringEnum):
     WORLD = "WORLD"
     CHARACTER = "CHARACTER"
     TARGET = "TARGET"
+
+
+class WidgetTargetRole(StringEnum):
+    """Which stage-owned control receives one presentation."""
+
+    PRIMARY = "PRIMARY"
+    POLE = "POLE"
+    SPLINE_CONTROL = "SPLINE_CONTROL"
 
 
 @dataclass(frozen=True)
@@ -334,13 +344,28 @@ class WidgetPresentationRef:
     widget_spec_id: str = ""
     geometry_node_group: str = ""
     preset_id: str = ""
+    target_role: WidgetTargetRole = WidgetTargetRole.PRIMARY
+    target_index: int = -1
+    settings: RigWidgetPresentationSpec = field(
+        default_factory=RigWidgetPresentationSpec
+    )
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        data["target_role"] = self.target_role.value
+        data["settings"] = self.settings.to_dict()
+        return data
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "WidgetPresentationRef":
-        return cls(**dict(data))
+        values = dict(data)
+        values["target_role"] = WidgetTargetRole(
+            values.get("target_role", "PRIMARY")
+        )
+        values["settings"] = RigWidgetPresentationSpec.from_dict(
+            values.get("settings", {})
+        )
+        return cls(**values)
 
 
 @dataclass(frozen=True)
@@ -621,11 +646,50 @@ def validate_semantic_rig(
                 presentation.presentation_uuid,
                 f"Unknown display frame {presentation.display_frame_id!r}.",
             )
-        if not (presentation.widget_spec_id or presentation.geometry_node_group or presentation.preset_id):
+        try:
+            target_role = WidgetTargetRole(presentation.target_role)
+        except ValueError:
+            target_role = None
+            issue(
+                "semantic.invalid_presentation_role",
+                presentation.presentation_uuid,
+                f"Unknown presentation target role {presentation.target_role!r}.",
+            )
+        if presentation.target_index < -1:
+            issue(
+                "semantic.invalid_presentation_index",
+                presentation.presentation_uuid,
+                "Presentation target index must be -1 or greater.",
+            )
+        elif (
+            target_role is not None
+            and target_role is not WidgetTargetRole.SPLINE_CONTROL
+            and presentation.target_index != -1
+        ):
+            issue(
+                "semantic.invalid_presentation_index",
+                presentation.presentation_uuid,
+                "Only spline-control presentations may select a target index.",
+            )
+        if not (
+            presentation.widget_spec_id
+            or presentation.geometry_node_group
+            or presentation.preset_id
+            or presentation.settings.shape != RigWidgetShape.NONE
+        ):
             issue(
                 "semantic.missing_widget_reference",
                 presentation.presentation_uuid,
                 "A widget, Geometry Nodes group or preset reference is required.",
+            )
+        for presentation_issue in validate_widget_presentation(
+            presentation.settings,
+            presentation.presentation_uuid,
+        ):
+            issue(
+                presentation_issue.code.replace("component.", "semantic.", 1),
+                presentation.presentation_uuid,
+                presentation_issue.message,
             )
 
     return tuple(issues)

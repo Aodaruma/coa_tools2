@@ -42,6 +42,8 @@ from rig_control.component_schema import (  # noqa: E402
     RigOrientationMode,
     RigParameterChannel,
     RigSolverMode,
+    RigWidgetPresentationSpec,
+    RigWidgetShape,
 )
 from rig_control.component_validation import validate_component_spec  # noqa: E402
 from rig_control.validation import (  # noqa: E402
@@ -127,10 +129,78 @@ class RigControlSchemaTests(unittest.TestCase):
             use_bend_hint=True,
             pole_distance=1.25,
             end_rotation_mode=RigEndRotationMode.COPY_LOCAL,
+            presentation=RigWidgetPresentationSpec(
+                shape=RigWidgetShape.CYLINDER_ARROW_1D,
+                bar_width=0.2,
+                head_length=0.4,
+                head_width=0.65,
+                radius=1.25,
+                arc_angle=math.pi * 1.25,
+                segments=96,
+                live_preview=False,
+            ),
             bindings=(output,),
         )
         self.assertEqual(spec, RigComponentSpec.from_dict(spec.to_dict()))
         self.assertFalse(validate_component_spec(spec))
+
+    def test_widget_presentation_round_trip_preserves_all_shape_parameters(self):
+        spec = RigWidgetPresentationSpec(
+            shape=RigWidgetShape.SECTOR,
+            custom_object_name="IgnoredForSector",
+            width=3.0,
+            height=2.0,
+            corner_radius=0.2,
+            bar_width=0.25,
+            head_length=0.5,
+            head_width=0.75,
+            radius=2.0,
+            arc_angle=math.pi,
+            sector_inner_radius=0.5,
+            sector_outer_radius=2.5,
+            sector_start_angle=-0.25,
+            sector_sweep_angle=1.75,
+            segments=128,
+            wire_width=2.5,
+            live_preview=False,
+        )
+        self.assertEqual(spec, RigWidgetPresentationSpec.from_dict(spec.to_dict()))
+
+    def test_version_two_component_gets_non_destructive_presentation_default(self):
+        data = {
+            "schema_version": 2,
+            "component_uuid": "component-v2",
+            "semantic_id": "legacy.widget",
+            "display_name": "Version 2",
+            "component_type": "ROOT",
+            "source_bones": ("root",),
+            "widget": "ROOT",
+        }
+        spec = RigComponentSpec.from_dict(data)
+        self.assertEqual(RigWidgetShape.NONE, spec.presentation.shape)
+        self.assertEqual(RigComponentWidget.ROOT, spec.widget)
+
+    def test_component_validation_checks_selected_presentation_shape(self):
+        spec = RigComponentSpec(
+            component_uuid="component-presentation-bad",
+            semantic_id="presentation.bad",
+            display_name="Bad Presentation",
+            component_type=RigComponentType.ROOT,
+            source_bones=("root",),
+            presentation=RigWidgetPresentationSpec(
+                shape=RigWidgetShape.SECTOR,
+                sector_inner_radius=2.0,
+                sector_outer_radius=1.0,
+                sector_sweep_angle=0.0,
+                segments=2,
+                wire_width=0.25,
+            ),
+        )
+        codes = {issue.code for issue in validate_component_spec(spec)}
+        self.assertIn("component.presentation_invalid_sector_radius", codes)
+        self.assertIn("component.presentation_invalid_sector_sweep", codes)
+        self.assertIn("component.presentation_invalid_segments", codes)
+        self.assertIn("component.presentation_invalid_wire_width", codes)
 
     def test_version_one_component_defaults_to_legacy_direct_deformation(self):
         data = {

@@ -34,6 +34,8 @@ from .component_schema import (
     RigOrientationMode,
     RigParameterChannel,
     RigSolverMode,
+    RigWidgetPresentationSpec,
+    RigWidgetShape,
 )
 from .pose_field import (
     POSE_FIELD_SCHEMA_VERSION,
@@ -70,6 +72,7 @@ from .semantic_schema import (
     SolverType,
     SplineSolverSpec,
     WidgetPresentationRef,
+    WidgetTargetRole,
     validate_semantic_rig,
 )
 from .secondary_motion import (
@@ -119,6 +122,8 @@ __all__ = [
     "RigOrientationMode",
     "RigParameterChannel",
     "RigSolverMode",
+    "RigWidgetPresentationSpec",
+    "RigWidgetShape",
     "RigFrameSpec",
     "SecondaryMotionSolverSpec",
     "SecondaryMotionResult",
@@ -139,6 +144,7 @@ __all__ = [
     "WidgetLayout",
     "WidgetSpec",
     "WidgetPresentationRef",
+    "WidgetTargetRole",
     "evaluate_pose_field",
     "filter_secondary_motion",
     "simulate_secondary_motion",

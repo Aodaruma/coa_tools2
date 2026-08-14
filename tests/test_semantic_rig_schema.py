@@ -25,7 +25,12 @@ from rig_control.semantic_schema import (  # noqa: E402
     SolverType,
     SplineSolverSpec,
     WidgetPresentationRef,
+    WidgetTargetRole,
     validate_semantic_rig,
+)
+from rig_control.component_schema import (  # noqa: E402
+    RigWidgetPresentationSpec,
+    RigWidgetShape,
 )
 
 
@@ -170,6 +175,86 @@ class SemanticRigSchemaTests(unittest.TestCase):
             ),
             tuple(node.solver.solver_type for node in restored.nodes),
         )
+
+    def test_presentation_round_trip_preserves_target_and_shape_settings(self):
+        presentation = WidgetPresentationRef(
+            "presentation.pole",
+            "control.arm.pole",
+            "frame.display",
+            target_role=WidgetTargetRole.POLE,
+            settings=RigWidgetPresentationSpec(
+                shape=RigWidgetShape.ELLIPSE,
+                width=0.75,
+                height=0.75,
+                segments=96,
+                wire_width=2.0,
+                live_preview=False,
+            ),
+        )
+        self.assertEqual(
+            presentation,
+            WidgetPresentationRef.from_dict(presentation.to_dict()),
+        )
+
+    def test_legacy_presentation_dict_gets_additive_defaults(self):
+        restored = WidgetPresentationRef.from_dict(
+            {
+                "presentation_uuid": "legacy-presentation",
+                "control_id": "legacy-control",
+                "display_frame_id": "frame.display",
+                "geometry_node_group": "LegacyWidgetGN",
+            }
+        )
+        self.assertEqual(WidgetTargetRole.PRIMARY, restored.target_role)
+        self.assertEqual(-1, restored.target_index)
+        self.assertEqual(RigWidgetShape.NONE, restored.settings.shape)
+
+    def test_presentation_validation_checks_role_index_and_custom_object(self):
+        spec = self._valid_spec()
+        bad_presentations = (
+            WidgetPresentationRef(
+                "bad-index",
+                "control.primary",
+                "frame.display",
+                target_role=WidgetTargetRole.PRIMARY,
+                target_index=2,
+                settings=RigWidgetPresentationSpec(
+                    shape=RigWidgetShape.RECTANGLE
+                ),
+            ),
+            WidgetPresentationRef(
+                "bad-custom",
+                "control.custom",
+                "frame.display",
+                target_role=WidgetTargetRole.POLE,
+                settings=RigWidgetPresentationSpec(
+                    shape=RigWidgetShape.CUSTOM_OBJECT
+                ),
+            ),
+            WidgetPresentationRef(
+                "bad-role",
+                "control.role",
+                "frame.display",
+                target_role="UNKNOWN",  # type: ignore[arg-type]
+                settings=RigWidgetPresentationSpec(
+                    shape=RigWidgetShape.ELLIPSE
+                ),
+            ),
+        )
+        bad = SemanticRigSpec(
+            spec.rig_uuid,
+            spec.semantic_id,
+            spec.display_name,
+            spec.frames,
+            spec.channels,
+            spec.nodes,
+            spec.outputs,
+            bad_presentations,
+        )
+        codes = {item.code for item in validate_semantic_rig(bad)}
+        self.assertIn("semantic.invalid_presentation_index", codes)
+        self.assertIn("semantic.presentation_missing_custom_object", codes)
+        self.assertIn("semantic.invalid_presentation_role", codes)
 
     def test_pose_map_ik_and_contact_can_form_one_pipeline(self):
         spec = self._valid_spec()

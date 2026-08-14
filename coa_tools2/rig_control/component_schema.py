@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any, Mapping
 
 from .schema import StringEnum, TargetKind
 
 
-RIG_COMPONENT_SCHEMA_VERSION = 2
+RIG_COMPONENT_SCHEMA_VERSION = 3
 
 
 class RigComponentType(StringEnum):
@@ -92,11 +92,71 @@ class RigDepthMode(StringEnum):
 
 
 class RigComponentWidget(StringEnum):
+    """Legacy component widget presets kept for file compatibility."""
+
     ROOT = "ROOT"
     FK = "FK"
     HAND = "HAND"
     FOOT = "FOOT"
     SQUARE = "SQUARE"
+
+
+class RigWidgetShape(StringEnum):
+    """Procedural or user-provided presentation for a rig control."""
+
+    NONE = "NONE"
+    ARROW_1D = "ARROW_1D"
+    ARROW_2D = "ARROW_2D"
+    CYLINDER_ARROW_1D = "CYLINDER_ARROW_1D"
+    SPHERE_ARROW_2D = "SPHERE_ARROW_2D"
+    TOMBSTONE = "TOMBSTONE"
+    ELLIPSE = "ELLIPSE"
+    TRIANGLE = "TRIANGLE"
+    RECTANGLE = "RECTANGLE"
+    DIAMOND = "DIAMOND"
+    SECTOR = "SECTOR"
+    CUSTOM_OBJECT = "CUSTOM_OBJECT"
+
+
+@dataclass(frozen=True)
+class RigWidgetPresentationSpec:
+    """Replaceable visual settings which do not affect solver behavior.
+
+    ``NONE`` is deliberately the compatibility default.  Older components
+    retain their legacy ``widget`` preset until a procedural presentation is
+    explicitly selected.  Blender-side compilers can therefore distinguish a
+    migrated file from an intentional procedural shape without changing the
+    component's kinematics.
+    """
+
+    shape: RigWidgetShape = RigWidgetShape.NONE
+    custom_object_name: str = ""
+    width: float = 2.0
+    height: float = 1.0
+    corner_radius: float = 0.15
+    bar_width: float = 0.18
+    head_length: float = 0.35
+    head_width: float = 0.6
+    radius: float = 1.0
+    arc_angle: float = 3.141592653589793
+    sector_inner_radius: float = 0.0
+    sector_outer_radius: float = 1.0
+    sector_start_angle: float = 0.0
+    sector_sweep_angle: float = 1.5707963267948966
+    segments: int = 96
+    wire_width: float = 1.0
+    live_preview: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        data["shape"] = self.shape.value
+        return data
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "RigWidgetPresentationSpec":
+        values = dict(data)
+        values["shape"] = RigWidgetShape(values.get("shape", "NONE"))
+        return cls(**values)
 
 
 class RigSolverMode(StringEnum):
@@ -154,6 +214,9 @@ class RigComponentSpec:
     bindings: tuple[RigComponentOutputSpec, ...] = ()
     enabled: bool = True
     schema_version: int = RIG_COMPONENT_SCHEMA_VERSION
+    presentation: RigWidgetPresentationSpec = field(
+        default_factory=RigWidgetPresentationSpec
+    )
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -163,6 +226,7 @@ class RigComponentSpec:
         data["orientation_mode"] = self.orientation_mode.value
         data["depth_mode"] = self.depth_mode.value
         data["widget"] = self.widget.value
+        data["presentation"] = self.presentation.to_dict()
         data["solver_mode"] = self.solver_mode.value
         data["bend_axis"] = self.bend_axis.value
         data["end_rotation_mode"] = self.end_rotation_mode.value
@@ -190,6 +254,9 @@ class RigComponentSpec:
         )
         values["depth_mode"] = RigDepthMode(values.get("depth_mode", "LIMITED"))
         values["widget"] = RigComponentWidget(values.get("widget", "SQUARE"))
+        values["presentation"] = RigWidgetPresentationSpec.from_dict(
+            values.get("presentation", {})
+        )
         values["solver_mode"] = RigSolverMode(values.get("solver_mode", "SPATIAL"))
         values["bend_axis"] = RigBendAxis(values.get("bend_axis", "AUTO"))
         values["end_rotation_mode"] = RigEndRotationMode(
