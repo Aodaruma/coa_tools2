@@ -73,10 +73,6 @@ class COATOOLS2_PT_SemanticRig(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         armature, component, stage = _active(context)
-        header = layout.box()
-        header.label(text="One action = composable controls + solver layers", icon="NODETREE")
-        header.label(text="State Rig remains the parameter/state controller system.")
-
         row = layout.row()
         row.template_list(
             "COATOOLS2_UL_SemanticStages", "", component, "semantic_stages",
@@ -90,7 +86,13 @@ class COATOOLS2_PT_SemanticRig(bpy.types.Panel):
         box.prop(stage, "label")
         box.prop(stage, "stage_type")
         box.prop(stage, "order")
-        box.prop(stage, "depends_on", text="After UUIDs")
+        dependencies = {value.strip() for value in stage.depends_on.split(",") if value.strip()}
+        dependency_names = [candidate.label for candidate in component.semantic_stages
+                            if candidate.stage_uuid in dependencies]
+        inputs = box.row(align=True)
+        inputs.label(text="Input: " + (", ".join(dependency_names) or "None"))
+        operator = inputs.operator("coa_tools2.edit_rig_dependencies", text="Choose")
+        operator.stage_uuid = stage.stage_uuid
 
         if stage.stage_type in {"PROJECTED_TRANSFORM", "CHAIN_FK", "SPLINE"}:
             draw_widget_presentation(
@@ -205,6 +207,7 @@ class COATOOLS2_PT_SemanticRig(bpy.types.Panel):
                     title="IK Handle Presentation",
                     stage_uuid=stage.stage_uuid,
                     target_role="PRIMARY",
+                    align_to_hand=True,
                 )
                 draw_widget_presentation(
                     details,

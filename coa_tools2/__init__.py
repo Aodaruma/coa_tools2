@@ -91,6 +91,8 @@ from .rig_control.blender import semantic_runtime as rig_semantic_runtime
 from .rig_control.blender import semantic_operators as rig_semantic_operators
 from .rig_control.blender import semantic_presentations as rig_semantic_presentations
 from .rig_control.blender import semantic_ui as rig_semantic_ui
+from .rig_control.blender import workspace_ui as rig_workspace_ui
+from .rig_control.blender import viewport_display as rig_viewport_display
 
 # register
 ##################################
@@ -334,6 +336,8 @@ classes = (
     rig_control_operators.COATOOLS2_OT_UpdateRigControl,
     rig_control_operators.COATOOLS2_OT_ValidateRig,
     rig_control_operators.COATOOLS2_OT_RepairRig,
+    *rig_workspace_ui.CLASSES,
+    *rig_viewport_display.CLASSES,
     rig_control_ui.COATOOLS2_UL_RigControls,
     rig_control_ui.COATOOLS2_UL_RigBindings,
     rig_control_ui.COATOOLS2_UL_RigStatePoints,
@@ -680,13 +684,16 @@ def check_view_2D_3D(dummy):
 @persistent
 def set_shading(dummy):
     bpy.context.scene.eevee.use_taa_reprojection = False
-    for obj in bpy.data.objects:
-        if "sprite_object" in obj.coa_tools2:
-            for screen in bpy.data.screens:
-                for area in screen.areas:
-                    if area.type == "VIEW_3D":
-                        area.spaces[0].shading.type = "RENDERED"
-            break
+    # Rig animation can use solid previews. Keep the saved viewport shading
+    # instead of forcing an unlit scene into rendered mode on every load.
+    if not rig_workspace_ui.is_rig_animation(bpy.context):
+        for obj in bpy.data.objects:
+            if "sprite_object" in obj.coa_tools2:
+                for screen in bpy.data.screens:
+                    for area in screen.areas:
+                        if area.type == "VIEW_3D":
+                            area.spaces[0].shading.type = "RENDERED"
+                break
     bpy.ops.coa_tools2.updater_check_now()
 
 

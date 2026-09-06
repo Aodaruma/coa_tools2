@@ -71,6 +71,7 @@ def draw_widget_presentation(
     default_closed=True,
     stage_uuid="",
     target_role="",
+    align_to_hand=False,
 ):
     """Draw one shape-aware, collapsible presentation editor."""
 
@@ -82,6 +83,8 @@ def draw_widget_presentation(
 
     body.prop(presentation, "shape")
     shape = presentation.shape
+    if align_to_hand and shape == "TOMBSTONE":
+        body.prop(presentation, "align_to_source_rest")
     if shape == "NONE":
         body.label(text="No procedural custom shape is generated.", icon="INFO")
         _draw_presentation_status(
@@ -187,11 +190,13 @@ class COATOOLS2_PT_RigComponents(bpy.types.Panel):
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = "COA Tools2"
+    bl_parent_id = "COATOOLS2_PT_rig_workspace"
 
     @classmethod
     def poll(cls, context):
+        from .workspace_ui import is_setup
         sprite_object = functions.get_sprite_object(context.active_object)
-        return sprite_object is not None and sprite_object.type == "ARMATURE"
+        return is_setup(context) and sprite_object is not None and sprite_object.type == "ARMATURE"
 
     def draw(self, context):
         layout = self.layout

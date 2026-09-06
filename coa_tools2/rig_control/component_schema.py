@@ -146,6 +146,7 @@ class RigWidgetPresentationSpec:
     segments: int = 96
     wire_width: float = 1.0
     live_preview: bool = True
+    align_to_source_rest: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)

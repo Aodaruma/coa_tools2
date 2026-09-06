@@ -368,6 +368,7 @@ def _apply_presentation(
     *,
     stage_uuid: str,
     target_role: str,
+    stage=None,
 ) -> set[str]:
     _validate_presentation_definition(
         presentation,
@@ -413,6 +414,16 @@ def _apply_presentation(
         stage_uuid=stage_uuid,
         target_role=target_role,
     )
+    if (
+        stage is not None
+        and stage.stage_type == "CHAIN_IK"
+        and target_role == "PRIMARY"
+        and shape == "TOMBSTONE"
+        and getattr(presentation, "align_to_source_rest", True)
+    ):
+        _align_ik_hand_widget(
+            armature, component, stage, pose_bones[0], shape_object, presentation
+        )
     _assign_custom_shape(pose_bones, shape_object, presentation)
     return expected
 
@@ -428,6 +439,37 @@ def _find_owned_bone(armature, component, role: str):
             f"Multiple generated bones use role '{role}'."
         )
     return candidates[0] if candidates else None
+
+
+def _align_ik_hand_widget(
+    armature, component, stage, pose_bone, shape_object, presentation
+) -> None:
+    from .semantic_artifacts import _source_names
+    from .semantic_widget_orientation import hand_widget_rest_transform
+
+    source_names = _source_names(component, stage)
+    source = armature.data.bones.get(source_names[-1]) if source_names else None
+    if source is None:
+        raise SemanticPresentationError(
+            "Hand rest alignment requires the source chain's end bone."
+        )
+    art_frame = _find_owned_bone(
+        armature, component, semantic_stage_role(stage.stage_uuid, "art_frame")
+    )
+    art_normal = (
+        art_frame.matrix_local.to_3x3().col[2]
+        if art_frame is not None
+        else stage.art_plane_normal
+    )
+    display = pose_bone.custom_shape_transform or pose_bone
+    transform = hand_widget_rest_transform(
+        source, display.bone, art_normal, presentation.height
+    )
+    # _ensure_generated_widget refreshes the cache from canonical GN geometry
+    # first, so applying the rest transform again never accumulates rotation.
+    # Preserve native custom-shape offsets and rotations as authored overrides.
+    shape_object.data.transform(transform)
+    shape_object.data.update()
 
 
 def _semantic_stage_targets(armature, component, stage, result=None):
@@ -685,6 +727,7 @@ def reconcile_semantic_presentations(
                 bone_names,
                 stage_uuid=stage.stage_uuid,
                 target_role=target_role,
+                stage=stage,
             )
     if cleanup:
         _cleanup_widget_artifacts(

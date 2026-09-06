@@ -21,6 +21,7 @@ AUDITED_MODULES = (
     "coa_tools2/rig_control/blender/ui.py",
     "coa_tools2/rig_control/blender/component_ui.py",
     "coa_tools2/rig_control/blender/semantic_ui.py",
+    "coa_tools2/rig_control/blender/workspace_ui.py",
 )
 
 

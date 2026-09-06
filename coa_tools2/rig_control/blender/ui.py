@@ -129,11 +129,13 @@ class COATOOLS2_PT_RigControls(bpy.types.Panel):
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = "COA Tools2"
+    bl_parent_id = "COATOOLS2_PT_rig_workspace"
 
     @classmethod
     def poll(cls, context):
+        from .workspace_ui import is_setup
         sprite_object = functions.get_sprite_object(context.active_object)
-        return sprite_object is not None and sprite_object.type == "ARMATURE"
+        return is_setup(context) and sprite_object is not None and sprite_object.type == "ARMATURE"
 
     def draw(self, context):
         layout = self.layout

@@ -121,6 +121,8 @@ Spline Rigとは排他的なComponent種類にせず、Semantic DAG上の別Solv
 
 ## 8. 操作用サンプル
 
+現在の操作導線は [Rig: Animate / Setup](rig_control_animation_workspace.md) を参照。
+
 4機能をまとめた `samples/semantic_animation_controls_demo.blend` を用意している。
 開発版Addonを隔離profileへ読み込んでからサンプルを開くには、repository rootで次を実行する。
 

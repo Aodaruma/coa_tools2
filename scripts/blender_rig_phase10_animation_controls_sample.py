@@ -385,7 +385,7 @@ def _create_fk_ik_contact(collection, material):
     ik_stage.chain_length = 2
     ik_stage.allow_stretch = False
     _configure_presentation(
-        ik_stage.presentation, "TOMBSTONE", width=1.15, height=0.72, corner_radius=0.20, segments=64
+        ik_stage.presentation, "TOMBSTONE", width=0.60, height=0.85, corner_radius=0.20, segments=64
     )
     _configure_presentation(
         ik_stage.pole_presentation, "ELLIPSE", width=0.60, height=0.60, segments=64
@@ -601,20 +601,20 @@ def _create_readme(scene):
         "  JP Vowels + MBP are bound to seven existing Shape Keys; no audio is required.\n"
         "  Frames 1, 9, 17, 25, 33, 41, 48 visit REST/A/I/U/E/O/MBP.\n\n"
         "B / FK/IK + CONTACT PIN\n"
-        "  N-panel > COA Tools2 > Character Rig: select Arm FK IK or Hand Contact.\n"
-        "  Use only Switch FK/IK with Pose Match and Contact Pin On/Off.\n"
+        "  N-panel > COA Tools2 > Rig > Animate: select an FK or IK hand control.\n"
+        "  Mode and Contact Pin appear together; each switch matches and keys the pose.\n"
         "  FK controls rotate the chain; the tombstone is IK and the ellipse is the pole.\n"
         "  Mode and Contact are discrete keyed controls; private compensation is smooth.\n\n"
         "C / B-BONE BEZIER + SECONDARY\n"
-        "  Circle controls are points. Triangle controls are tangent handles.\n"
         "  Move points; move/rotate/scale handles to change tangent, roll and ease.\n"
         "  B-Bone Secondary is linked to those controls and baked for frames 1-48.\n\n"
         "D / VECTOR OUTPUT ADAPTER\n"
         "  Move the four-way arrow on local X. One logical output drives XYZ location.\n"
         "  The rose diamond is driven by three managed component drivers.\n\n"
         "UI NOTE\n"
-        "  State Rig contains A. Character Rig contains B/C/D. Generated widgets use\n"
-        "  production Geometry Nodes sources and edge-only evaluated custom shapes.\n"
+        "  Animate is the default workspace. Graph handles show evaluated mixed weights.\n"
+        "  Setup contains State Rig for A and Character Rig for B/C/D.\n"
+        "  Setup > Viewport can apply or restore the Animator Display preset.\n"
     )
     scene["coa_demo_readme"] = readme.name
     scene["coa_demo_sections"] = "A Graph Lip Sync; B FK IK Contact; C B-Bone Secondary; D Vector Output"
@@ -656,7 +656,9 @@ def _prepare_saved_pose_view(armatures, active_armature, active_bone):
     for screen in bpy.data.screens:
         for area in screen.areas:
             if area.type == "VIEW_3D":
-                area.spaces.active.shading.type = "MATERIAL"
+                area.spaces.active.shading.type = "SOLID"
+                area.spaces.active.shading.color_type = "MATERIAL"
+                area.spaces.active.show_region_ui = True
                 area.spaces.active.overlay.show_relationship_lines = False
                 area.spaces.active.region_3d.view_perspective = "CAMERA"
 
@@ -731,7 +733,6 @@ def main():
         _text_object(f"DEMO_Label_{suffix}", body, location, guides, text, size=0.32)
     _text_object("DEMO_Guide_A", "DRAG GRAPH HANDLE | REST A I U E O MBP", (-5.8, -0.28, 1.65), guides, text, size=0.20)
     _text_object("DEMO_Guide_B", "FK ROTATE | TOMBSTONE IK | ELLIPSE POLE | CONTACT ON/OFF", (3.0, -0.28, 1.65), guides, text, size=0.18)
-    _text_object("DEMO_Guide_C", "CIRCLE POINTS | TRIANGLE TANGENTS | MOVE / ROTATE / SCALE", (-5.8, -0.28, -6.75), guides, text, size=0.18)
     _text_object("DEMO_Guide_D", "MOVE ARROW X | ROSE DIAMOND RECEIVES XYZ", (3.0, -0.28, -6.75), guides, text, size=0.20)
     _create_readme(scene)
     _camera(scene)
@@ -756,6 +757,9 @@ def main():
     scene.frame_set(24)
     armatures = (graph_armature, fk_armature, bbone_armature, vector_armature)
     _prepare_saved_pose_view(armatures, graph_armature, graph_control.control_bone)
+    from coa_tools2.rig_control.blender.viewport_display import apply_animator_display
+    for armature in armatures:
+        apply_animator_display(armature)
     output = args.output.expanduser().resolve()
     if output.suffix.lower() != ".blend":
         raise RuntimeError("Sample output must use the .blend extension.")

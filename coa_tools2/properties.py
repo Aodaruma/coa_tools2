@@ -572,6 +572,15 @@ class BoneProperties(bpy.types.PropertyGroup):
 
 class WindowManagerProperties(bpy.types.PropertyGroup):
     show_help: BoolProperty(default=False, description="Hide Help")
+    rig_workspace: EnumProperty(
+        name="Rig Workspace",
+        items=(
+            ("ANIMATE", "Animate", "Pose and animate the selected rig control"),
+            ("SETUP", "Setup", "Build rigs and edit their presentation and outputs"),
+        ),
+        default="ANIMATE",
+        options={"SKIP_SAVE"},
+    )
 
 def register():
     property_types = (

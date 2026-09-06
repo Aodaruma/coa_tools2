@@ -75,9 +75,11 @@ class COATOOLS2_PT_Info(bpy.types.Panel):
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = "COA Tools2"
+    bl_order = 10
 
     @classmethod
     def poll(cls, context):
+        from .rig_control.blender.workspace_ui import is_rig_animation
         if (
             addon_updater_ops.updater.update_ready
             and addon_updater_ops.updater.json["ignore"] == False
@@ -89,12 +91,14 @@ class COATOOLS2_PT_Info(bpy.types.Panel):
         ):
             return context
         if (
-            context.space_data.shading.type != "RENDERED"
-            or context.scene.view_settings.view_transform != "Standard"
+            not is_rig_animation(context)
+            and (context.space_data.shading.type != "RENDERED"
+                 or context.scene.view_settings.view_transform != "Standard")
         ):
             return context
 
     def draw(self, context):
+        from .rig_control.blender.workspace_ui import is_rig_animation
         layout = self.layout
 
         if context.scene.coa_tools2.deprecated_data_found:
@@ -114,6 +118,7 @@ class COATOOLS2_PT_Info(bpy.types.Panel):
                 context.space_data.shading.type != "RENDERED"
                 or context.scene.view_settings.view_transform != "Standard"
             )
+            and not is_rig_animation(context)
             and not context.scene.coa_tools2.deprecated_data_found
             and not context.scene.coa_tools2.old_coatools_found
         ):
@@ -136,6 +141,7 @@ class COATOOLS2_PT_ObjectProperties(bpy.types.Panel):
     bl_region_type = "UI"
     bl_label = "Object Properties"
     bl_category = "COA Tools2"
+    bl_order = 20
 
     @classmethod
     def poll(cls, context):
@@ -432,6 +438,7 @@ class COATOOLS2_PT_Tools(bpy.types.Panel):
     bl_region_type = "UI"
     bl_label = "Cutout Tools"
     bl_category = "COA Tools2"
+    bl_order = 30
 
     bpy.types.WindowManager.coa_show_help: BoolProperty(
         default=False, description="Hide Help"
@@ -439,6 +446,9 @@ class COATOOLS2_PT_Tools(bpy.types.Panel):
 
     @classmethod
     def poll(cls, context):
+        from .rig_control.blender.workspace_ui import is_rig_animation
+        if is_rig_animation(context):
+            return False
         if (
             not context.scene.coa_tools2.deprecated_data_found
             and not context.scene.coa_tools2.old_coatools_found
@@ -1047,6 +1057,7 @@ class COATOOLS2_PT_Collections(bpy.types.Panel):
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
     bl_category = "COA Tools2"
+    bl_order = 40
 
     @classmethod
     def poll(cls, context):

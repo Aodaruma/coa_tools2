@@ -378,6 +378,13 @@ class COATOOLS2_PG_RigComponentBoneRef(bpy.types.PropertyGroup):
 class COATOOLS2_PG_RigWidgetPresentation(bpy.types.PropertyGroup):
     """Solver-independent custom-shape presentation shared by rig controls."""
 
+    align_to_source_rest: BoolProperty(
+        name="Align to Hand Rest",
+        description="Align generated IK hand shapes to the source effector rest direction in the art plane",
+        default=True,
+        update=_mark_widget_presentation_dirty,
+    )
+
     shape: EnumProperty(
         name="Shape",
         items=(
@@ -1639,6 +1646,7 @@ def widget_presentation_to_spec(presentation) -> RigWidgetPresentationSpec:
             "segments": presentation.segments,
             "wire_width": presentation.wire_width,
             "live_preview": presentation.live_preview,
+            "align_to_source_rest": presentation.align_to_source_rest,
         }
     )
 
